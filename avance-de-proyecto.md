@@ -1,7 +1,7 @@
 # ECO | Wind — Avance de Proyecto
 
 **Documento de referencia (alcance):** [`plan-tecnico-eco-wind.md`](./plan-tecnico-eco-wind.md)
-**Última actualización:** 30 de agosto, 2026 (Hallazgo 5 — combinación sustentación+arrastre)
+**Última actualización:** 30 de agosto, 2026 (Hallazgo 6 — arquitectura real de la combinación, verificada contra patentes primarias)
 **Propósito:** comparar el alcance planeado contra el avance real, y dejar constancia de los
 hallazgos que no estaban previstos en el plan original. Se actualiza en cada avance
 significativo — no es una foto única.
@@ -13,7 +13,7 @@ significativo — no es una foto única.
 | Fase / Pista | Estado |
 |---|---|
 | **Fase 1 — Pista A** (motor empírico) | 🟢 Sólida — mecánica y fuentes de datos climáticos (EPW + GWA) validadas con datos reales; z0/afinación fina quedó pendiente para más adelante (decisión del Director del Proyecto) |
-| **Fase 1 — Pista B** (motor físico DMST + CFD) | 🟡 Primer avance — DMST de turbina aislada construido y validado; polar híbrido sustentación+arrastre construido, corregido y verificado (Betz + 4 modelos), pero bloqueado en combinar ambos componentes por falta de la curva par-velocidad real del producto (Hallazgo 5) |
+| **Fase 1 — Pista B** (motor físico DMST + CFD) | 🟡 Primer avance — combinación sustentación+arrastre implementada con la arquitectura real (dos niveles de pala, patente US9255567B2) y verificada (Betz + 4 modelos); combinarla bien no resuelve la sobre-predicción, que sigue siendo el problema abierto (Hallazgo 6) |
 | **Fase 2** (productización: Streamlit + Cloud Run) | ⚪ No iniciada |
 
 ---
@@ -128,7 +128,7 @@ combinado — útil más adelante para orientación de bouquets).
 
 | # | Paso | Estado |
 |---|---|---|
-| 1 | DMST turbina aislada (patentes CA2800765C/US9255567B2, ES2970155T3) | 🟡 Sustentación (NACA 0018) y arrastre (Savonius, patente ES2970155T3) construidos y validados por separado; combinación en un polar único construida y verificada (Betz + 4 modelos), pero bloqueada por falta de dato real (TSR/RPM de operación) — ver Hallazgo 5 |
+| 1 | DMST turbina aislada (patentes CA2800765C/US9255567B2, ES2970155T3/AU2019380766B2) | 🟡 Sustentación (NACA 0018) y arrastre (Savonius) construidos y validados por separado; combinados con la arquitectura real de dos niveles de pala (`engine/rotor_combinado.py`) y verificados (Betz + 4 modelos) — combinar bien no resuelve la sobre-predicción, ver Hallazgo 6 |
 | 2 | Pérdida dinámica a TSR bajo (Leishman-Beddoes) | ⚪ No iniciado |
 | 3 | Efecto clúster (Cilindro Actuador, OpenFOAM offline) | ⚪ No iniciado |
 | 4 | Estructural (ASCE 7) | ⚪ No iniciado |
@@ -254,6 +254,60 @@ ambos en algún punto intermedio — que es justamente lo que se necesitaría pa
 combinación con confianza. Esto se deja como el bloqueo identificado, no como una pregunta
 abierta sin explorar.
 
+### Hallazgo 6 — Las patentes reales (no el repo) muestran que la combinación es de dos niveles de pala, no un polar híbrido; y que combinarla bien no resuelve la sobre-predicción
+
+Pablo compartió directamente los PDFs reales de las tres patentes clave (`US9255567B2`,
+`CA2800765C`, `AU2019380766B2`) al notar que el repo solo tenía placeholders de 11 bytes en
+`documentos_tecnicos/` (ver más abajo). Leerlas completas cambió el entendimiento de esta
+pista en dos formas:
+
+**1) Todas las cifras usadas hasta ahora quedaron verificadas palabra por palabra contra el
+documento real** — sin discrepancias de fondo: Cd=1.2 convexa/2.3 cóncava (`External Load
+Calculations 2m & 5m.pdf`, leído vía Drive), CTDR=0.25-0.35 (3 palas) / 0.25-0.45 (2 palas),
+y los cuatro ratios de geometría Savonius (distancia=3.5×eje, superposición=0.2×eje,
+cuerda=6.6×eje, diámetro total=9.7×eje) confirmados exactos contra el ejemplo numérico
+propio de la patente (eje=100mm → 350/20/660/970mm). Único ajuste de precisión: el
+TSR óptimo del Savonius es **0.511** (no 0.5 como se venía redondeando), y la patente
+aclara que ese óptimo **escala con el tamaño absoluto de la turbina** (≈1.22 para un rotor
+del doble de diámetro) — un dato de calibración que no se tenía antes.
+
+**2) La arquitectura real para combinar sustentación y arrastre no es un polar híbrido de un
+solo elemento** (la hipótesis explorada en Hallazgo 5) — es **dos niveles de pala en el
+mismo eje**: un nivel de arrastre (interno) y uno de sustentación (externo), girando a la
+misma velocidad angular. Cita textual de `US9255567B2` (reivindicación 11): *"An internal
+set of drag blades... An external set of lift blades, wherein the maximally efficient rpm
+of the two sets are within 20% of each other."* Y la fórmula de rpm objetivo del generador:
+*"operating most efficiently at a rpm plus or minus 25% of 10 divided by the product of
+'pi' and the turbine diameter"* (a V=10 m/s) — que expresada como TSR da **λ≈1.0,
+independiente del diámetro**, verificado contra el propio ejemplo numérico de la patente
+(turbina de arrastre D=2.5m a 76 rpm + palas de sustentación a 86 rpm, ambas ~TSR=1.0).
+
+Implementado en `engine/rotor_combinado.py`: sustentación (DMST) evaluada en TSR=1.0 fijo
+(no en su propio TSR óptimo) + arrastre (Savonius, Cp=0.34) sumados. **Resultado honesto:**
+la sobre-predicción prácticamente no cambia — 5.39x/2.01x/2.04x/1.23x (Small/Medium/3M/
+Large), casi idéntico al 5.43x/2.02x/2.06x/1.24x de sustentación sola en su propio óptimo
+(Hallazgo 4). Combinar los dos mecanismos correctamente **no resuelve la brecha** — apunta a
+que la causa dominante de la sobre-predicción no es un mecanismo aerodinámico faltante, sino
+algo que afecta a ambos por igual (pérdidas 3D/de punta de pala que escalan con el tamaño, y
+posiblemente pérdidas electromecánicas de generador/controlador que ningún cálculo de esta
+pista incluye todavía).
+
+**Límite real encontrado, no escondido:** sumar los dos niveles como discos actuadores
+independientes es compatible con Betz en TSR=1.0 (Cp≈0.50), pero **rompe Betz en TSR=1.25**
+(borde superior de la tolerancia ±25% que la propia patente declara; Cp≈0.61 > 0.593) — el
+término de sustentación sigue creciendo con TSR mientras el de arrastre se mantiene
+constante (Cp=0.34 fijo, sin curva Cp(TSR) completa disponible para ese nivel). Documentado
+como limitación explícita del modelo: una versión más rigurosa necesitaría resolver una
+inducción conjunta entre ambos niveles, no sumarlos de forma independiente.
+
+**Problema de datos real encontrado en el repo (separado del hallazgo anterior):** cada PDF
+y DOCX en `documentos_tecnicos/` (~80 archivos) es un placeholder de 11 bytes, no el
+contenido real — causado por el commit `e53ebf5` ("Add files via upload", Pablo, 29/ago),
+donde el subidor web de GitHub no llevó el contenido binario. Los archivos reales sí existen
+en el Drive del proyecto; se confirmaron dos de ellos ahí (`External Load Calculations` y la
+ficha real de Medium Tulip, que reconfirma de forma independiente los 622 W a 12 m/s del
+motor empírico). Pendiente decidir con Pablo cómo resincronizar el resto.
+
 ---
 
 ## 6. Pendientes activos / bloqueos
@@ -287,13 +341,28 @@ abierta sin explorar.
       corregido (bug real: inflaba también la sustentación) y verificado con las dos
       verificaciones pedidas (Betz + 4 modelos). Ver Hallazgo 5: el resultado honesto es que
       el bloqueo no era la fórmula, sino no saber en qué TSR real opera la turbina.
-- [ ] Conseguir la curva de par-velocidad real del generador/carga eléctrica, o al menos el
-      RPM operativo típico, de al menos un modelo Flower Turbines — es el dato que falta para
-      cerrar la combinación sustentación+arrastre (Hallazgo 5), ahora el bloqueo central de
-      la Pista B.
+- [x] ~~Conseguir la curva de par-velocidad real / RPM operativo típico~~ — resuelto sin
+      necesitar más datos: la propia patente US9255567B2 da la fórmula del rpm objetivo del
+      generador (equivalente a TSR≈1.0), usada en el modelo combinado. Ver Hallazgo 6.
+- [x] ~~Combinar sustentación y arrastre con la arquitectura real (no el polar híbrido)~~ —
+      implementado en `engine/rotor_combinado.py` y verificado (Betz + 4 modelos). Resultado
+      honesto: combinar bien **no** resuelve la sobre-predicción — sigue siendo el problema
+      abierto de la Pista B. Ver Hallazgo 6.
+- [ ] Investigar pérdidas electromecánicas (generador, rectificador/controlador de carga)
+      como posible causa dominante de la sobre-predicción residual — ningún cálculo de esta
+      pista las incluye todavía (Hallazgo 6).
+- [ ] Resolver una inducción conjunta entre los dos niveles de pala (arrastre + sustentación)
+      en vez de sumarlos como discos actuadores independientes — la suma simple rompe Betz en
+      el borde de la tolerancia ±25% de TSR de la patente (Hallazgo 6).
+- [ ] Resincronizar `documentos_tecnicos/` con el contenido real desde Drive — el repo solo
+      tiene placeholders de 11 bytes en ~80 archivos PDF/DOCX (causa raíz identificada:
+      commit `e53ebf5`, subida web de GitHub). Decidir con Pablo el alcance (todo, o solo lo
+      relevante a Pista B) — ver Hallazgo 6.
 - [ ] Validar la calibración K(v) contra datos de campo reales (catálogo Flower Turbines
       vs. dispersión real) — necesita el CSV detrás de los gráficos de dispersión, no solo
       las imágenes PNG.
+- [ ] Evaluar los 4 modelos AL13 Power Tower (catálogo del motor empírico incluye 8 modelos,
+      no 4 — AL13 es una línea de producto distinta a la Tulip, sin cubrir todavía en Pista B).
 - [ ] Decidir registro de leads para la Fase 2 (Sheets vs. Airtable — abierto en el plan,
       sección 7).
 
