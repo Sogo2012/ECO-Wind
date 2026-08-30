@@ -79,8 +79,34 @@ organización del proxy de red:
 **Consecuencia práctica:** cualquier fuente de datos que dependa de una llamada de red en
 vivo tiene que escribirse y probarse "a ciegas" acá, y validarse recién en Google Colab (que
 sí tiene internet normal) o con archivos que alguien con acceso baja manualmente y sube al
-repo. Este patrón ya se usó con éxito para el EPW (`datos_clima/`) y es el que se va a
-repetir para el Global Wind Atlas y, eventualmente, ERA5.
+repo. Este patrón ya se usó con éxito para el EPW (`datos_clima/`) y se repitió para el
+Global Wind Atlas (ver Hallazgo 3).
+
+### Hallazgo 3 — Global Wind Atlas confirmado con datos reales (10m); dos formatos de export no concuerdan entre sí
+
+Pablo exportó del panel del GWA para el punto exacto del aeropuerto, confirmado a 10m: la
+curva de excedencia empírica de viento y el mapa mes×hora real, más el archivo `.lib`
+(formato WAsP nativo, detalle por rugosidad/altura/sector).
+
+| Fuente | Viento medio (10m) | kWh/año* |
+|---|---|---|
+| NASA POWER (real) | 1.30 m/s | 16.5 |
+| **GWA — panel web (real, confirmado 10m)** | **3.67 m/s** | **387.9** |
+| EPW estación real (15 años, TMYx) | 4.03 m/s | 606.8 |
+| GWA — `.lib` WAsP, z0=0.030, 10m (referencia, no usado para magnitud) | 5.37 m/s | *(no usado)* |
+
+*Mismo escenario de prueba: 3× Medium Tulip en bouquet, buje a 3.0 m.
+
+GWA (panel web) y el EPW concuerdan razonablemente (~9% de diferencia en la media de
+viento) — ambos son fuentes utilizables, y quedan en el mismo orden de magnitud de energía.
+Pero el archivo `.lib` da una media ~46% más alta que el panel web para la misma coordenada.
+Lectura de trabajo (sin confirmar con documentación oficial del GWA, que sigue bloqueada
+desde este sandbox): el `.lib` es el clima "generalizado" reexpuesto a una rugosidad
+idealizada uniforme — pensado como insumo para un cálculo de micrositing completo en WAsP
+con el terreno real alrededor — mientras que el panel web ya hace ese downscaling específico
+para el punto exacto. Por eso el proyecto usa el panel web para la magnitud, y el `.lib`
+solo para el wind rose direccional (sectores dominantes: 90°-150°, ~50% del tiempo
+combinado — útil más adelante para orientación de bouquets).
 
 ---
 
@@ -90,8 +116,9 @@ repetir para el Global Wind Atlas y, eventualmente, ERA5.
 |---|---|---|---|
 | NASA POWER (MERRA-2) | ~50-60 km | ❌ Bloqueado | Implementado, con sesgo confirmado y documentado. Solo respaldo. |
 | EPW / estación real (ISD + ERA5 gap-fill) | Puntual (estación) | N/A — archivo local | ✅ Implementado y validado. Fuente primaria cuando existe estación cercana. |
-| Global Wind Atlas (Weibull A/k, downscaling WAsP a 250m) | 250 m | ❌ Bloqueado | Código listo, **esperando A/k reales del sitio** (pendiente, sección 6) |
-| ERA5 + bias correction (Copernicus CDS) | ~31 km + corrección | ❌ Bloqueado | No implementado. Necesita cuenta/API key de Copernicus. |
+| Global Wind Atlas (panel web — curva empírica + mes×hora real) | 250 m | ❌ Bloqueado (se usa vía archivos exportados) | ✅ Implementado y validado con datos reales confirmados a 10m. Concuerda razonablemente con EPW. |
+| Global Wind Atlas — `.lib` WAsP (rose direccional) | 250 m | ❌ Bloqueado | ✅ Implementado — solo para dirección/sectores, no para magnitud (ver Hallazgo 3) |
+| ERA5 + bias correction (Copernicus CDS) | ~31 km + corrección | ❌ Bloqueado | No implementado. Necesita cuenta/API key de Copernicus. Menor prioridad ahora que GWA y EPW ya concuerdan razonablemente entre sí. |
 
 ---
 
@@ -112,16 +139,20 @@ Acordado con Pablo: se arranca Pista B solo después de que la Pista A esté só
 
 ## 6. Pendientes activos / bloqueos
 
-- [ ] **Conseguir A/k reales del Global Wind Atlas** para el aeropuerto Juan Santamaría
-      (Pablo compartió el link del punto en el mapa; el sitio está bloqueado desde este
-      sandbox, hace falta leer los valores manualmente desde la web o desde Colab).
-- [ ] Decidir si se implementa la Pista C (ERA5 + quantile mapping) ahora o se pospone hasta
-      que haga falta estructura horaria real.
-- [ ] Confirmar si el sesgo de NASA POWER (~3x) se sostiene en otros puntos del Valle
-      Central, o fue específico de esta coordenada.
-- [ ] Conseguir EPWs de los sitios reales de proyectos según se vayan definiendo.
-- [ ] Sensibilizar `z0` (rugosidad de superficie) — se usó 0.3 como default ilustrativo en
-      toda la validación hecha hasta ahora.
+- [x] ~~Conseguir A/k reales del Global Wind Atlas~~ — resuelto, y con datos más ricos de lo
+      esperado (curva empírica completa + estacionalidad real + wind rose). Ver Hallazgo 3.
+- [ ] Decidir si se implementa la Pista C (ERA5 + quantile mapping) ahora o se pospone —
+      menor prioridad ahora que GWA y EPW ya concuerdan razonablemente entre sí (~9%).
+- [ ] Confirmar si el sesgo de NASA POWER (~3x) y la brecha GWA-vs-EPW (~9%) se sostienen en
+      otros puntos del Valle Central, o fueron específicos de esta coordenada.
+- [ ] Entender mejor la discrepancia entre el `.lib` de WAsP (5.37 m/s) y el panel web del
+      GWA (3.67 m/s) para la misma coordenada — la lectura actual (Hallazgo 3) es una
+      hipótesis razonable, no una confirmación oficial.
+- [ ] Conseguir EPWs/exports de GWA de los sitios reales de proyectos según se vayan
+      definiendo.
+- [ ] Unificar `z0` — `wind_at_height()` usa 0.3 (suburbano) como default ilustrativo, pero
+      el `.lib` del GWA para este sitio se leyó con z0=0.030 (pasto corto/aeropuerto); son
+      valores distintos y habría que decidir cuál aplica a cada sitio real.
 - [ ] Validar la calibración K(v) contra datos de campo reales (catálogo Flower Turbines
       vs. dispersión real) — necesita el CSV detrás de los gráficos de dispersión, no solo
       las imágenes PNG.
