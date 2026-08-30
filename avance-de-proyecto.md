@@ -12,8 +12,8 @@ significativo — no es una foto única.
 
 | Fase / Pista | Estado |
 |---|---|
-| **Fase 1 — Pista A** (motor empírico) | 🟡 En desarrollo activo — mecánica completa y validada; fuente de datos climáticos en revisión |
-| **Fase 1 — Pista B** (motor físico DMST + CFD) | ⚪ No iniciada |
+| **Fase 1 — Pista A** (motor empírico) | 🟢 Sólida — mecánica y fuentes de datos climáticos (EPW + GWA) validadas con datos reales; z0/afinación fina quedó pendiente para más adelante (decisión del Director del Proyecto) |
+| **Fase 1 — Pista B** (motor físico DMST + CFD) | 🟡 Primer avance — DMST de turbina aislada (solo sustentación) construido y validado en orden de magnitud; componente de arrastre Savonius aún sin resolver |
 | **Fase 2** (productización: Streamlit + Cloud Run) | ⚪ No iniciada |
 
 ---
@@ -124,11 +124,39 @@ combinado — útil más adelante para orientación de bouquets).
 
 ## 5. Pista B — Motor físico (DMST + CFD)
 
-⚪ **No iniciada.** Recordatorio de los 4 pasos del plan (sección 3):
+🟡 **Primer avance.** Recordatorio de los 4 pasos del plan (sección 3), y estado de cada uno:
 
-1. DMST (Paraschivoiu) para turbina aislada, usando la geometría de las patentes
-   CA2800765C/US9255567B2 y ES2970155T3 (NACA 0018 para el componente de sustentación).
-2. Pérdida dinámica a TSR bajo (Leishman-Beddoes).
+| # | Paso | Estado |
+|---|---|---|
+| 1 | DMST turbina aislada (patentes CA2800765C/US9255567B2, ES2970155T3) | 🟡 Solo componente de sustentación (NACA 0018); componente de arrastre Savonius sin resolver |
+| 2 | Pérdida dinámica a TSR bajo (Leishman-Beddoes) | ⚪ No iniciado |
+| 3 | Efecto clúster (Cilindro Actuador, OpenFOAM offline) | ⚪ No iniciado |
+| 4 | Estructural (ASCE 7) | ⚪ No iniciado |
+
+**Lo construido:** `engine/dmst_model.py` (solver DMST de doble tubo de corriente —
+simplificado, un factor de inducción por semicírculo upwind/downwind, no multi-tubo por
+azimut) + `engine/naca0018_polar.py` (polar aproximado: teoría de perfil delgado +
+extrapolación Viterna-Corrigan post-stall; no hay datos XFOIL/experimentales reales
+accesibles desde este sandbox). Notebook: `notebooks/pista_b_motor_fisico.ipynb`.
+
+**Bug real encontrado y corregido en el mismo pase:** la primera versión del solver violaba
+el límite de Betz (Cp llegó a 1.48, imposible — el máximo teórico es 0.593) por un factor de
+4 mal puesto en el coeficiente de empuje del balance de momento. Corregido; el chequeo de
+Betz quedó como test explícito en el notebook para que no vuelva a pasar desapercibido.
+
+**Resultado de validación (Medium Tulip, solo sustentación, contra la curva empírica ya
+validada de la Pista A):** el DMST predice consistentemente **~2.02x** la potencia empírica
+en todo el rango de viento probado (3 a 15 m/s) — misma forma funcional (P~v³), magnitud
+razonable para un primer modelo aerodinámico puro sin pérdidas 3D/punta de pala ni
+corrección de alta inducción (Glauert).
+
+**Lo que NO funcionó (documentado, no escondido):** el intento más simple de representar el
+componente de arrastre tipo Savonius — sumar un Cd extra constante a todos los ángulos de
+ataque — da **potencia negativa** (no físico). Penaliza también los ángulos donde el flujo ya
+generaba torque limpio, sin capturar la asimetría cóncava/convexa real que sí produce torque
+neto a TSR bajo. Pendiente: modelarlo como fuerza propia con la geometría exacta de
+ES2970155T3 (distancia entre bordes=3.5×diámetro del eje, superposición=0.2×diámetro del eje,
+cuerda=6.6×diámetro del eje, Cp=0.34 reportado).
 3. Efecto clúster vía Cilindro Actuador (RANS-AC, OpenFOAM, offline/batch).
 4. Estructural (ASCE 7, con los Cd de pala ya conocidos: 1.2 convexa / 2.3 cóncava).
 
@@ -152,7 +180,15 @@ Acordado con Pablo: se arranca Pista B solo después de que la Pista A esté só
       definiendo.
 - [ ] Unificar `z0` — `wind_at_height()` usa 0.3 (suburbano) como default ilustrativo, pero
       el `.lib` del GWA para este sitio se leyó con z0=0.030 (pasto corto/aeropuerto); son
-      valores distintos y habría que decidir cuál aplica a cada sitio real.
+      valores distintos y habría que decidir cuál aplica a cada sitio real. **Decisión del
+      Director del Proyecto (30/ago/2026): queda pendiente, se afina más adelante — no
+      bloquea seguir a la Pista B.**
+- [ ] Modelar el componente de arrastre Savonius del DMST (Pista B) con la geometría exacta
+      de la patente ES2970155T3, en vez del atajo de Cd extra que no funcionó (ver sección 5).
+- [ ] Conseguir un polar NACA 0018 real (XFOIL o experimental) para reemplazar la aproximación
+      de teoría de perfil delgado + Viterna-Corrigan del DMST.
+- [ ] Investigar la brecha de ~2x entre el DMST (solo sustentación) y la curva empírica —
+      ¿es enteramente pérdidas no modeladas (3D, Glauert, mecánicas), o hay algo más?
 - [ ] Validar la calibración K(v) contra datos de campo reales (catálogo Flower Turbines
       vs. dispersión real) — necesita el CSV detrás de los gráficos de dispersión, no solo
       las imágenes PNG.
