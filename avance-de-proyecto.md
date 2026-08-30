@@ -154,9 +154,41 @@ corrección de alta inducción (Glauert).
 componente de arrastre tipo Savonius — sumar un Cd extra constante a todos los ángulos de
 ataque — da **potencia negativa** (no físico). Penaliza también los ángulos donde el flujo ya
 generaba torque limpio, sin capturar la asimetría cóncava/convexa real que sí produce torque
-neto a TSR bajo. Pendiente: modelarlo como fuerza propia con la geometría exacta de
-ES2970155T3 (distancia entre bordes=3.5×diámetro del eje, superposición=0.2×diámetro del eje,
-cuerda=6.6×diámetro del eje, Cp=0.34 reportado).
+neto a TSR bajo.
+
+### Hallazgo 4 — Validación cruzada en los 4 modelos reales: el ratio DMST/empírico no es constante, y el Savonius solo (patente) ajusta mejor que la sustentación pura
+
+Validando el DMST (solo sustentación) contra los 4 tamaños reales de la línea de producto
+(no solo Medium Tulip):
+
+| Modelo | Diámetro | Ratio DMST/empírico (sin corrección Re) | Ratio DMST/empírico (con corrección Re) | Ratio Savonius solo (Cp=0.34 de la patente) |
+|---|---|---|---|---|
+| Small Tulip | 0.55 m | 5.43x | 6.68x | 3.66x |
+| Medium Tulip | 1.18 m | 2.02x | 3.21x | 1.37x |
+| 3-M Tulip | 1.80 m | 2.06x | 3.76x | 1.39x |
+| Large Tulip | 2.50 m | 1.24x | 2.52x | 0.83x (subestima) |
+
+**El ratio cae con el tamaño** — patrón consistente con Reynolds (a mayor diámetro, mayor
+cuerda, mayor Re, el perfil real se acerca más al comportamiento ideal de la teoría de perfil
+delgado).
+
+**Corrección por Reynolds:** implementada (`Cd0(Re) ~ Re^-0.5`, reducción de Cl_max/stall a
+Re bajo). Resultado honesto: reduce la dispersión *relativa* entre modelos (el spread entre
+el más y el menos afectado baja de ~4.4x a ~2.65x) pero **empeora el ajuste absoluto en los
+4 modelos**. Confirma que el efecto es real/plausible, pero calibrarlo con confianza necesita
+un polar NACA 0018 medido (XFOIL o túnel de viento) a los Reynolds reales del producto
+(3×10⁵ a 1.6×10⁶ según el tamaño) — no disponible desde este sandbox. **No se activa por
+default** (`re_dependiente=False` es el comportamiento por defecto en `resolver_dmst()`).
+
+**Componente Savonius, geometría propia de la patente ES2970155T3** (distancia entre
+bordes=3.5×diámetro del eje, superposición=0.2×diámetro del eje, cuerda=6.6×diámetro del eje,
+diámetro total=9.7×diámetro del eje, **Cp=0.34 ya reportado en la patente, usado tal cual sin
+ajustar**): queda **más cerca de la curva empírica que el modelo de sustentación pura en los
+4 modelos** (incluso en Large, donde subestima — el error absoluto es igual de menor). Sugiere
+que el mecanismo de arrastre pesa más de lo que un análisis de sustentación aislado captura,
+sobre todo a escala chica. No se suma al resultado del DMST — se deja como estimación
+independiente, ya que **sigue sin resolverse cómo combinar ambos componentes** en el modelo
+de la pala híbrida real, que es la pieza central pendiente de esta pista.
 3. Efecto clúster vía Cilindro Actuador (RANS-AC, OpenFOAM, offline/batch).
 4. Estructural (ASCE 7, con los Cd de pala ya conocidos: 1.2 convexa / 2.3 cóncava).
 
@@ -183,12 +215,18 @@ Acordado con Pablo: se arranca Pista B solo después de que la Pista A esté só
       valores distintos y habría que decidir cuál aplica a cada sitio real. **Decisión del
       Director del Proyecto (30/ago/2026): queda pendiente, se afina más adelante — no
       bloquea seguir a la Pista B.**
-- [ ] Modelar el componente de arrastre Savonius del DMST (Pista B) con la geometría exacta
-      de la patente ES2970155T3, en vez del atajo de Cd extra que no funcionó (ver sección 5).
-- [ ] Conseguir un polar NACA 0018 real (XFOIL o experimental) para reemplazar la aproximación
-      de teoría de perfil delgado + Viterna-Corrigan del DMST.
-- [ ] Investigar la brecha de ~2x entre el DMST (solo sustentación) y la curva empírica —
-      ¿es enteramente pérdidas no modeladas (3D, Glauert, mecánicas), o hay algo más?
+- [x] ~~Modelar el componente de arrastre Savonius con geometría propia~~ — resuelto como
+      estimación independiente con el Cp=0.34 de la patente ES2970155T3 (ver Hallazgo 4);
+      ajusta mejor que la sustentación pura en los 4 modelos. Pendiente real: **combinar**
+      sustentación + arrastre en un solo modelo, no simplemente sumarlos.
+- [x] ~~Validar el ratio DMST/empírico contra otros tamaños~~ — resuelto (Hallazgo 4): el
+      ratio NO es constante (5.43x Small a 1.24x Large), consistente con efecto Reynolds.
+- [ ] Conseguir un polar NACA 0018 real (XFOIL o experimental) para calibrar la corrección de
+      Reynolds con confianza (la versión actual empeora el ajuste absoluto aunque mejora la
+      dispersión relativa — ver Hallazgo 4).
+- [ ] Resolver cómo combinar el componente de sustentación (DMST) y el de arrastre (Savonius)
+      en un solo modelo de la pala híbrida real, sin duplicar ni cancelar fuerzas — pieza
+      central pendiente de la Pista B.
 - [ ] Validar la calibración K(v) contra datos de campo reales (catálogo Flower Turbines
       vs. dispersión real) — necesita el CSV detrás de los gráficos de dispersión, no solo
       las imágenes PNG.

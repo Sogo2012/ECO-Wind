@@ -7,13 +7,30 @@ ingenieria, no un polar medido.
 import numpy as np
 
 
-def cl_cd_naca0018(alpha_deg, Re=2e5):
-    """
-    Cl, Cd aproximados para NACA 0018 en funcion del angulo de ataque (grados).
+RE_REF = 2e5  # Re de referencia donde Cd0/alpha_stall/Cl_max toman sus valores "de libro"
 
-    Region lineal (|alpha| < ~12 grados, antes de stall):
+
+def cl_cd_naca0018(alpha_deg, Re=RE_REF):
+    """
+    Cl, Cd aproximados para NACA 0018 en funcion del angulo de ataque (grados)
+    y del numero de Reynolds.
+
+    Region lineal (|alpha| < alpha_stall(Re)):
       Cl = 2*pi*sin(alpha) * factor de correccion de espesor (~0.9 para 18% espesor)
-      Cd = Cd0 (perfil, ~0.01-0.02 a este Re) + termino inducido pequenio
+           * factor_Re (reduce Cl_max a Re bajo)
+      Cd = Cd0(Re) + termino inducido pequenio
+
+    Dependencia con Reynolds (aproximacion, NO viene de datos XFOIL/experimentales
+    reales -- motivada por el hallazgo de que el DMST sobre-predice mucho mas para
+    el Small Tulip (cuerda chica, Re bajo, ratio 5.43x) que para el Large Tulip
+    (cuerda grande, Re alto, ratio 1.24x)):
+      - Cd0(Re) = Cd0_ref * (Re/Re_ref)^-0.5  -- escala tipo capa limite laminar
+        (Cd de placa plana laminar ~ Re^-0.5; aproximacion estandar de ingenieria
+        para el rango de "Re bajo" de perfiles, no un ajuste fino).
+      - alpha_stall(Re) y Cl_max(Re) se reducen suavemente por debajo de Re_ref
+        (perfiles reales entran en perdida antes y con menor Cl_max a Re bajo --
+        efecto bien documentado cualitativamente, la magnitud exacta aqui es una
+        aproximacion, no una medicion).
 
     Post-stall (|alpha| > alpha_stall): extrapolacion de Viterna-Corrigan,
     que hace tender Cl y Cd hacia el comportamiento de una placa plana a
@@ -22,11 +39,14 @@ def cl_cd_naca0018(alpha_deg, Re=2e5):
     """
     alpha = np.asarray(alpha_deg, dtype=float)
     alpha_rad = np.radians(alpha)
+    Re = np.maximum(np.asarray(Re, dtype=float), 1e3)  # evitar Re=0/negativo
+
+    factor_re = np.clip((Re / RE_REF) ** 0.5, 0.55, 1.0)  # <=1, cae a Re bajo
 
     # --- Region lineal ---
-    alpha_stall = 12.0  # grados, tipico para NACA 0018 a Re~1e5-5e5
-    cl_slope = 2 * np.pi * 0.90  # correccion ~10% por espesor finito (18%)
-    cd0 = 0.014  # arrastre de perfil a alpha=0, Re~2e5 (orden de magnitud tipico NACA0018)
+    alpha_stall = 12.0 * (0.7 + 0.3 * factor_re)  # grados; cae de 12 a ~8.4 a Re muy bajo
+    cl_slope = 2 * np.pi * 0.90 * factor_re  # correccion ~10% por espesor + caida por Re bajo
+    cd0 = 0.014 * (Re / RE_REF) ** -0.5  # Cd0(Re), tipo capa limite laminar
 
     cl_lin = cl_slope * np.sin(alpha_rad)
     cd_lin = cd0 + 0.02 * (alpha_rad ** 2)  # crecimiento suave de Cd con AoA (arrastre inducido aprox.)

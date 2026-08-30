@@ -16,9 +16,11 @@ except ImportError:
 _trapz = getattr(np, "trapezoid", None) or np.trapz  # numpy >=2.0 renombro trapz
 
 RHO_AIRE = 1.225  # kg/m^3, nivel del mar (ajustar despues por densidad/altitud CR)
+NU_AIRE = 1.46e-5  # m^2/s, viscosidad cinematica del aire ~15-20C
 
 
-def fuerzas_azimut(theta, u, Omega, R, c, rho=RHO_AIRE, cd_extra=0.0):
+def fuerzas_azimut(theta, u, Omega, R, c, rho=RHO_AIRE, cd_extra=0.0, nu=NU_AIRE,
+                    re_dependiente=True):
     """
     Fuerza tangencial (Ft, N/m de altura de pala) y fuerza en x (Fx, N/m)
     sobre UNA pala en la posicion azimutal theta, con velocidad axial local
@@ -27,7 +29,12 @@ def fuerzas_azimut(theta, u, Omega, R, c, rho=RHO_AIRE, cd_extra=0.0):
     cd_extra: arrastre adicional (componente tipo Savonius) sumado al Cd
     del perfil -- representa la contribucion de arrastre de la geometria
     hibrida de Flower Turbines, no presente en un Darrieus NACA puro.
+
+    re_dependiente: si es False, usa el polar "de libro" (Re=RE_REF fijo,
+    sin la correccion de Reynolds) -- para poder comparar con/sin la
+    correccion de forma limpia.
     """
+    from engine.naca0018_polar import RE_REF
     t_hat = np.array([-np.sin(theta), np.cos(theta)])
 
     Wx = u + Omega * R * np.sin(theta)
@@ -40,7 +47,8 @@ def fuerzas_azimut(theta, u, Omega, R, c, rho=RHO_AIRE, cd_extra=0.0):
     Wn = Wx * np.cos(theta) + Wy * np.sin(theta)
     alpha = np.degrees(np.arctan2(Wn, -Wt))
 
-    cl, cd = cl_cd_naca0018(alpha)
+    Re_local = (W * c / nu) if re_dependiente else RE_REF
+    cl, cd = cl_cd_naca0018(alpha, Re=Re_local)
     cd = cd + cd_extra
 
     q = 0.5 * rho * W ** 2 * c
@@ -54,13 +62,14 @@ def fuerzas_azimut(theta, u, Omega, R, c, rho=RHO_AIRE, cd_extra=0.0):
     return Ft, Fx, alpha, W
 
 
-def _thrust_media(u, Omega, R, c, N, thetas, rho=RHO_AIRE, cd_extra=0.0):
-    Fx_vals = np.array([fuerzas_azimut(th, u, Omega, R, c, rho, cd_extra)[1] for th in thetas])
+def _thrust_media(u, Omega, R, c, N, thetas, rho=RHO_AIRE, cd_extra=0.0, re_dependiente=True):
+    Fx_vals = np.array([fuerzas_azimut(th, u, Omega, R, c, rho, cd_extra, re_dependiente=re_dependiente)[1]
+                         for th in thetas])
     return (N / (2 * np.pi)) * _trapz(Fx_vals, thetas)
 
 
 def resolver_induccion(V_ref, Omega, R, c, N, thetas, rho=RHO_AIRE, cd_extra=0.0,
-                        a0=0.2, tol=1e-4, max_iter=100, relax=0.3):
+                        a0=0.2, tol=1e-4, max_iter=100, relax=0.3, re_dependiente=True):
     """Itera el factor de induccion 'a' para un semicirculo (upwind o downwind),
     balanceando el empuje de disco actuador (2*rho*A*V_ref^2*a(1-a)) contra el
     empuje derivado de las fuerzas de pala."""
@@ -68,7 +77,7 @@ def resolver_induccion(V_ref, Omega, R, c, N, thetas, rho=RHO_AIRE, cd_extra=0.0
     a = a0
     for _ in range(max_iter):
         u = V_ref * (1 - a)
-        T_palas = _thrust_media(u, Omega, R, c, N, thetas, rho, cd_extra)
+        T_palas = _thrust_media(u, Omega, R, c, N, thetas, rho, cd_extra, re_dependiente)
         T_momento_coef = T_palas / (0.5 * rho * A * V_ref ** 2) if V_ref > 0 else 0.0  # CT estandar = T/(0.5*rho*A*V^2)
         T_momento_coef = np.clip(T_momento_coef, 0.0, 0.9999)
         a_nuevo = 0.5 * (1 - np.sqrt(max(1 - T_momento_coef, 0.0)))
@@ -79,25 +88,31 @@ def resolver_induccion(V_ref, Omega, R, c, N, thetas, rho=RHO_AIRE, cd_extra=0.0
     return a
 
 
-def resolver_dmst(V_inf, TSR, R, c, N=2, H=1.0, rho=RHO_AIRE, cd_extra=0.0, n_theta=72):
+def resolver_dmst(V_inf, TSR, R, c, N=2, H=1.0, rho=RHO_AIRE, cd_extra=0.0, n_theta=72,
+                   re_dependiente=True):
     """
     Resuelve el DMST de doble tubo de corriente para un V_inf y TSR dados.
     Devuelve potencia (W), Cp, y los factores de induccion.
+
+    re_dependiente: si es False, usa el polar "de libro" (Re=RE_REF fijo en
+    todo el barrido) -- para comparar limpio con/sin la correccion de Reynolds.
     """
     Omega = TSR * V_inf / R
     thetas_up = np.linspace(-np.pi / 2, np.pi / 2, n_theta // 2)
     thetas_down = np.linspace(np.pi / 2, 3 * np.pi / 2, n_theta // 2)
 
-    a_up = resolver_induccion(V_inf, Omega, R, c, N, thetas_up, rho, cd_extra)
+    a_up = resolver_induccion(V_inf, Omega, R, c, N, thetas_up, rho, cd_extra, re_dependiente=re_dependiente)
     u_up = V_inf * (1 - a_up)
     V_wake = V_inf * (1 - 2 * a_up)
     V_wake = max(V_wake, 0.05 * V_inf)  # evitar wake invertido a induccion muy alta
 
-    a_down = resolver_induccion(V_wake, Omega, R, c, N, thetas_down, rho, cd_extra)
+    a_down = resolver_induccion(V_wake, Omega, R, c, N, thetas_down, rho, cd_extra, re_dependiente=re_dependiente)
     u_down = V_wake * (1 - a_down)
 
-    Ft_up = np.array([fuerzas_azimut(th, u_up, Omega, R, c, rho, cd_extra)[0] for th in thetas_up])
-    Ft_down = np.array([fuerzas_azimut(th, u_down, Omega, R, c, rho, cd_extra)[0] for th in thetas_down])
+    Ft_up = np.array([fuerzas_azimut(th, u_up, Omega, R, c, rho, cd_extra, re_dependiente=re_dependiente)[0]
+                       for th in thetas_up])
+    Ft_down = np.array([fuerzas_azimut(th, u_down, Omega, R, c, rho, cd_extra, re_dependiente=re_dependiente)[0]
+                         for th in thetas_down])
 
     Q_up = (N / (2 * np.pi)) * _trapz(Ft_up, thetas_up) * R
     Q_down = (N / (2 * np.pi)) * _trapz(Ft_down, thetas_down) * R
