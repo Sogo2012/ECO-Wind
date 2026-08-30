@@ -1,7 +1,7 @@
 # ECO | Wind — Avance de Proyecto
 
 **Documento de referencia (alcance):** [`plan-tecnico-eco-wind.md`](./plan-tecnico-eco-wind.md)
-**Última actualización:** 30 de agosto, 2026
+**Última actualización:** 30 de agosto, 2026 (Hallazgo 5 — combinación sustentación+arrastre)
 **Propósito:** comparar el alcance planeado contra el avance real, y dejar constancia de los
 hallazgos que no estaban previstos en el plan original. Se actualiza en cada avance
 significativo — no es una foto única.
@@ -13,7 +13,7 @@ significativo — no es una foto única.
 | Fase / Pista | Estado |
 |---|---|
 | **Fase 1 — Pista A** (motor empírico) | 🟢 Sólida — mecánica y fuentes de datos climáticos (EPW + GWA) validadas con datos reales; z0/afinación fina quedó pendiente para más adelante (decisión del Director del Proyecto) |
-| **Fase 1 — Pista B** (motor físico DMST + CFD) | 🟡 Primer avance — DMST de turbina aislada (solo sustentación) construido y validado en orden de magnitud; componente de arrastre Savonius aún sin resolver |
+| **Fase 1 — Pista B** (motor físico DMST + CFD) | 🟡 Primer avance — DMST de turbina aislada construido y validado; polar híbrido sustentación+arrastre construido, corregido y verificado (Betz + 4 modelos), pero bloqueado en combinar ambos componentes por falta de la curva par-velocidad real del producto (Hallazgo 5) |
 | **Fase 2** (productización: Streamlit + Cloud Run) | ⚪ No iniciada |
 
 ---
@@ -128,7 +128,7 @@ combinado — útil más adelante para orientación de bouquets).
 
 | # | Paso | Estado |
 |---|---|---|
-| 1 | DMST turbina aislada (patentes CA2800765C/US9255567B2, ES2970155T3) | 🟡 Solo componente de sustentación (NACA 0018); componente de arrastre Savonius sin resolver |
+| 1 | DMST turbina aislada (patentes CA2800765C/US9255567B2, ES2970155T3) | 🟡 Sustentación (NACA 0018) y arrastre (Savonius, patente ES2970155T3) construidos y validados por separado; combinación en un polar único construida y verificada (Betz + 4 modelos), pero bloqueada por falta de dato real (TSR/RPM de operación) — ver Hallazgo 5 |
 | 2 | Pérdida dinámica a TSR bajo (Leishman-Beddoes) | ⚪ No iniciado |
 | 3 | Efecto clúster (Cilindro Actuador, OpenFOAM offline) | ⚪ No iniciado |
 | 4 | Estructural (ASCE 7) | ⚪ No iniciado |
@@ -187,13 +187,72 @@ ajustar**): queda **más cerca de la curva empírica que el modelo de sustentaci
 4 modelos** (incluso en Large, donde subestima — el error absoluto es igual de menor). Sugiere
 que el mecanismo de arrastre pesa más de lo que un análisis de sustentación aislado captura,
 sobre todo a escala chica. No se suma al resultado del DMST — se deja como estimación
-independiente, ya que **sigue sin resolverse cómo combinar ambos componentes** en el modelo
-de la pala híbrida real, que es la pieza central pendiente de esta pista.
-3. Efecto clúster vía Cilindro Actuador (RANS-AC, OpenFOAM, offline/batch).
-4. Estructural (ASCE 7, con los Cd de pala ya conocidos: 1.2 convexa / 2.3 cóncava).
+independiente, ya que en ese momento **seguía sin resolverse cómo combinar ambos
+componentes** en el modelo de la pala híbrida real. Ver Hallazgo 5 para el intento de
+resolverlo.
+
+**Próximos pasos de Pista B fuera del alcance de este ciclo:** pérdida dinámica a TSR bajo
+(Leishman-Beddoes), efecto clúster vía Cilindro Actuador (RANS-AC, OpenFOAM, offline/batch),
+y estructural (ASCE 7, con los Cd de pala ya conocidos: 1.2 convexa / 2.3 cóncava).
 
 Acordado con Pablo: se arranca Pista B solo después de que la Pista A esté sólida
 (secuencial, no en paralelo — recomendación del plan, confirmada).
+
+### Hallazgo 5 — Combinar sustentación y arrastre en un polar único: la fórmula ya no era el problema, el régimen de TSR sí
+
+Pablo pidió continuar con la pieza central pendiente de Hallazgo 4: cómo combinar el
+componente de sustentación (DMST) y el de arrastre (Savonius) sin simplemente sumarlos (el
+atajo de un `Cd` extra uniforme ya había dado potencia negativa, no físico).
+
+**Lo construido:** `engine/polar_hibrido.py` — un único polar para la pala real, no dos
+mecanismos separados. Idéntico al NACA 0018 simétrico en sustentación (región lineal Y
+post-pérdida). El arrastre post-pérdida es **asimétrico**: Cd→2.3 cuando la cara cóncava
+enfrenta el flujo, Cd→1.2 cuando enfrenta la convexa (ambos valores de la ficha *External
+Load Calculations 2m & 5m.pdf* de Pablo), seleccionado por el signo del ángulo de ataque
+local — supuesto de convención de signo no confirmado contra el CAD real de la pala.
+
+**Bug real encontrado y corregido en el mismo pase:** la primera versión metía el `Cd_max`
+asimétrico dentro de la fórmula completa de Viterna-Corrigan (Cl y Cd juntos). Esa fórmula
+liga la sustentación post-pérdida al `Cd_max` usado — subir `Cd_max` a 2.3 no solo agregaba
+arrastre, también **inflaba la sustentación post-pérdida ~10-15%**, empeorando la
+sobre-predicción en vez de corregirla (verificado numéricamente antes de descartar el
+enfoque). Corregido: la sustentación post-pérdida ahora se calcula igual que en el NACA0018
+puro; solo el arrastre usa la asimetría.
+
+**Verificación 1 — Betz:** con el polar híbrido ya corregido, en el rotor "de libro" del
+Paso 2, Cp máximo = 0.514 en TSR=3 (referencia NACA puro: 0.522 en TSR=3) — dentro del
+límite de 0.593 en ambos casos.
+
+**Verificación 2 — los 4 modelos reales:** con `re_dependiente=False` (config por defecto,
+igual que el baseline de Hallazgo 4), el polar híbrido da **exactamente los mismos números
+que el DMST de sustentación pura** en los 4 modelos (5.43x / 2.02x / 2.06x / 1.24x, bit a
+bit idénticos) — el mecanismo de arrastre asimétrico no cambió nada.
+
+No es casualidad numérica — se investigó la causa en vez de asumirla. Diagnóstico directo:
+en el TSR que el propio modelo elige como óptimo (TSR=3 para Small Tulip), el ángulo de
+ataque máximo alcanzado durante toda la revolución es 9.8°, por debajo del ángulo de pérdida
+del polar (12°) — **la pala nunca entra en pérdida**, que es la única región donde el
+arrastre asimétrico actúa por diseño. Barriendo TSR completo (0.3 a 4.0) se confirma que el
+mecanismo de arrastre sí cambia el Cp en TSR bajo (0.3–2.0, con diferencias reales tanto
+positivas como negativas), pero incluso su mejor punto ahí (TSR≈0.7, Cp≈0.085) queda muy por
+debajo del Cp de sustentación pura en TSR≈3 (Cp≈0.50).
+
+**Conclusión honesta:** esto no era un problema de fórmula del polar (esa parte ya quedó
+corregida, verificada y Betz-compatible) — es que sustentación y arrastre dominan en
+regímenes de TSR distintos y casi disjuntos: la sustentación necesita TSR medio-alto
+(~3-4) para mantenerse antes de pérdida, mientras que el mecanismo tipo Savonius necesita
+pérdida profunda y sostenida a TSR bajo (la propia patente ES2970155T3 reporta
+TSR_óptimo≈0.5). Una búsqueda de "máximo Cp posible sobre TSR" — que es lo que este solver
+hace — elige siempre el régimen de sustentación, porque da un Cp mayor en el papel; nunca
+"mezcla" ambos mecanismos en un punto intermedio real.
+
+**Lo que falta no es más ajuste de polar — es la curva de par-velocidad (o el RPM operativo
+típico) del generador/carga eléctrica real del producto.** Sin ese dato, el modelo no tiene
+forma de saber en qué TSR opera de verdad la turbina, y por tanto tampoco de saber si el
+comportamiento real está dominado por sustentación, por arrastre, o por una mezcla real de
+ambos en algún punto intermedio — que es justamente lo que se necesitaría para calibrar la
+combinación con confianza. Esto se deja como el bloqueo identificado, no como una pregunta
+abierta sin explorar.
 
 ---
 
@@ -217,16 +276,21 @@ Acordado con Pablo: se arranca Pista B solo después de que la Pista A esté só
       bloquea seguir a la Pista B.**
 - [x] ~~Modelar el componente de arrastre Savonius con geometría propia~~ — resuelto como
       estimación independiente con el Cp=0.34 de la patente ES2970155T3 (ver Hallazgo 4);
-      ajusta mejor que la sustentación pura en los 4 modelos. Pendiente real: **combinar**
-      sustentación + arrastre en un solo modelo, no simplemente sumarlos.
+      ajusta mejor que la sustentación pura en los 4 modelos.
 - [x] ~~Validar el ratio DMST/empírico contra otros tamaños~~ — resuelto (Hallazgo 4): el
       ratio NO es constante (5.43x Small a 1.24x Large), consistente con efecto Reynolds.
 - [ ] Conseguir un polar NACA 0018 real (XFOIL o experimental) para calibrar la corrección de
       Reynolds con confianza (la versión actual empeora el ajuste absoluto aunque mejora la
       dispersión relativa — ver Hallazgo 4).
-- [ ] Resolver cómo combinar el componente de sustentación (DMST) y el de arrastre (Savonius)
-      en un solo modelo de la pala híbrida real, sin duplicar ni cancelar fuerzas — pieza
-      central pendiente de la Pista B.
+- [x] ~~Resolver cómo combinar el componente de sustentación (DMST) y el de arrastre
+      (Savonius) en un solo modelo de la pala híbrida real~~ — polar híbrido construido,
+      corregido (bug real: inflaba también la sustentación) y verificado con las dos
+      verificaciones pedidas (Betz + 4 modelos). Ver Hallazgo 5: el resultado honesto es que
+      el bloqueo no era la fórmula, sino no saber en qué TSR real opera la turbina.
+- [ ] Conseguir la curva de par-velocidad real del generador/carga eléctrica, o al menos el
+      RPM operativo típico, de al menos un modelo Flower Turbines — es el dato que falta para
+      cerrar la combinación sustentación+arrastre (Hallazgo 5), ahora el bloqueo central de
+      la Pista B.
 - [ ] Validar la calibración K(v) contra datos de campo reales (catálogo Flower Turbines
       vs. dispersión real) — necesita el CSV detrás de los gráficos de dispersión, no solo
       las imágenes PNG.
