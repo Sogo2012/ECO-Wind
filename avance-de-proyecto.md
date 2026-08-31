@@ -1,7 +1,7 @@
 # ECO | Wind — Avance de Proyecto
 
 **Documento de referencia (alcance):** [`plan-tecnico-eco-wind.md`](./plan-tecnico-eco-wind.md)
-**Última actualización:** 30 de agosto, 2026 (Hallazgo 6 — arquitectura real de la combinación, verificada contra patentes primarias)
+**Última actualización:** 30 de agosto, 2026 (Hallazgo 6 completo — resync, verificación cruzada de fichas técnicas y Matriz Maestra de bouquet)
 **Propósito:** comparar el alcance planeado contra el avance real, y dejar constancia de los
 hallazgos que no estaban previstos en el plan original. Se actualiza en cada avance
 significativo — no es una foto única.
@@ -304,12 +304,21 @@ inducción conjunta entre ambos niveles, no sumarlos de forma independiente.
 resuelto:** cada PDF/DOCX/PNG/JPG en `documentos_tecnicos/` (91 archivos) era un placeholder
 de 11 bytes, no el contenido real — causado por el commit `e53ebf5` ("Add files via upload",
 Pablo, 29/ago), donde el subidor web de GitHub no llevó el contenido binario. Resincronizado
-desde el Drive del proyecto (90 de 91 — falta solo el manual de instalación de SolArk, ~6.5MB,
-por un corte de sesión de Drive; es documentación de un inversor de terceros, no de Flower
-Turbines, baja prioridad). Cada archivo se emparejó verificando el contenido contra la
-carpeta del repo, no solo el nombre — Drive tiene archivos duplicados con el mismo nombre en
-carpetas distintas (ej. "Medium Tulip Turbine.pdf" existe como ficha técnica, como
-declaración CE, y como guía de inicio rápido).
+desde el Drive del proyecto (90 de 91 — falta solo el manual de instalación de SolArk,
+~6.5MB, documentación de un inversor de terceros, no de Flower Turbines. **Decisión del
+Director del Proyecto (30/ago/2026): no es necesario por ahora, se deja pendiente sin
+prioridad.**). Cada archivo se emparejó verificando el contenido contra la carpeta del repo,
+no solo el nombre — Drive tiene archivos duplicados con el mismo nombre en carpetas
+distintas (ej. "Medium Tulip Turbine.pdf" existe como ficha técnica, como declaración CE, y
+como guía de inicio rápido).
+
+**Verificación adicional de la Matriz Maestra de Potencia (N=1-10, bouquet):** Pablo compartió
+directamente la tabla completa (390 puntos: 3 modelos × 10 tamaños de clúster × 13 velocidades
+de viento, 3-15 m/s) para confirmar que se estaba hablando de la misma fuente. Verificado
+punto por punto contra `bouquet_multiplier()`: peor error relativo 2.9% (puro redondeo a 1
+decimal en la tabla origen, consistente con lo que ya documentaba el código). Confirma que es
+exactamente la misma matriz que ya validó la fórmula M(N)=exp(0.21103·(N-1)) — no había nada
+nuevo que incorporar.
 
 **Con el contenido real ya disponible, verificación cruzada de las fichas técnicas:**
 diámetros de Small/Medium/3-M/Large Tulip (0.55/1.18/1.80/2.50m) confirmados exactos contra
@@ -381,8 +390,8 @@ usado hasta aquí (que sigue en 2.50m, ahora triple-confirmado).
       en vez de sumarlos como discos actuadores independientes — la suma simple rompe Betz en
       el borde de la tolerancia ±25% de TSR de la patente (Hallazgo 6).
 - [x] ~~Resincronizar `documentos_tecnicos/` con el contenido real desde Drive~~ — resuelto,
-      90 de 91 archivos (falta el manual de SolArk por un corte de sesión de Drive, baja
-      prioridad, es de un tercero). Ver Hallazgo 6.
+      90 de 91 archivos. El manual de SolArk (inversor de terceros) queda fuera de alcance por
+      decisión del Director del Proyecto — no bloquea nada. Ver Hallazgo 6.
 - [ ] Recalibrar los coeficientes `al13_2m/4m/6m/8m` en `flower_turbines_curves.py` — con la
       ficha técnica real del AL13 ya disponible (1.7m diámetro, ≈350W/módulo a 12 m/s), el
       coeficiente actual de `al13_2m` predice más del doble de eso (1523.7W) — se leyó
