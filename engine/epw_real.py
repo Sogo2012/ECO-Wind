@@ -427,6 +427,37 @@ def descargar_y_extraer_epw(url_zip, carpeta_destino=None):
         return os.path.join(destino, epw_files[0])
 
 
+# Coordenadas reales de los 4 sitios con datos propios (del encabezado real
+# de su propio EPW/GWA -- no del catálogo, ver la discrepancia de Finca
+# Favorita documentada arriba). San José coincide con
+# SITIOS_DISPONIBLES["san_jose_juan_santamaria"] de simulador_pista_a.py
+# (no se importa para no acoplar los dos módulos -- mismo valor, verificado).
+_SITIOS_PRECACHEADOS_COORDS = {
+    "san_jose": (10.0034, -84.2033),
+    "nicoya": (10.150, -85.450),
+    "liberia": (10.593, -85.544),
+    "finca_favorita": (9.517, -82.650),
+}
+
+
+def sitio_precacheado_cercano(lat, lon, umbral_km=2.0):
+    """
+    Hallazgo 19 (v3): parte de consolidar en un solo flujo -- si (lat, lon)
+    cae a menos de umbral_km de uno de los 4 sitios que ya tenemos con datos
+    propios validados (San José vía GWA, Nicoya/Liberia/Finca Favorita vía
+    EPW real, Hallazgo 18), esta función devuelve su clave para que la app
+    sirva el dato LOCAL ya validado en vez de descargar de nuevo lo mismo
+    desde climate.onebuilding.org -- el usuario no ve ninguna diferencia
+    (sigue siendo "elegí una estación real de la lista"), es sólo una
+    optimización interna. Match por PROXIMIDAD, no por texto del nombre --
+    no depende de que el catálogo escriba el nombre exactamente igual.
+    """
+    for clave, (slat, slon) in _SITIOS_PRECACHEADOS_COORDS.items():
+        if _haversine_km(lat, lon, slat, slon) <= umbral_km:
+            return clave
+    return None
+
+
 SITIOS_EPW_REAL = {
     "nicoya": {
         "nombre": "Nicoya A.P. (Guanacaste, Pacífico seco)",

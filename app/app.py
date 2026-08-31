@@ -7,31 +7,35 @@ multi-sitio, corrección de densidad, multi-clúster y gráficos (Hallazgo 17
 -- ver avance-de-proyecto.md).
 
 ALCANCE HONESTO:
-- San José (Juan Santamaría), Nicoya, Liberia y Finca Favorita (Limón)
-  tienen datos climáticos REALES completos y propios: San José vía export
-  del panel de Global Wind Atlas (curva de excedencia + patrón diurno
-  reales), y los otros 3 vía EPW real de climate.onebuilding.org (Hallazgo
-  18 -- descargados por Pablo, ver engine/epw_real.py). Ninguno de estos 4
-  usa aproximación.
-- Cualquier OTRA coordenada de Costa Rica usa la velocidad media real del
-  ráster de GWA (si está descargado en datos_clima/gwa_costa_rica_10m.tif
-  -- ver engine/gwa_raster.py) con la FORMA prestada de San José, escalada
-  a esa media -- una aproximación declarada, no datos propios del sitio
-  nuevo. Hallazgo 18 cuantificó el error de esta aproximación contra los 3
-  sitios EPW reales: entre -44% y +18% en producción anual estimada según
-  el sitio -- se muestra un aviso explícito en la app cuando se usa.
-- El ráster de Costa Rica no se pudo descargar en este entorno de
+- Un solo flujo de clima, homologado con DDP-lite/Skyplus (Hallazgo 19,
+  v3): buscás tu sitio por nombre, coordenada o clic en el mapa, la app te
+  muestra las estaciones climáticas REALES más cercanas (catálogo de
+  climate.onebuilding.org, 5,276 estaciones, 20 países -- sin acotar a
+  Costa Rica), y elegís una. No hay "modos" que elegir de antemano.
+- San José, Nicoya, Liberia y Finca Favorita (Limón) ya están validados
+  localmente (San José vía export del panel de Global Wind Atlas -- curva
+  de excedencia + patrón diurno reales -- los otros 3 vía EPW real de
+  climate.onebuilding.org, Hallazgo 18): si la búsqueda te devuelve una de
+  estas 4 estaciones, la app sirve ese dato local en vez de descargar de
+  nuevo lo mismo -- invisible para vos, sigue siendo "elegí una estación
+  real de la lista" (ver engine/epw_real.py::sitio_precacheado_cercano()).
+- Si la estación real más cercana a tu punto queda a más de
+  UMBRAL_APROXIMACION_KM, la app ofrece AL LADO (mismo flujo, no una
+  pantalla aparte) una aproximación: velocidad media real del ráster de
+  GWA para ese punto exacto + forma (estacionalidad, ciclo diurno)
+  prestada de San José -- declarada como aproximación, con el error ya
+  cuantificado en Hallazgo 18 (-41% a -44% en Guanacaste, +18% en Limón)
+  mostrado ahí mismo. El ráster no se pudo descargar en este entorno de
   desarrollo (globalwindatlas.info bloqueado, Hallazgo 2) -- si no existe
-  el archivo, la app lo dice claramente en vez de fallar oscuro.
-- ¿Tenés el EPW real de tu sitio (climate.onebuilding.org u otra fuente)?
-  Subilo directo -- patrón adoptado de DDP-lite (Sogo2012/DDP-lite,
-  Hallazgo 18) -- y se usa sin aproximación, sin importar si el sitio está
-  en la lista de arriba.
-- Elevación: para los 4 sitios con datos propios ya está confirmada (AIP/
-  DGAC para San José, el propio encabezado del EPW para los otros 3). Para
-  coordenadas nuevas (aproximación) se pide manual por ahora -- la
-  búsqueda automática por DEM queda pendiente (Hallazgo 17).
-- Sin mapa, sin PDF, sin registro de leads todavía.
+  el archivo, la opción simplemente no aparece, en vez de fallar oscuro.
+- ¿Tenés el EPW real de tu sitio? Subilo directo -- opción secundaria
+  discreta (mismo patrón que DDP-lite/Skyplus), no compite con la
+  búsqueda de arriba.
+- Elevación: de la estación real (encabezado del EPW, o AIP/DGAC para San
+  José) siempre que hay una estación real elegida; sólo se pide manual
+  cuando se usa la aproximación (el ráster no trae elevación -- búsqueda
+  automática por DEM pendiente, Hallazgo 17).
+- Sin PDF, sin registro de leads todavía.
 - Corre local; despliegue a Cloud Run sigue pendiente.
 """
 import os
@@ -55,8 +59,15 @@ from engine.flower_turbines_curves import CURVE_COEFFICIENTS
 from engine.gwa_raster import generar_clima_sitio_nuevo, RUTA_RASTER_CR_DEFAULT
 from engine.epw_real import (
     SITIOS_EPW_REAL, cargar_epw_real, heatmap_json_desde_epw, rosa_frecuencia_desde_epw,
-    obtener_estaciones_cercanas, geocode_name, descargar_y_extraer_epw,
+    obtener_estaciones_cercanas, geocode_name, descargar_y_extraer_epw, sitio_precacheado_cercano,
 )
+
+# Hallazgo 19 (v3): a partir de qué distancia a la estación real más cercana la app ofrece
+# la aproximación (ráster GWA + forma de San José) como alternativa. Es una decisión de
+# producto, no un valor medido -- Costa Rica es topográficamente compartimentada (cordilleras
+# separan microclimas a distancias cortas), así que 40 km ya es generoso, no conservador.
+# Documentado explícitamente para que Pablo lo ajuste si no es el número correcto.
+UMBRAL_APROXIMACION_KM = 40.0
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -107,51 +118,80 @@ def _rosa_y_heatmap_san_jose():
     return ws_json, hm_json, rosa_freq
 
 
-def cargar_clima_sitio(modo, sitio_key, lat, lon, elevacion_m, ruta_epw_custom=None):
-    """
-    Devuelve un dict: df_clima, media, hm_json (índice mes×hora), rosa_freq
-    (12 sectores, %), es_aproximacion, elevacion_m (la real del sitio si
-    viene de un EPW propio -- ignora el valor tecleado en ese caso), error.
+def _resultado_desde_epw(df_clima, meta):
+    """Arma el dict unificado (mismo formato para las 3 rutas que terminan en un EPW
+    real: precacheado, recién descargado, o subido por el usuario)."""
+    hm_json = heatmap_json_desde_epw(df_clima)
+    rosa_freq = rosa_frecuencia_desde_epw(df_clima)
+    return dict(df_clima=df_clima, media=float(df_clima["WS10M"].mean()), hm_json=hm_json,
+                rosa_freq=rosa_freq, es_aproximacion=False, elevacion_m=meta["elevacion_m"],
+                error=None, meta=meta)
 
-    modo: "san_jose" | "epw_real" (sitio_key = clave en SITIOS_EPW_REAL) |
-          "epw_custom" (usa ruta_epw_custom, subido por el usuario o
-          descargado desde el mapa -- mismo patrón que el "¿Usar EPW
-          personalizado?" de DDP-lite) | "mapa" (sin estación elegida
-          todavía -- error informativo) | "coordenada" (ráster GWA + forma
-          prestada de San José, aproximación).
-    """
-    if modo == "san_jose":
-        sitio = SITIOS_DISPONIBLES[sitio_key]
-        ws_json, hm_json, rosa_freq = _rosa_y_heatmap_san_jose()
-        df_clima, media = generar_clima_gwa(ws_json, hm_json)
-        return dict(df_clima=df_clima, media=media, hm_json=hm_json, rosa_freq=rosa_freq,
-                    es_aproximacion=False, elevacion_m=elevacion_m, error=None)
 
-    if modo == "mapa":
+def _resultado_san_jose():
+    """San José usa el export real de GWA (curva de excedencia + patrón mes×hora propios,
+    Hallazgo 3) en vez de un EPW -- es el único de los 4 sitios precacheados así."""
+    sitio = SITIOS_DISPONIBLES["san_jose_juan_santamaria"]
+    ws_json, hm_json, rosa_freq = _rosa_y_heatmap_san_jose()
+    df_clima, media = generar_clima_gwa(ws_json, hm_json)
+    meta = dict(estacion="San José (Juan Santamaría)", pais="Costa Rica", wmo="787620",
+                lat=sitio["lat"], lon=sitio["lon"], elevacion_m=sitio["elevacion_m"])
+    return dict(df_clima=df_clima, media=media, hm_json=hm_json, rosa_freq=rosa_freq,
+                es_aproximacion=False, elevacion_m=sitio["elevacion_m"], error=None, meta=meta)
+
+
+def cargar_estacion_elegida(row):
+    """
+    Hallazgo 19 (v3): un solo camino para "el usuario eligió una estación real de la
+    lista" -- mismo patrón que DDP-lite/Skyplus (obtener_estaciones_cercanas() +
+    descargar_y_extraer_epw()). Si la estación elegida coincide (por proximidad, no por
+    texto) con uno de los 4 sitios que ya tenemos validados localmente (San José vía GWA,
+    Nicoya/Liberia/Finca Favorita vía EPW real, Hallazgo 18), sirve ese dato local en vez
+    de descargar de nuevo lo mismo -- invisible para el usuario, sigue siendo "elegí una
+    estación real y ya".
+    """
+    clave = sitio_precacheado_cercano(row["lat"], row["lon"]) if pd.notna(row.get("lat")) else None
+    if clave == "san_jose":
+        return _resultado_san_jose()
+    if clave in SITIOS_EPW_REAL:
+        df_clima, meta = cargar_epw_real(SITIOS_EPW_REAL[clave]["ruta_epw"])
+        return _resultado_desde_epw(df_clima, meta)
+    try:
+        ruta = descargar_y_extraer_epw(row["url"])
+        df_clima, meta = cargar_epw_real(ruta)
+        return _resultado_desde_epw(df_clima, meta)
+    except Exception as e:
         return dict(error=(
-            "Todavía no elegiste ninguna estación. Hacé clic en el mapa para buscar las más "
-            "cercanas y presioná \"Usar\" en la que quieras."
+            f"No se pudo descargar {row['name']}: {e} -- necesita internet real "
+            "(no funciona en este sandbox de desarrollo, Hallazgo 2)."
         ))
 
-    if modo in ("epw_real", "epw_custom"):
-        try:
-            ruta = SITIOS_EPW_REAL[sitio_key]["ruta_epw"] if modo == "epw_real" else ruta_epw_custom
-            df_clima, meta = cargar_epw_real(ruta)
-        except (FileNotFoundError, ValueError, KeyError) as e:
-            return dict(error=str(e))
-        hm_json = heatmap_json_desde_epw(df_clima)
-        rosa_freq = rosa_frecuencia_desde_epw(df_clima)
-        return dict(df_clima=df_clima, media=float(df_clima["WS10M"].mean()), hm_json=hm_json,
-                    rosa_freq=rosa_freq, es_aproximacion=False, elevacion_m=meta["elevacion_m"],
-                    error=None, meta=meta)
 
-    # modo == "coordenada" -- ráster GWA + forma prestada de San José (Requisito 1, aproximación)
+def cargar_epw_subido(ruta):
+    """EPW propio subido por el usuario -- opción secundaria discreta (mismo patrón que
+    DDP-lite/Skyplus), no un modo aparte: llega al mismo resultado unificado que elegir
+    una estación de la lista."""
+    try:
+        df_clima, meta = cargar_epw_real(ruta)
+    except (FileNotFoundError, ValueError, KeyError) as e:
+        return dict(error=str(e))
+    return _resultado_desde_epw(df_clima, meta)
+
+
+def cargar_aproximacion(lat, lon, elevacion_m):
+    """
+    Ráster GWA + forma prestada de San José (Requisito 1, Hallazgo 17) -- desde Hallazgo
+    19 (v3) YA NO es un modo que el usuario elige de entrada: la app la ofrece sola,
+    dentro del mismo flujo de búsqueda, sólo cuando la estación real más cercana queda a
+    más de UMBRAL_APROXIMACION_KM (ver arriba). Error ya cuantificado en Hallazgo 18:
+    -41% a -44% en Guanacaste, +18% en Limón según el sitio -- advertencia mostrada en el
+    mismo lugar donde aparece la opción, no en una pantalla aparte.
+    """
     if not os.path.exists(RUTA_RASTER_CR_DEFAULT):
         return dict(error=(
             f"No existe el ráster de Costa Rica ({os.path.basename(RUTA_RASTER_CR_DEFAULT)}). "
             "Hay que descargarlo primero desde un entorno con internet real (Colab) -- "
-            "ver engine/gwa_raster.py, descargar_raster_costa_rica(). No se puede calcular "
-            "para una coordenada nueva sin ese archivo (o subí el EPW real del sitio si lo tenés)."
+            "ver engine/gwa_raster.py, descargar_raster_costa_rica()."
         ))
     try:
         df_clima, media = generar_clima_sitio_nuevo(lat, lon)
@@ -215,156 +255,144 @@ col_config, col_resultado = st.columns([1, 2])
 
 with col_config:
     st.subheader("Sitio")
-
-    _opciones_sitio = {"san_jose": ("San José (Juan Santamaría) — datos GWA completos", "san_jose_juan_santamaria")}
-    for _k, _s in SITIOS_EPW_REAL.items():
-        _opciones_sitio[f"epw_{_k}"] = (f"{_s['nombre']} — EPW real", _k)
-    _opciones_sitio["mapa"] = ("🗺️ Buscar estación en el mapa (climate.onebuilding.org)", None)
-    _opciones_sitio["coordenada"] = ("Coordenada personalizada (aproximación)", None)
-
-    _modo_ui = st.selectbox(
-        "Sitio del proyecto", options=list(_opciones_sitio.keys()),
-        format_func=lambda k: _opciones_sitio[k][0],
+    st.caption(
+        "Un solo flujo, igual que DDP-lite/Skyplus (Hallazgo 19): buscá dónde está tu "
+        "proyecto -- por nombre, por coordenada, o clic en el mapa -- y elegí la estación "
+        "climática real más cercana. Nada de \"modos\" para decidir de antemano."
     )
-    if _modo_ui == "san_jose":
-        modo_sitio = "san_jose"
-    elif _modo_ui == "coordenada":
-        modo_sitio = "coordenada"
-    elif _modo_ui == "mapa":
-        modo_sitio = "mapa"
-    else:
-        modo_sitio = "epw_real"
-    sitio_key = _opciones_sitio[_modo_ui][1]
-    ruta_epw_custom = None  # se completa más abajo (mapa o uploader propio), si aplica
 
-    if modo_sitio == "san_jose":
-        sitio = SITIOS_DISPONIBLES[sitio_key]
-        lat, lon = sitio["lat"], sitio["lon"]
-        elevacion_m = sitio["elevacion_m"]
-        st.caption(f"lat={lat}, lon={lon}, elevación={elevacion_m:.0f}m (AIP/DGAC) -- datos GWA reales propios.")
-    elif modo_sitio == "epw_real":
-        lat, lon, elevacion_m = None, None, None  # se completan con el EPW real al cargar
-        st.caption(f"EPW real de climate.onebuilding.org (Hallazgo 18) -- sin aproximación.")
-    elif modo_sitio == "mapa":
-        lat, lon, elevacion_m = None, None, None
-        st.caption(
-            "Homologado con DDP-lite y Skyplus (Sogo2012/DDP-lite, Sogo2012/Skyplus, Hallazgo 19) "
-            "-- catálogo completo de climate.onebuilding.org, 5,276 estaciones en 20 países de "
-            "América, sin acotar a Costa Rica. Buscá por nombre, por coordenada, o clic en el mapa; "
-            "la descarga necesita internet real: no funciona en este sandbox de desarrollo "
-            "(Hallazgo 2), sí en Docker local o Cloud Run."
+    if "sitio_lat" not in st.session_state:
+        st.session_state.sitio_lat, st.session_state.sitio_lon = 9.9, -84.0
+        st.session_state.sitio_cercanas = None
+        st.session_state.sitio_activo, st.session_state.sitio_nombre_activo = None, None
+
+    def _buscar_y_guardar(_lat, _lon):
+        with st.spinner("Buscando estaciones cercanas..."):
+            st.session_state.sitio_lat, st.session_state.sitio_lon = _lat, _lon
+            df = obtener_estaciones_cercanas(_lat, _lon)
+            st.session_state.sitio_cercanas = df
+            if df is None or df.empty:
+                st.error("No se encontraron estaciones para esta ubicación.")
+
+    with st.expander("Buscar por nombre o coordenada",
+                      expanded=(st.session_state.sitio_activo is None)):
+        _nombre_busqueda = st.text_input(
+            "Ciudad o país", placeholder="Ej: Alajuela, Costa Rica",
+            label_visibility="collapsed", key="sitio_busqueda_nombre",
         )
-        if "mapa_lat" not in st.session_state:
-            st.session_state.mapa_lat, st.session_state.mapa_lon = 9.9, -84.0
-            st.session_state.mapa_cercanas = None
-            st.session_state.mapa_epw_seleccionado, st.session_state.mapa_estacion_nombre = None, None
-
-        def _buscar_y_guardar(_lat, _lon):
-            with st.spinner("Buscando estaciones cercanas..."):
-                st.session_state.mapa_lat, st.session_state.mapa_lon = _lat, _lon
-                df = obtener_estaciones_cercanas(_lat, _lon)
-                st.session_state.mapa_cercanas = df
-                if df is None or df.empty:
-                    st.error("No se encontraron estaciones para esta ubicación.")
-
-        with st.expander("Buscar por nombre", expanded=False):
-            _nombre_busqueda = st.text_input(
-                "Ciudad o país", placeholder="Ej: Alajuela, Costa Rica",
-                label_visibility="collapsed", key="mapa_busqueda_nombre",
-            )
-            if st.button("Buscar por nombre", use_container_width=True, key="btn_mapa_buscar_nombre"):
-                if _nombre_busqueda:
-                    _lat_g, _lon_g = geocode_name(_nombre_busqueda)
-                    if _lat_g is not None:
-                        _buscar_y_guardar(_lat_g, _lon_g)
-                        st.rerun()
-                    else:
-                        st.error(
-                            "No se pudo geocodificar ese nombre -- necesita internet real "
-                            "(Nominatim/Photon están bloqueados en este sandbox, Hallazgo 2)."
-                        )
-            st.divider()
-            _lat_manual = st.number_input("Latitud", value=st.session_state.mapa_lat, format="%.4f",
-                                           key="mapa_lat_input")
-            _lon_manual = st.number_input("Longitud", value=st.session_state.mapa_lon, format="%.4f",
-                                           key="mapa_lon_input")
-            if st.button("Buscar por coordenada", use_container_width=True, key="btn_mapa_buscar_coord"):
-                _buscar_y_guardar(_lat_manual, _lon_manual)
-                st.rerun()
-
-        _m = folium.Map(location=[st.session_state.mapa_lat, st.session_state.mapa_lon],
-                         zoom_start=8, tiles="CartoDB positron")
-        folium.Marker(
-            [st.session_state.mapa_lat, st.session_state.mapa_lon], tooltip="Ubicación del proyecto",
-            icon=folium.Icon(color="red", icon="crosshairs"),
-        ).add_to(_m)
-        _df_cerc = st.session_state.mapa_cercanas
-        if _df_cerc is not None and not _df_cerc.empty:
-            for _, _row in _df_cerc.iterrows():
-                if pd.notna(_row.get("lat")) and pd.notna(_row.get("lon")):
-                    folium.Marker(
-                        [_row["lat"], _row["lon"]],
-                        tooltip=f"{_row['name']} ({_row['distancia_km']} km)",
-                        icon=folium.Icon(color="blue", icon="cloud"),
-                    ).add_to(_m)
-        _salida_mapa = st_folium(_m, height=340, use_container_width=True, key="mapa_estaciones")
-
-        if _salida_mapa and _salida_mapa.get("last_clicked"):
-            _c_lat, _c_lon = _salida_mapa["last_clicked"]["lat"], _salida_mapa["last_clicked"]["lng"]
-            if (round(_c_lat, 4), round(_c_lon, 4)) != (
-                    round(st.session_state.mapa_lat, 4), round(st.session_state.mapa_lon, 4)):
-                _buscar_y_guardar(_c_lat, _c_lon)
-                st.rerun()
-
-        if _df_cerc is not None and not _df_cerc.empty:
-            st.caption("Estaciones más cercanas (clic en el mapa, o buscá arriba, para actualizar):")
-            for _i, _row in _df_cerc.iterrows():
-                _c1, _c2 = st.columns([3, 1])
-                _c1.write(f"**{_row['name']}** ({_row.get('state', '')}) -- {_row['distancia_km']} km")
-                if _c2.button("Usar", key=f"btn_mapa_est_{_i}"):
-                    with st.spinner(f"Descargando {_row['name']}..."):
-                        try:
-                            _ruta = descargar_y_extraer_epw(_row["url"])
-                            st.session_state.mapa_epw_seleccionado = _ruta
-                            st.session_state.mapa_estacion_nombre = _row["name"]
-                            st.rerun()
-                        except Exception as _e:
-                            st.error(
-                                f"No se pudo descargar {_row['name']}: {_e} -- necesita internet "
-                                "real (no funciona en este sandbox de desarrollo, Hallazgo 2)."
-                            )
-
-        if st.session_state.mapa_epw_seleccionado:
-            st.success(f"Estación activa: {st.session_state.mapa_estacion_nombre}")
-            ruta_epw_custom = st.session_state.mapa_epw_seleccionado
-            modo_sitio = "epw_custom"
-    else:
-        st.warning(
-            "Aproximación (Requisito 1, Hallazgo 17): magnitud real del ráster de GWA, forma "
-            "(variabilidad, estacionalidad) prestada de San José. Hallazgo 18 midió el error de esto "
-            "contra 3 sitios reales: entre -44% y +18% en producción anual según el sitio -- no son "
-            "datos propios de esta coordenada.",
-            icon="⚠️",
-        )
-        lat = st.number_input("Latitud", value=9.9, min_value=8.0, max_value=11.3, format="%.4f")
-        lon = st.number_input("Longitud", value=-84.0, min_value=-86.0, max_value=-82.5, format="%.4f")
-        elevacion_m = st.number_input("Elevación (m sobre el nivel del mar)", value=800.0, min_value=0.0,
-                                       max_value=3800.0, step=50.0,
-                                       help="Búsqueda automática por DEM pendiente (Hallazgo 17) -- por ahora, manual.")
+        if st.button("Buscar por nombre", use_container_width=True, key="btn_sitio_buscar_nombre"):
+            if _nombre_busqueda:
+                _lat_g, _lon_g = geocode_name(_nombre_busqueda)
+                if _lat_g is not None:
+                    _buscar_y_guardar(_lat_g, _lon_g)
+                    st.rerun()
+                else:
+                    st.error(
+                        "No se pudo geocodificar ese nombre -- necesita internet real "
+                        "(Nominatim/Photon están bloqueados en este sandbox, Hallazgo 2)."
+                    )
+        st.divider()
+        _lat_manual = st.number_input("Latitud", value=st.session_state.sitio_lat, format="%.4f",
+                                       key="sitio_lat_input")
+        _lon_manual = st.number_input("Longitud", value=st.session_state.sitio_lon, format="%.4f",
+                                       key="sitio_lon_input")
+        if st.button("Buscar por coordenada", use_container_width=True, key="btn_sitio_buscar_coord"):
+            _buscar_y_guardar(_lat_manual, _lon_manual)
+            st.rerun()
 
     with st.expander("¿Tenés el EPW real de tu sitio? Subilo directo"):
         st.caption(
-            "Patrón adoptado de DDP-lite (Sogo2012/DDP-lite, Hallazgo 18) -- si subís un .epw, se usa "
-            "directo (sin aproximación) y reemplaza la selección de arriba para este cálculo."
+            "Opción secundaria (mismo patrón que DDP-lite/Skyplus) -- no compite con la "
+            "búsqueda de arriba, sólo se usa si subís un archivo."
         )
-        _usar_custom = st.toggle("¿Usar mi propio archivo EPW?", value=False, key="usar_epw_custom")
-        if _usar_custom:
-            _archivo = st.file_uploader("Cargar archivo .epw", type=["epw"], key="archivo_epw_custom")
-            if _archivo is not None:
-                ruta_epw_custom = os.path.join(tempfile.gettempdir(), f"eco_wind_custom_{_archivo.name}")
-                with open(ruta_epw_custom, "wb") as _f:
-                    _f.write(_archivo.getbuffer())
-                modo_sitio = "epw_custom"
+        _archivo = st.file_uploader("Cargar archivo .epw", type=["epw"], key="archivo_epw_custom")
+        if _archivo is not None and st.session_state.get("_ultimo_epw_subido") != _archivo.name:
+            _ruta_subida = os.path.join(tempfile.gettempdir(), f"eco_wind_custom_{_archivo.name}")
+            with open(_ruta_subida, "wb") as _f:
+                _f.write(_archivo.getbuffer())
+            _res_subida = cargar_epw_subido(_ruta_subida)
+            st.session_state["_ultimo_epw_subido"] = _archivo.name
+            if _res_subida.get("error"):
+                st.error(_res_subida["error"])
+            else:
+                st.session_state.sitio_activo = _res_subida
+                st.session_state.sitio_nombre_activo = f"{_res_subida['meta']['estacion']} (EPW propio)"
+                st.rerun()
+
+    _m = folium.Map(location=[st.session_state.sitio_lat, st.session_state.sitio_lon],
+                     zoom_start=8, tiles="CartoDB positron")
+    folium.Marker(
+        [st.session_state.sitio_lat, st.session_state.sitio_lon], tooltip="Ubicación del proyecto",
+        icon=folium.Icon(color="red", icon="crosshairs"),
+    ).add_to(_m)
+    _df_cerc = st.session_state.sitio_cercanas
+    if _df_cerc is not None and not _df_cerc.empty:
+        for _, _row in _df_cerc.iterrows():
+            if pd.notna(_row.get("lat")) and pd.notna(_row.get("lon")):
+                folium.Marker(
+                    [_row["lat"], _row["lon"]], tooltip=f"{_row['name']} ({_row['distancia_km']} km)",
+                    icon=folium.Icon(color="blue", icon="cloud"),
+                ).add_to(_m)
+    _salida_mapa = st_folium(_m, height=340, use_container_width=True, key="mapa_sitio")
+
+    if _salida_mapa and _salida_mapa.get("last_clicked"):
+        _c_lat, _c_lon = _salida_mapa["last_clicked"]["lat"], _salida_mapa["last_clicked"]["lng"]
+        if (round(_c_lat, 4), round(_c_lon, 4)) != (
+                round(st.session_state.sitio_lat, 4), round(st.session_state.sitio_lon, 4)):
+            _buscar_y_guardar(_c_lat, _c_lon)
+            st.rerun()
+
+    if _df_cerc is not None and not _df_cerc.empty:
+        st.caption("Estaciones reales más cercanas (clic en el mapa, o buscá arriba, para actualizar):")
+        for _i, _row in _df_cerc.iterrows():
+            _c1, _c2 = st.columns([3, 1])
+            _c1.write(f"**{_row['name']}** ({_row.get('state', '')}) -- {_row['distancia_km']} km")
+            if _c2.button("Usar", key=f"btn_sitio_est_{_i}"):
+                _res_est = cargar_estacion_elegida(_row)
+                if _res_est.get("error"):
+                    st.error(_res_est["error"])
+                else:
+                    st.session_state.sitio_activo = _res_est
+                    st.session_state.sitio_nombre_activo = _row["name"]
+                    st.rerun()
+
+        # Hallazgo 19 (v3): aproximación como fallback automático DENTRO del mismo flujo,
+        # sólo cuando la estación real más cercana ya no representa bien el sitio -- no es
+        # un modo aparte que el usuario elige de entrada.
+        _dist_min = float(_df_cerc["distancia_km"].min())
+        _dentro_de_cr = (8.0 <= st.session_state.sitio_lat <= 11.3
+                          and -86.0 <= st.session_state.sitio_lon <= -82.5)
+        if _dist_min > UMBRAL_APROXIMACION_KM and _dentro_de_cr and os.path.exists(RUTA_RASTER_CR_DEFAULT):
+            with st.container(border=True):
+                st.markdown(
+                    f"⚠️ **Aproximación para este punto exacto** -- la estación real más "
+                    f"cercana está a {_dist_min:.0f} km."
+                )
+                st.caption(
+                    "Media real del ráster de GWA para esta coordenada + forma (estacionalidad, "
+                    "ciclo diurno) prestada de San José -- no son datos propios de este sitio. "
+                    "Error ya medido (Hallazgo 18): -41% a -44% en Guanacaste, +18% en Limón "
+                    "según el sitio real comparado."
+                )
+                _elev_aprox = st.number_input(
+                    "Elevación (m sobre el nivel del mar)", value=800.0, min_value=0.0,
+                    max_value=3800.0, step=50.0, key="sitio_elev_aprox",
+                    help="El ráster no trae elevación -- búsqueda automática por DEM pendiente "
+                         "(Hallazgo 17), por ahora manual.",
+                )
+                if st.button("Usar esta aproximación", key="btn_usar_aproximacion"):
+                    _res_aprox = cargar_aproximacion(
+                        st.session_state.sitio_lat, st.session_state.sitio_lon, _elev_aprox)
+                    if _res_aprox.get("error"):
+                        st.error(_res_aprox["error"])
+                    else:
+                        st.session_state.sitio_activo = _res_aprox
+                        st.session_state.sitio_nombre_activo = (
+                            "Aproximación -- ráster GWA + forma de San José")
+                        st.rerun()
+
+    if st.session_state.sitio_activo:
+        st.success(f"✅ Sitio activo: {st.session_state.sitio_nombre_activo}")
 
     st.subheader("Clústers del proyecto")
     for i, c in enumerate(st.session_state.clusters):
@@ -408,10 +436,15 @@ with col_resultado:
     st.subheader("Resultado")
 
     if calcular:
-        resultado_clima = cargar_clima_sitio(modo_sitio, sitio_key, lat, lon, elevacion_m, ruta_epw_custom)
-        error = resultado_clima.get("error")
+        resultado_clima = st.session_state.sitio_activo
+        error = None if resultado_clima is None else resultado_clima.get("error")
 
-        if error:
+        if resultado_clima is None:
+            st.error(
+                "Elegí primero una estación (o una aproximación) en \"Sitio\", a la izquierda.",
+                icon="🚫",
+            )
+        elif error:
             st.error(error, icon="🚫")
         else:
             df_clima = resultado_clima["df_clima"]
@@ -419,15 +452,16 @@ with col_resultado:
             hm_json = resultado_clima["hm_json"]
             rosa_freq = resultado_clima["rosa_freq"]
             es_aproximacion = resultado_clima["es_aproximacion"]
-            elevacion_m = resultado_clima["elevacion_m"]  # real del EPW si aplica, sobreescribe el input
+            elevacion_m = resultado_clima["elevacion_m"]
 
-            if modo_sitio in ("epw_real", "epw_custom"):
+            if "meta" in resultado_clima:
                 _m = resultado_clima["meta"]
-                st.success(f"EPW real: {_m['estacion']} ({_m['pais']}, WMO {_m['wmo']}) -- "
+                st.success(f"Estación real: {_m['estacion']} ({_m['pais']}, WMO {_m['wmo']}) -- "
                            f"lat={_m['lat']:.4f}, lon={_m['lon']:.4f}, elevación={_m['elevacion_m']:.0f}m. "
                            f"Media anual real (10m): {media_confirmada:.2f} m/s.", icon="✅")
             if es_aproximacion:
-                st.info(f"Velocidad media real (ráster GWA, coordenada {lat:.4f},{lon:.4f}): "
+                st.info(f"Velocidad media real (ráster GWA, coordenada "
+                        f"{st.session_state.sitio_lat:.4f},{st.session_state.sitio_lon:.4f}): "
                         f"{media_confirmada:.2f} m/s -- forma prestada de San José.", icon="ℹ️")
 
             resultados = []

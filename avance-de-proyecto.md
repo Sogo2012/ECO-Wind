@@ -1,7 +1,7 @@
 # ECO | Wind — Avance de Proyecto
 
 **Documento de referencia (alcance):** [`plan-tecnico-eco-wind.md`](./plan-tecnico-eco-wind.md)
-**Última actualización:** 31 de agosto, 2026 (Hallazgo 20 — corrección real en el perfil de viento por altura: z0 de referencia distinto de z0 destino, -16% a -24% en velocidad de buje; Hallazgo 19 — búsqueda de clima homologada con DDP-lite/Skyplus: catálogo completo de 5,276 estaciones en 20 países, búsqueda por nombre/coordenada/mapa, sin acotar a Costa Rica)
+**Última actualización:** 31 de agosto, 2026 (Hallazgo 19 v3 — consolidado en UN SOLO flujo de búsqueda de clima, igual que DDP-lite/Skyplus: sin selector de modos, estación real siempre, aproximación como fallback automático sólo cuando hace falta; Hallazgo 20 — corrección real en el perfil de viento por altura, z0 de referencia distinto de z0 destino)
 **Propósito:** comparar el alcance planeado contra el avance real, y dejar constancia de los
 hallazgos que no estaban previstos en el plan original. Se actualiza en cada avance
 significativo — no es una foto única.
@@ -1047,7 +1047,9 @@ prestados). `app/app.py`: selector de sitio ahora lista los 4 sitios con datos p
 José + los 3 EPW reales) además de "coordenada personalizada" (aproximación, con la advertencia
 ahora cuantificada con estos números), más el toggle+uploader de EPW propio. Probado extremo a
 extremo (los 4 sitios, `simular()` completo) y con `streamlit run` arrancando sin errores
-(HTTP 200, sin traceback).
+(HTTP 200, sin traceback). *(Corrección, Hallazgo 19 v3: este selector de modos se eliminó --
+los 4 sitios y la aproximación siguen existiendo, pero como parte de un solo flujo de búsqueda,
+no como opciones separadas que elegir de entrada. Ver Hallazgo 19 v3 más abajo.)*
 
 **UWG (Urban Weather Generator, ladybug-tools) — evaluado y descartado, con evidencia de
 código fuente, no de documentación.** `ladybug.tools`/`www.ladybug.tools` está bloqueado en
@@ -1149,6 +1151,47 @@ Run) -- ni la geocodificación, ni el mapa visual, ni una descarga real de EPW s
 verificar de punta a punta en este sandbox de desarrollo. Lo que sí se puede afirmar con
 evidencia: la lógica de búsqueda es correcta y NO está limitada a Costa Rica (probado con 4
 países), la app no se rompe cuando la red falla, y el patrón de UI es fiel al de DDP-lite/Skyplus.
+
+**Hallazgo 19 (v3) — corrección real: la v2 seguía siendo 4 modos paralelos, no un solo
+flujo.** Pablo corrigió esto explícitamente: la v2 (arriba) sí portó el catálogo completo y la
+geocodificación, pero la UI seguía teniendo un selector de 6 opciones (San José, 3 EPW, mapa,
+coordenada) que el usuario tenía que elegir de antemano -- exactamente lo que DDP-lite/Skyplus
+NO hacen. Se revisó el `app.py` REAL de ambos (ya clonados en esta sesión, no sólo
+`weather_utils.py`) para confirmar la pantalla exacta antes de tocar código: en los dos, la
+búsqueda (nombre/coordenada, en el sidebar) y el mapa+lista de estaciones (una sola pantalla,
+"Selección de Clima") son un solo flujo continuo, sin modos.
+
+**Consolidación real, no cosmética:**
+- El selector de 6 opciones desapareció. Ahora hay un solo buscador (nombre / coordenada / clic
+  en el mapa -- las 3 formas de indicar ubicación no se tocaron, ya estaban bien) que siempre
+  muestra estaciones reales cercanas para elegir.
+- San José y los 3 EPW reales (Hallazgo 18) ya NO son opciones de un menú -- son una
+  optimización interna invisible: `engine/epw_real.py::sitio_precacheado_cercano(lat, lon)`
+  detecta por PROXIMIDAD (no por texto del nombre) cuando la estación que devolvió la búsqueda
+  es una de estas 4, y sirve el dato local ya validado en vez de descargar de nuevo lo mismo.
+  Verificado: buscar por la coordenada real de San José devuelve "San Jose Santamaria Intl AP"
+  a 0.0 km, y al elegir esa estación carga el GWA local al instante (sin intentar red) --
+  reproduce exacto el benchmark ya establecido (156 kWh/año, medium_tulip×3, buje 3m).
+- La aproximación (ráster GWA + forma de San José, Hallazgo 17-18) ya NO es un modo que se
+  elige de entrada -- es un fallback automático que la app ofrece SÓLO cuando la estación real
+  más cercana queda a más de `UMBRAL_APROXIMACION_KM` (**40 km -- decisión de producto
+  documentada explícitamente en el código, no un valor medido**: Costa Rica es topográficamente
+  compartimentada, cordilleras separan microclimas a distancias cortas, así que 40 km ya es
+  generoso) Y el punto cae dentro de Costa Rica Y el ráster existe localmente. Aparece como una
+  tarjeta dentro de la MISMA pantalla de resultados de búsqueda, con la advertencia cuantificada
+  de Hallazgo 18 (-41% a -44% Guanacaste, +18% Limón) ahí mismo -- no en una pantalla aparte.
+- Subir un EPW propio sigue existiendo, pero como opción secundaria discreta (mismo patrón real
+  de DDP-lite/Skyplus, confirmado en su `app.py`), no como modo de nivel superior.
+
+**Verificado con `streamlit.testing.v1.AppTest`** (los 5 casos, todos sin excepción ni
+traceback): (1) arranque limpio; (2) "Calcular" sin haber elegido sitio → error claro, no
+crash; (3) buscar San José → coincide con el sitio precacheado, carga local, "Calcular" produce
+156 kWh (idéntico al benchmark de Hallazgo 20); (4) buscar un punto real de Costa Rica lejos de
+toda estación (Golfito, zona sur, ~147 km de la más cercana) con un ráster de prueba presente →
+aparece la tarjeta de aproximación; (5) buscar Buenos Aires (fuera de Costa Rica) → la
+aproximación NO aparece aunque esté "lejos", porque el ráster sólo cubre Costa Rica. En el
+estado real de este sandbox (sin el ráster descargado, Hallazgo 2) la tarjeta de aproximación no
+aparece nunca -- comportamiento correcto: mejor que la opción no aparezca a que aparezca rota.
 
 ### Hallazgo 20 — Perfil de viento por altura: un error real (un solo z0 para referencia y destino) encontrado al revisar wind-data.ch y el código fuente de ladybug-tools
 
