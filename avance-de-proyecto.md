@@ -1,7 +1,7 @@
 # ECO | Wind — Avance de Proyecto
 
 **Documento de referencia (alcance):** [`plan-tecnico-eco-wind.md`](./plan-tecnico-eco-wind.md)
-**Última actualización:** 31 de agosto, 2026 (Hallazgo 20 — corrección real en el perfil de viento por altura: z0 de referencia distinto de z0 destino, -16% a -24% en velocidad de buje; Hallazgo 19 — mapa + búsqueda de estaciones de DDP-lite portado a Costa Rica)
+**Última actualización:** 31 de agosto, 2026 (Hallazgo 20 — corrección real en el perfil de viento por altura: z0 de referencia distinto de z0 destino, -16% a -24% en velocidad de buje; Hallazgo 19 — búsqueda de clima homologada con DDP-lite/Skyplus: catálogo completo de 5,276 estaciones en 20 países, búsqueda por nombre/coordenada/mapa, sin acotar a Costa Rica)
 **Propósito:** comparar el alcance planeado contra el avance real, y dejar constancia de los
 hallazgos que no estaban previstos en el plan original. Se actualiza en cada avance
 significativo — no es una foto única.
@@ -14,7 +14,8 @@ significativo — no es una foto única.
 |---|---|
 | **Fase 1 — Pista A** (motor empírico) | 🟢 Sólida — mecánica y fuentes de datos climáticos (EPW + GWA) validadas con datos reales; z0/afinación fina quedó pendiente para más adelante (decisión del Director del Proyecto) |
 | **Fase 1 — Pista B** (motor físico DMST + CFD) | 🟡 Aerodinámica congelada (vía agotada, sobre-predicción sigue abierta, Hallazgo 8); curvas de potencia re-verificadas contra el calculador oficial, sin dudas reales (Hallazgo 12) — módulo estructural ASCE 7 con demanda de anclaje para 5 modelos y carga de clúster conservadora (Hallazgos 9-10, 13); Cilindro Actuador implementado y validado, pero no reproduce el Efecto Bouquet real todavía (Hallazgo 15) |
-| **Fase 2** (productización: Streamlit + Cloud Run) | 🟡 Multi-clúster, corrección de densidad, cálculo horario probado (Jensen), perfil de viento por altura corregido (z0 de referencia ≠ z0 destino, Hallazgo 20), gráficos (rosa de vientos, heatmap, curva de duración), 4 sitios con datos climáticos reales propios (San José + Nicoya/Liberia/Finca Favorita) más mapa de búsqueda de estaciones (12 de Costa Rica) y subida de EPW propio, y arquitectura para cualquier otra coordenada (ráster+forma prestada, error ya cuantificado -44%/+18%, pendiente el archivo real). Falta: PDF, leads, despliegue a Cloud Run (Hallazgos 16-20) |
+| **Fase 2** (productización: Streamlit + Cloud Run) | 🟡 Multi-clúster, corrección de densidad, cálculo horario probado (Jensen), perfil de viento por altura corregido (z0 de referencia ≠ z0 destino, Hallazgo 20), gráficos (rosa de vientos, heatmap, curva de duración), 4 sitios con datos climáticos reales propios (San José + Nicoya/Liberia/Finca Favorita) más mapa de búsqueda de estaciones (5,276 en 20 países, por nombre/coordenada/mapa, sin acotar
+a Costa Rica) y subida de EPW propio, y arquitectura para cualquier otra coordenada (ráster+forma prestada, error ya cuantificado -44%/+18%, pendiente el archivo real). Falta: PDF, leads, despliegue a Cloud Run (Hallazgos 16-20) |
 
 ---
 
@@ -81,6 +82,8 @@ organización del proxy de red:
   que EPW/GWA-San José.)
 - `www.ladybug.tools` (confirmado 31/ago/2026, mismo patrón -- ver Hallazgo 18)
 - `wind-data.ch` (confirmado 31/ago/2026 vía WebFetch, mismo patrón -- ver Hallazgo 20)
+- `nominatim.openstreetmap.org`, `photon.komoot.io` (confirmado 31/ago/2026 con curl,
+  `connect_rejected` -- geocodificación directa e inversa, ver Hallazgo 19)
 
 **Nota aparte, mismo patrón pero otro tipo de recurso (Hallazgo 19):** no sólo APIs/datos --
 también un CDN de JavaScript de terceros queda bloqueado para un navegador real dentro de este
@@ -1072,54 +1075,80 @@ térmico (temperatura/humedad de isla de calor urbana, no viento) para otro prod
 de UWG sí está implementada y probada -- sería una evaluación aparte, no relacionada con este
 simulador de viento.
 
-### Hallazgo 19 — Módulo de búsqueda de clima + mapa de DDP-lite, portado: catálogo de 12 estaciones de Costa Rica, búsqueda Haversine, descarga bajo demanda, mapa Folium
+### Hallazgo 19 — Módulo de búsqueda de clima + mapa homologado con DDP-lite y Skyplus: catálogo completo (5,276 estaciones, 20 países), búsqueda por nombre/coordenada/mapa, sin acotar a Costa Rica
 
-Pablo pidió portar el módulo de búsqueda de clima y mapa que ya tiene DDP-lite, y preguntó si
-hacía falta que subiera todo el proyecto. No hizo falta: `Sogo2012/DDP-lite` ya estaba clonado
-en esta sesión (Hallazgo 18), con acceso de lectura completo.
+Pablo pidió portar el módulo de búsqueda de clima y mapa que ya tienen DDP-lite y Skyplus, y
+preguntó si hacía falta que subiera todo el proyecto. No hizo falta: `Sogo2012/DDP-lite` ya
+estaba clonado en esta sesión (Hallazgo 18); se agregó `Sogo2012/Skyplus` (lectura) como segunda
+referencia. Los dos comparten literalmente el mismo `weather_utils.py` (`diff` sin diferencias
+en la lógica de búsqueda, sólo branding) -- confirma que ese módulo es el patrón real y estable
+de ECO Consultor para esto, no una implementación particular de un solo producto.
 
-**Qué se portó, y qué no.** DDP-lite resuelve "clima real por sitio" con `epw_catalog_global.json`
-(5,276 estaciones, 20 países, prescrapeado real de climate.onebuilding.org) + búsqueda geodésica
-Haversine + geocodificación inversa (Photon/Nominatim) como fallback para identificar el país +
-mapa interactivo Folium (`app.py`, sección "TAB 1 -- MAPA Y DESCARGA EPW") donde un clic dispara
-la búsqueda y un botón por estación descarga+extrae+procesa el EPW. Para ECO-Wind, que sólo
-cubre Costa Rica, se extrajeron **únicamente las 12 estaciones de Costa Rica** del catálogo
-completo (`datos_clima/epw_catalog_cr.json`) y se **eliminó la capa de geocodificación/países
-vecinos** -- no hace falta adivinar el país cuando la app ya está acotada a Costa Rica (límites
-de lat/lon ya existentes en la UI). Lo demás (Haversine, descarga+extracción, mapa+botones) se
-portó fiel al patrón real de DDP-lite. Todo en `engine/epw_real.py`
-(`cargar_catalogo_cr()`, `buscar_estaciones_cercanas()`, `descargar_y_extraer_epw()`) y en
-`app/app.py` (nuevo modo de sitio "🗺️ Buscar estación en el mapa").
+**v1 (primera versión de este Hallazgo) fue una simplificación incorrecta, que Pablo corrigió
+explícitamente.** La primera pasada recortó el catálogo a sólo las 12 estaciones de Costa Rica y
+eliminó la geocodificación, asumiendo que ECO-Wind "ya está acotado a Costa Rica" -- Pablo pidió
+explícitamente deshacer eso: *"no me hardcodes ninguna estación ni me limites a costa rica...
+necesito la misma cosa"* que DDP-lite/Skyplus. Corregido: esta es la v2, un port fiel y completo.
+
+**Qué se portó, fiel al original, sin recortes:**
+- `datos_clima/epw_catalog_global.json` -- el catálogo COMPLETO (5,276 estaciones, 20 países:
+  USA/CAN/MEX + 17 LATAM), copiado tal cual de DDP-lite/Skyplus (idéntico byte a byte entre
+  ambos). Ya no existe una versión recortada a Costa Rica.
+- `engine/epw_real.py::obtener_estaciones_cercanas()` -- port completo de la función real
+  (mismo nombre): geocodificación inversa (Photon, luego Nominatim) para inferir el país de
+  cualquier coordenada del mundo, con fallback a bounding box (sin red) si la geocodificación
+  falla; búsqueda en ese país; si hay pocas estaciones, expande a países vecinos; si aún hay
+  pocas, busca en los 20 países completos. Nada de esto asume Costa Rica -- probado con Ciudad
+  de México, Buenos Aires y Bogotá además de San José, cada uno devolviendo estaciones reales de
+  su propio país (ver tabla abajo).
+- `engine/epw_real.py::geocode_name()` -- geocodificación directa (buscar por nombre de ciudad/
+  país), puerto fiel del mismo nombre de función.
+- `app/app.py` -- el modo "🗺️ Buscar estación en el mapa" ahora tiene los 3 caminos reales de
+  DDP-lite/Skyplus: **buscar por nombre** (texto libre + geocodificación), **buscar por
+  coordenada** (lat/lon manual), y **clic en el mapa** -- los 3 llaman a la misma
+  `obtener_estaciones_cercanas()`.
+
+**Verificado sin red (Haversine + fallback por bounding box, ninguno de los dos necesita
+geocodificación para funcionar) contra 4 países distintos, no sólo Costa Rica:**
+
+| Búsqueda | País inferido (fallback bbox) | Estación más cercana real | Distancia |
+|---|---|---|---|
+| Ciudad de México (19.4326, -99.1332) | Mexico | Fes Cuautitlan | 29.6 km |
+| Buenos Aires (-34.6037, -58.3816) | Argentina | El Palomar A.P. | 19.7 km |
+| Bogotá (4.7110, -74.0721) | Colombia | Las Gaviotas | 84.7 km |
+| San José, CR (9.9937, -84.2088) | Costa Rica | San José Santamaría Intl. A.P. | 0.0 km |
 
 **Discrepancia real encontrada al portar esto (no ignorada, documentada en el propio código):**
-el catálogo de DDP-lite ubica Finca Favorita en (9.8833, -83.9167), pero el EPW real que Pablo
-subió (Hallazgo 18) trae en su propio encabezado LOCATION (9.517, -82.650) -- casi 50 km de
+el catálogo ubica Finca Favorita en (9.8833, -83.9167), pero el EPW real que Pablo subió
+(Hallazgo 18) trae en su propio encabezado LOCATION (9.517, -82.650) -- casi 50 km de
 diferencia. El catálogo es sólo una posición aproximada para el mapa y el orden por distancia
 ANTES de descargar; la metadata que de verdad se usa (lat/lon/elevación) siempre sale del
-encabezado del EPW ya descargado, nunca del catálogo -- no afecta ningún resultado ya calculado,
-pero es una razón más para no confiar en el catálogo como fuente de verdad de la posición. De
-las 12 estaciones del catálogo, sólo 7 traen coordenada (las otras 5 se muestran igual, por
-nombre, en una lista aparte -- no se pueden ubicar en el mapa ni ordenar por distancia).
+encabezado del EPW ya descargado, nunca del catálogo -- no afecta ningún resultado ya calculado.
 
-**Verificado sin red, con red bloqueada donde correspondía (mismo patrón que todo el proyecto):**
-`buscar_estaciones_cercanas()` (Haversine pura) probada con coordenadas reales -- desde el
-aeropuerto Juan Santamaría, devuelve San José Santamaría a 0.0 km, Puntarenas a 9.4 km, etc.,
-orden correcto. `descargar_y_extraer_epw()` probada contra la URL real del catálogo: falla con
-`ProxyError` (bloqueo de política, no un bug) de forma limpia y capturable -- confirmado que la
-app NO se cae, muestra un error claro al usuario. El **mapa visual en sí** no se pudo probar con
-Playwright/Chromium real: `cdn.jsdelivr.net` (de donde `folium` carga Leaflet.js) está bloqueado
-en este sandbox (`net::ERR_TUNNEL_CONNECTION_FAILED`) -- el iframe del componente sí se genera y
-monta, pero el mapa queda en blanco sin la librería. Para no depender de poder ver el mapa, se
-probó todo el flujo restante con `streamlit.testing.v1.AppTest` (sin necesitar navegador):
-seleccionar el modo, poblar `session_state` como si el usuario hubiera hecho clic, y verificar
-que aparecen las 11 estaciones (6 con distancia + 5 sin coordenada) con su botón "Usar", y que
-al hacer clic en una el error de red se muestra correctamente sin traceback. Ver Hallazgo 2 para
-el registro de ambos bloqueos nuevos (`wind-data.ch` de Hallazgo 20, y la nota sobre jsdelivr).
+**Bloqueado en este sandbox, mismo patrón de siempre (Hallazgo 2, extendido):**
+`nominatim.openstreetmap.org` y `photon.komoot.io` (geocodificación, tanto directa como
+inversa) -- confirmado con curl, `connect_rejected`. Como el fallback por bounding box no
+necesita red, la búsqueda por coordenada funciona igual de bien aunque la geocodificación esté
+caída (para eso está el fallback). La búsqueda por NOMBRE sí depende 100% de la geocodificación
+-- en este sandbox falla limpio (`geocode_name()` devuelve `(None, None)`, la app muestra un
+error claro, no un traceback) y sólo se puede probar de verdad con internet real. `climate.
+onebuilding.org` sigue bloqueado también -- `descargar_y_extraer_epw()` probada contra una URL
+real del catálogo de Argentina: falla con `ProxyError` de forma limpia y capturable. El **mapa
+visual en sí** tampoco se pudo probar con Playwright/Chromium real: `cdn.jsdelivr.net` (de donde
+`folium` carga Leaflet.js) está bloqueado (`net::ERR_TUNNEL_CONNECTION_FAILED`) -- el iframe del
+componente sí se genera y monta, pero el mapa queda en blanco sin la librería.
+
+**Verificado con `streamlit.testing.v1.AppTest`** (sin necesitar navegador, para no depender del
+mapa visual): seleccionar el modo, poblar `session_state` con resultados reales de
+`obtener_estaciones_cercanas()` para Buenos Aires (Argentina, NO Costa Rica) y confirmar que
+aparecen las 5 estaciones argentinas con su botón "Usar", y que al hacer clic el error de red
+(climate.onebuilding.org bloqueado) se muestra correctamente sin traceback.
 
 **Alcance honesto:** este mapa funciona sólo con internet real (Docker local de Pablo, Cloud
-Run) -- ni el mapa visual ni la descarga de EPW se pueden verificar de punta a punta en este
-sandbox de desarrollo. Lo que sí se puede afirmar con evidencia: la lógica de búsqueda es
-correcta, la app no se rompe cuando la descarga falla, y el patrón de UI es fiel al de DDP-lite.
+Run) -- ni la geocodificación, ni el mapa visual, ni una descarga real de EPW se pueden
+verificar de punta a punta en este sandbox de desarrollo. Lo que sí se puede afirmar con
+evidencia: la lógica de búsqueda es correcta y NO está limitada a Costa Rica (probado con 4
+países), la app no se rompe cuando la red falla, y el patrón de UI es fiel al de DDP-lite/Skyplus.
 
 ### Hallazgo 20 — Perfil de viento por altura: un error real (un solo z0 para referencia y destino) encontrado al revisar wind-data.ch y el código fuente de ladybug-tools
 
@@ -1346,14 +1375,17 @@ Probado de punta a punta: `streamlit run` arranca sin errores (HTTP 200).
 - [ ] Cuando exista el ráster real, decidir si vale la pena pedir también capacity-factor
       (`/api/gis/country/CRI/capacity-factor_IEC{1,2,3}`) del mismo endpoint oficial, como
       dato adicional (Hallazgo 17).
-- [ ] **Nuevo, de Hallazgo 19:** probar el mapa + descarga de estaciones de punta a punta con
-      internet real (Docker local de Pablo o Cloud Run) — en este sandbox sólo se pudo verificar
-      la lógica (búsqueda, lista, manejo de error), no el mapa visual ni una descarga real
-      exitosa (`cdn.jsdelivr.net` y `climate.onebuilding.org` bloqueados acá).
-- [ ] **Nuevo, de Hallazgo 19:** el catálogo de 12 estaciones de Costa Rica es el de DDP-lite tal
-      cual — 5 de las 12 no traen coordenada (no se pueden ubicar en el mapa). Si hace falta
-      completarlas, geocodificarlas a mano (nombre + provincia ya se conocen) sin necesitar
-      volver a scrapear climate.onebuilding.org.
+- [ ] **Nuevo, de Hallazgo 19:** probar el mapa + búsqueda por nombre + descarga de estaciones de
+      punta a punta con internet real (Docker local de Pablo o Cloud Run) — en este sandbox sólo
+      se pudo verificar la lógica (búsqueda Haversine + fallback bbox, lista, manejo de error),
+      no la geocodificación, el mapa visual, ni una descarga real exitosa (`nominatim.
+      openstreetmap.org`, `photon.komoot.io`, `cdn.jsdelivr.net` y `climate.onebuilding.org`
+      bloqueados acá).
+- [ ] **Nuevo, de Hallazgo 19:** el catálogo (5,276 estaciones, 20 países) es el de DDP-lite/
+      Skyplus tal cual — algunas estaciones no traen coordenada en el catálogo (se excluyen de
+      la búsqueda por distancia, mismo comportamiento que el original). Si hace falta ampliar el
+      catálogo a más países o completar coordenadas faltantes, es un scraping aparte de
+      climate.onebuilding.org — no algo para inventar sin la fuente real.
 - [ ] **Nuevo, de Hallazgo 20:** el default `z0_met=0.1` ("country"/aeropuerto) es el más
       defendible con lo que se sabe hoy (así lo documenta ladybug-tools/EnergyPlus para datos de
       aeropuerto), pero no está validado contra producción real de una turbina instalada. Si en
@@ -1379,8 +1411,9 @@ ECO-Wind/
 │   ├── atmosfera_estandar.py         ← densidad ISA por elevación (Hallazgo 17)
 │   ├── gwa_raster.py                 ← clima para cualquier coordenada de CR, ráster+forma prestada (Hallazgo 17)
 │   ├── epw_real.py                   ← parser EPW propio + 3 sitios reales (Nicoya/Liberia/Finca
-│   │                                     Favorita, Hallazgo 18) + catálogo/búsqueda/descarga de
-│   │                                     estaciones CR (Hallazgo 19)
+│   │                                     Favorita, Hallazgo 18) + búsqueda/geocodificación/
+│   │                                     descarga de estaciones, 20 países, homologado con
+│   │                                     DDP-lite/Skyplus (Hallazgo 19)
 │   ├── dmst_model.py, rotor_combinado.py, polar_hibrido.py, naca0018_polar.py  ← Pista B aerodinámica
 │   ├── estructural_asce7.py          ← Pista B estructural, ASCE 7 (Hallazgos 9-10, 13-14)
 │   └── actuator_cylinder.py          ← Pista B efecto clúster, Cilindro Actuador (Hallazgo 15)
@@ -1392,8 +1425,8 @@ ECO-Wind/
 │   ├── gwa_juan_santamaria/           ← export real del Global Wind Atlas
 │   ├── epw_real/                      ← 3 EPW reales de climate.onebuilding.org (Hallazgo 18):
 │   │                                     Nicoya, Liberia, Finca Favorita
-│   ├── epw_catalog_cr.json            ← 12 estaciones de Costa Rica, extraído del catálogo de
-│   │                                     DDP-lite (Hallazgo 19)
+│   ├── epw_catalog_global.json         ← catálogo completo (5,276 estaciones, 20 países),
+│   │                                     idéntico al de DDP-lite/Skyplus (Hallazgo 19)
 │   └── gwa_costa_rica_10m.tif          ← (falta) ráster de todo el país, ver pendientes Hallazgo 17
 └── documentos_tecnicos/               ← research, fichas técnicas, insumos originales
 ```

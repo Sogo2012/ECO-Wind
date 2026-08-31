@@ -11,26 +11,33 @@ datos reales de esa fuente, igual que el EPW de San José que ya estaba en
 el repo (mismo patrón, mismo dominio de origen, misma convención de
 nombres TMYx).
 
-PATRÓN ADOPTADO DE DDP-Lite (Sogo2012/DDP-lite, revisado a pedido de
-Pablo): ese proyecto resuelve "clima real por sitio" con un catálogo
-estático pre-scrapeado de climate.onebuilding.org (epw_catalog_global.json,
-5276 estaciones) + búsqueda geodésica (Haversine) + una opción explícita
-"¿Usar archivo EPW personalizado?" (toggle + st.file_uploader) que reemplaza
-la estación más cercana del catálogo por el EPW real que suba el usuario,
-cuando lo tiene. Ver weather_utils.py::obtener_estaciones_cercanas() y
-app.py líneas ~1259-1298 de ese repo.
+PATRÓN ADOPTADO DE DDP-Lite Y SKYPLUS (Sogo2012/DDP-lite, Sogo2012/Skyplus
+-- mismo módulo `weather_utils.py`, prácticamente idéntico entre los dos
+salvo branding, confirmado con `diff` línea por línea): "clima real por
+sitio" se resuelve con un catálogo estático pre-scrapeado de
+climate.onebuilding.org (`epw_catalog_global.json`, 5,276 estaciones, 20
+países de América -- USA/CAN/MEX + 17 LATAM) + búsqueda geodésica
+(Haversine) + geocodificación (Photon/Nominatim, tanto inversa para
+inferir el país de una coordenada como directa para "buscar por nombre")
++ un mapa Folium con clic-para-buscar + una opción explícita "¿Usar
+archivo EPW personalizado?" que reemplaza la estación por el EPW real que
+suba el usuario. Ver `weather_utils.py::obtener_estaciones_cercanas()`,
+`get_location_info()`, `geocode_name()` de esos repos.
 
-ACTUALIZACIÓN (Hallazgo 19): sí se portó un catálogo propio --
-`datos_clima/epw_catalog_cr.json`, las 12 entradas de Costa Rica extraídas
-directo de `epw_catalog_global.json` de DDP-lite (que ya lo tenía
-scrapeado real de climate.onebuilding.org, con 5,276 estaciones de 20
-países -- acá solo se usan las 12 de Costa Rica, todo lo demás está fuera
-de alcance de ECO-Wind). Se recortó también la lógica de
-`obtener_estaciones_cercanas()`: sin geocodificación inversa (Photon/
-Nominatim) ni fallback de países vecinos -- ECO-Wind ya sólo cubre Costa
-Rica (lat 8-11.3, lon -86/-82.5, ver límites en app.py), así que buscar
-"a qué país pertenece la coordenada" no aplica. Sólo queda la búsqueda
-Haversine sobre las 12 estaciones (`buscar_estaciones_cercanas()`).
+CORRECCIÓN, Hallazgo 19 (v1 -> v2): la primera versión de este módulo
+recortaba el catálogo a sólo las 12 estaciones de Costa Rica y eliminaba
+la geocodificación -- una simplificación que Pablo pidió deshacer
+explícitamente ("no me hardcodes ninguna estación ni me limites a costa
+rica... necesito la misma cosa [que DDP-lite/Skyplus]"). Esta versión es
+un port fiel y completo: el catálogo completo (5,276 estaciones, 20
+países) y `obtener_estaciones_cercanas()` con toda su lógica real
+(geocodificación inversa + bounding boxes de los 20 países + expansión a
+países vecinos + fallback global), más `geocode_name()` para buscar por
+nombre -- nada acotado a Costa Rica. La única simplificación real que
+queda, y es deliberada: no se usa `ladybug.epw.EPW` para parsear el EPW
+descargado (DDP-lite/Skyplus sí la usan) -- se usa el parser propio y
+liviano `cargar_epw_real()` de este mismo módulo, ya construido y
+validado en Hallazgo 18, que lee exactamente los mismos campos.
 
 **Discrepancia real encontrada al portar esto (no ignorada):** el catálogo
 trae Finca Favorita en (9.8833, -83.9167), pero el EPW real que Pablo
@@ -42,19 +49,23 @@ sale del encabezado del EPW ya descargado, nunca del catálogo -- por eso
 esto no afecta ningún resultado ya calculado, pero es una razón más para
 no confiar en el catálogo como fuente de verdad de la posición.
 
-Lo que SÍ se adopta aquí, ya en este módulo: (a) un parser EPW genérico y
-liviano (sin depender de ladybug, que DDP-lite sí usa pero que no es
-dependencia de ECO-Wind todavía), reutilizable para cualquier .epw nuevo,
-San José incluido si algún día se reemplaza el export manual de GWA por
-su propio EPW real; (b) el mismo concepto de "EPW personalizado" vía
-uploader en la app (ver app/app.py); (c) desde Hallazgo 19, el mapa +
-búsqueda de estaciones + descarga bajo demanda, mismo patrón que DDP-lite.
+BLOQUEO DE RED, mismo patrón de todo el proyecto (Hallazgo 2): tanto
+`nominatim.openstreetmap.org` como `photon.komoot.io` están bloqueados en
+este sandbox (confirmado con curl, `connect_rejected`) -- la
+geocodificación (buscar por nombre, o inferir país por reversa) no se
+pudo probar en vivo acá. Lo que SÍ se probó sin red: el fallback por
+bounding box (`_infer_country_from_bbox()`, pura aritmética, no necesita
+geocodificación para funcionar) y la búsqueda Haversine sobre el catálogo
+completo -- por eso la búsqueda por coordenada funciona igual de bien
+aunque la geocodificación esté caída (es justamente el fallback para eso).
 """
 import csv
 import json
 import math
 import os
+import random
 import tempfile
+import time
 import zipfile
 
 import numpy as np
@@ -63,7 +74,13 @@ import pandas as pd
 _AQUI = os.path.dirname(os.path.abspath(__file__))
 _BASE = os.path.dirname(_AQUI)
 CARPETA_EPW_REAL = os.path.join(_BASE, "datos_clima", "epw_real")
-RUTA_CATALOGO_CR = os.path.join(_BASE, "datos_clima", "epw_catalog_cr.json")
+RUTA_CATALOGO_GLOBAL = os.path.join(_BASE, "datos_clima", "epw_catalog_global.json")
+
+try:
+    from geopy.geocoders import Nominatim, Photon
+    GEOPY_OK = True
+except ImportError:
+    GEOPY_OK = False
 
 
 def cargar_epw_real(ruta_epw, year=2023):
@@ -137,7 +154,7 @@ def rosa_frecuencia_desde_epw(df_clima, n_sectores=12, vel_min_calma=0.3):
 
 def _haversine_km(lat1, lon1, lat2, lon2):
     """Distancia geodésica en km entre dos puntos -- misma fórmula que
-    weather_utils.py::_haversine() de DDP-lite."""
+    weather_utils.py::_haversine() de DDP-lite/Skyplus."""
     R = 6371.0
     p1, p2 = math.radians(lat1), math.radians(lat2)
     dlat = math.radians(lat2 - lat1)
@@ -146,37 +163,232 @@ def _haversine_km(lat1, lon1, lat2, lon2):
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
-def cargar_catalogo_cr(ruta=RUTA_CATALOGO_CR):
-    """Catálogo de estaciones EPW de Costa Rica (12 entradas, ver docstring
-    del módulo -- extraído de epw_catalog_global.json de DDP-lite)."""
+def cargar_catalogo_global(ruta=RUTA_CATALOGO_GLOBAL):
+    """Catálogo completo: 5,276 estaciones, 20 países (USA/CAN/MEX + 17
+    LATAM) -- idéntico (`diff` sin diferencias) al de DDP-lite y Skyplus."""
     with open(ruta, encoding="utf-8") as f:
         return json.load(f)
 
 
-def buscar_estaciones_cercanas(lat, lon, top_n=6, ruta_catalogo=RUTA_CATALOGO_CR):
-    """
-    Estaciones del catálogo de Costa Rica más cercanas a (lat, lon), por
-    distancia Haversine -- versión recortada de
-    weather_utils.py::obtener_estaciones_cercanas() de DDP-lite: sin
-    geocodificación inversa ni fallback de países vecinos, porque ECO-Wind
-    ya está acotado a Costa Rica (no hace falta adivinar el país).
+# ── Mapeo país -> código ISO del catálogo (idéntico a weather_utils.py) ────
 
-    Devuelve (cercanas, sin_coordenada): la lista ordenada por distancia
-    (sólo estaciones con lat/lon conocidos en el catálogo -- algunas no
-    los traen, ver docstring del módulo) y la lista aparte de estaciones
-    del catálogo sin coordenada (igual utilizables por nombre, pero no se
-    pueden ubicar en el mapa ni ordenar por distancia).
-    """
-    catalogo = cargar_catalogo_cr(ruta_catalogo)
-    con_coord = [s for s in catalogo if s.get("lat") is not None and s.get("lon") is not None]
-    sin_coord = [s for s in catalogo if s.get("lat") is None or s.get("lon") is None]
+_COUNTRY_MAP = {
+    "united states": "USA", "united states of america": "USA", "usa": "USA", "us": "USA",
+    "mexico": "MEX", "méxico": "MEX",
+    "canada": "CAN", "canadá": "CAN",
+    "guatemala": "GTM",
+    "honduras": "HND",
+    "nicaragua": "NIC",
+    "el salvador": "SLV",
+    "costa rica": "CRI",
+    "panama": "PAN", "panamá": "PAN",
+    "dominican republic": "DOM", "república dominicana": "DOM", "republica dominicana": "DOM",
+    "colombia": "COL",
+    "venezuela": "VEN",
+    "ecuador": "ECU",
+    "peru": "PER", "perú": "PER",
+    "bolivia": "BOL",
+    "brazil": "BRA", "brasil": "BRA",
+    "chile": "CHL",
+    "argentina": "ARG",
+    "paraguay": "PRY",
+    "uruguay": "URY",
+}
 
-    cercanas = []
-    for s in con_coord:
-        d = _haversine_km(lat, lon, s["lat"], s["lon"])
-        cercanas.append({**s, "distancia_km": round(d, 1)})
-    cercanas.sort(key=lambda x: x["distancia_km"])
-    return cercanas[:top_n], sin_coord
+
+def _country_to_code(country_name):
+    if not country_name:
+        return None
+    key = country_name.lower().strip()
+    if key in _COUNTRY_MAP:
+        return _COUNTRY_MAP[key]
+    for k, v in _COUNTRY_MAP.items():
+        if k in key or key in k:
+            return v
+    return None
+
+
+def get_location_info(lat, lon):
+    """
+    Geocodificación inversa robusta (Photon, luego Nominatim) -- idéntica a
+    weather_utils.py::get_location_info(). Retorna (country_name, city_name)
+    en inglés, o cae al fallback por bounding box si la red falla (ambos
+    hosts de geocodificación están bloqueados en este sandbox, Hallazgo 2).
+    """
+    user_agents = [
+        f"eco_wind_v1_{random.randint(100, 999)}",
+        "Mozilla/5.0",
+        "ECO Wind/1.0 ECO Consultor",
+    ]
+    if GEOPY_OK:
+        try:
+            geo = Photon(user_agent=random.choice(user_agents))
+            loc = geo.reverse(f"{lat}, {lon}", timeout=10)
+            if loc and "properties" in loc.raw:
+                props = loc.raw["properties"]
+                country = props.get("country")
+                city = props.get("city") or props.get("name")
+                if country:
+                    return country, city
+        except Exception:
+            pass
+        try:
+            time.sleep(0.5)
+            geo = Nominatim(user_agent=random.choice(user_agents))
+            loc = geo.reverse(f"{lat}, {lon}", language="en", timeout=10)
+            if loc and "address" in loc.raw:
+                addr = loc.raw["address"]
+                country = addr.get("country")
+                city = (addr.get("city") or addr.get("town")
+                        or addr.get("village") or addr.get("municipality"))
+                if country:
+                    return country, city
+        except Exception:
+            pass
+    country = _infer_country_from_bbox(lat, lon)
+    return country, None
+
+
+def _infer_country_from_bbox(lat, lon):
+    """Fallback rápido, sin red -- bounding boxes de los 20 países del
+    catálogo, idéntico a weather_utils.py::_infer_country_from_bbox()."""
+    boxes = [
+        ("United States", 24.4, 49.4, -125.0, -66.9),
+        ("United States", 18.9, 28.5, -168.0, -154.8),
+        ("United States", 51.2, 71.5, -179.9, -129.9),
+        ("Mexico", 14.5, 32.7, -117.1, -86.7),
+        ("Canada", 41.7, 83.1, -141.0, -52.6),
+        ("Guatemala", 13.7, 17.8, -92.2, -88.2),
+        ("Honduras", 13.0, 16.5, -89.4, -83.1),
+        ("Nicaragua", 10.7, 15.0, -87.7, -83.1),
+        ("El Salvador", 13.1, 14.5, -90.1, -87.7),
+        ("Costa Rica", 8.0, 11.2, -85.9, -82.6),
+        ("Panama", 7.2, 9.7, -83.0, -77.2),
+        ("Dominican Republic", 17.5, 20.0, -72.1, -68.3),
+        ("Colombia", -4.2, 13.4, -79.0, -66.9),
+        ("Venezuela", 0.6, 12.2, -73.4, -59.8),
+        ("Ecuador", -5.0, 1.5, -81.1, -75.2),
+        ("Peru", -18.4, -0.1, -81.4, -68.6),
+        ("Bolivia", -22.9, -9.7, -69.6, -57.5),
+        ("Brazil", -33.8, 5.3, -73.9, -34.8),
+        ("Chile", -55.9, -17.5, -75.6, -66.4),
+        ("Argentina", -55.1, -21.8, -73.6, -53.6),
+        ("Paraguay", -27.6, -19.3, -62.7, -54.3),
+        ("Uruguay", -34.9, -30.1, -58.4, -53.1),
+    ]
+    for country, lat_min, lat_max, lon_min, lon_max in boxes:
+        if lat_min <= lat <= lat_max and lon_min <= lon <= lon_max:
+            return country
+    return None
+
+
+def _search_in_codes(lat, lon, catalog, codes, limit):
+    candidates = []
+    for code in codes:
+        for s in catalog.get(code, []):
+            if s.get("lat") is None or s.get("lon") is None:
+                continue
+            dist = _haversine_km(lat, lon, s["lat"], s["lon"])
+            candidates.append({
+                "name": s.get("name", "Unknown"), "state": s.get("state", ""),
+                "country": code, "distancia_km": round(dist, 2), "url": s.get("url", ""),
+                "lat": s["lat"], "lon": s["lon"],
+            })
+    candidates.sort(key=lambda x: x["distancia_km"])
+    return candidates[:limit]
+
+
+def _merge_dedupe(a, b):
+    seen = {x["url"] for x in a}
+    return a + [x for x in b if x["url"] not in seen]
+
+
+def _nearest_country_from_catalog(lat, lon, catalog):
+    best_code, best_dist = None, float("inf")
+    for code, stations in catalog.items():
+        for s in stations:
+            if s.get("lat") is None:
+                continue
+            d = _haversine_km(lat, lon, s["lat"], s["lon"])
+            if d < best_dist:
+                best_dist, best_code = d, code
+            if best_dist < 50:
+                break
+    return best_code
+
+
+_NEIGHBOR_CODES = {
+    "MEX": ["USA", "GTM"], "USA": ["CAN", "MEX"], "CAN": ["USA"],
+    "GTM": ["MEX", "HND", "SLV"], "HND": ["GTM", "NIC", "SLV"], "NIC": ["HND", "CRI"],
+    "SLV": ["GTM", "HND"], "CRI": ["NIC", "PAN"], "PAN": ["CRI", "COL"], "DOM": ["PAN"],
+    "COL": ["PAN", "VEN", "ECU", "PER"], "VEN": ["COL", "BRA"], "ECU": ["COL", "PER"],
+    "PER": ["ECU", "COL", "BOL", "CHL", "BRA"], "BOL": ["PER", "CHL", "ARG", "BRA", "PRY"],
+    "BRA": ["COL", "VEN", "PER", "BOL", "PRY", "ARG", "URY"], "CHL": ["PER", "BOL", "ARG"],
+    "ARG": ["CHL", "BOL", "PRY", "BRA", "URY"], "PRY": ["BOL", "BRA", "ARG"],
+    "URY": ["BRA", "ARG"],
+}
+
+
+def obtener_estaciones_cercanas(lat, lon, top_n=6, ruta_catalogo=RUTA_CATALOGO_GLOBAL):
+    """
+    Búsqueda de estaciones EPW más cercanas a (lat, lon) EN CUALQUIER PARTE
+    de los 20 países del catálogo -- port fiel de
+    weather_utils.py::obtener_estaciones_cercanas() de DDP-lite/Skyplus, sin
+    ninguna restricción geográfica propia de ECO-Wind (Hallazgo 19, v2).
+
+    Estrategia idéntica al original: (1) inferir país por geocodificación
+    inversa, con fallback a bounding box si la red falla; (2) buscar en ese
+    país; (3) si hay pocas (<3), ampliar a países vecinos; (4) si aún hay
+    pocas (<2), buscar en TODOS los países del catálogo -- así cualquier
+    coordenada del mundo devuelve algo, aunque esté lejos de los 20 países
+    cubiertos (mejor una respuesta lejana y honesta que ninguna).
+
+    Devuelve un DataFrame ordenado por distancia (puede estar vacío).
+    """
+    catalog = cargar_catalogo_global(ruta_catalogo)
+    if not catalog:
+        return pd.DataFrame()
+
+    country_name, _ = get_location_info(lat, lon)
+    country_code = _country_to_code(country_name) if country_name else None
+    if not country_code:
+        country_code = _nearest_country_from_catalog(lat, lon, catalog)
+
+    results = _search_in_codes(lat, lon, catalog, [country_code] if country_code else [], top_n * 2)
+
+    if len(results) < 3:
+        neighbors = _NEIGHBOR_CODES.get(country_code, [])
+        extra = _search_in_codes(lat, lon, catalog, neighbors, top_n * 2)
+        results = _merge_dedupe(results, extra)
+
+    if len(results) < 2:
+        all_codes = [c for c in catalog.keys() if c != country_code]
+        extra = _search_in_codes(lat, lon, catalog, all_codes, top_n)
+        results = _merge_dedupe(results, extra)
+
+    if not results:
+        return pd.DataFrame()
+
+    results.sort(key=lambda x: x["distancia_km"])
+    return pd.DataFrame(results[:top_n])
+
+
+def geocode_name(name):
+    """Geocodifica un nombre de ciudad/país a (lat, lon) -- idéntico a
+    weather_utils.py::geocode_name() (Photon, luego Nominatim)."""
+    if not GEOPY_OK:
+        return None, None
+    ua = f"eco_wind_search_{random.randint(100, 999)}"
+    for GeoClass in (Photon, Nominatim):
+        try:
+            geo = GeoClass(user_agent=ua)
+            loc = geo.geocode(name, timeout=10)
+            if loc:
+                return loc.latitude, loc.longitude
+            time.sleep(0.5)
+        except Exception:
+            pass
+    return None, None
 
 
 def descargar_y_extraer_epw(url_zip, carpeta_destino=None):

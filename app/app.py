@@ -55,7 +55,7 @@ from engine.flower_turbines_curves import CURVE_COEFFICIENTS
 from engine.gwa_raster import generar_clima_sitio_nuevo, RUTA_RASTER_CR_DEFAULT
 from engine.epw_real import (
     SITIOS_EPW_REAL, cargar_epw_real, heatmap_json_desde_epw, rosa_frecuencia_desde_epw,
-    buscar_estaciones_cercanas, descargar_y_extraer_epw,
+    obtener_estaciones_cercanas, geocode_name, descargar_y_extraer_epw,
 )
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -248,15 +248,49 @@ with col_config:
     elif modo_sitio == "mapa":
         lat, lon, elevacion_m = None, None, None
         st.caption(
-            "Patrón adoptado de DDP-lite (Sogo2012/DDP-lite, Hallazgo 19): clic en el mapa, "
-            "elegí la estación real más cercana y se descarga su EPW de climate.onebuilding.org "
-            "-- sin aproximación. La descarga necesita internet real: no funciona en este sandbox "
-            "de desarrollo (Hallazgo 2/18), sí en Docker local o Cloud Run."
+            "Homologado con DDP-lite y Skyplus (Sogo2012/DDP-lite, Sogo2012/Skyplus, Hallazgo 19) "
+            "-- catálogo completo de climate.onebuilding.org, 5,276 estaciones en 20 países de "
+            "América, sin acotar a Costa Rica. Buscá por nombre, por coordenada, o clic en el mapa; "
+            "la descarga necesita internet real: no funciona en este sandbox de desarrollo "
+            "(Hallazgo 2), sí en Docker local o Cloud Run."
         )
         if "mapa_lat" not in st.session_state:
             st.session_state.mapa_lat, st.session_state.mapa_lon = 9.9, -84.0
-            st.session_state.mapa_cercanas, st.session_state.mapa_sin_coord = None, []
+            st.session_state.mapa_cercanas = None
             st.session_state.mapa_epw_seleccionado, st.session_state.mapa_estacion_nombre = None, None
+
+        def _buscar_y_guardar(_lat, _lon):
+            with st.spinner("Buscando estaciones cercanas..."):
+                st.session_state.mapa_lat, st.session_state.mapa_lon = _lat, _lon
+                df = obtener_estaciones_cercanas(_lat, _lon)
+                st.session_state.mapa_cercanas = df
+                if df is None or df.empty:
+                    st.error("No se encontraron estaciones para esta ubicación.")
+
+        with st.expander("Buscar por nombre", expanded=False):
+            _nombre_busqueda = st.text_input(
+                "Ciudad o país", placeholder="Ej: Alajuela, Costa Rica",
+                label_visibility="collapsed", key="mapa_busqueda_nombre",
+            )
+            if st.button("Buscar por nombre", use_container_width=True, key="btn_mapa_buscar_nombre"):
+                if _nombre_busqueda:
+                    _lat_g, _lon_g = geocode_name(_nombre_busqueda)
+                    if _lat_g is not None:
+                        _buscar_y_guardar(_lat_g, _lon_g)
+                        st.rerun()
+                    else:
+                        st.error(
+                            "No se pudo geocodificar ese nombre -- necesita internet real "
+                            "(Nominatim/Photon están bloqueados en este sandbox, Hallazgo 2)."
+                        )
+            st.divider()
+            _lat_manual = st.number_input("Latitud", value=st.session_state.mapa_lat, format="%.4f",
+                                           key="mapa_lat_input")
+            _lon_manual = st.number_input("Longitud", value=st.session_state.mapa_lon, format="%.4f",
+                                           key="mapa_lon_input")
+            if st.button("Buscar por coordenada", use_container_width=True, key="btn_mapa_buscar_coord"):
+                _buscar_y_guardar(_lat_manual, _lon_manual)
+                st.rerun()
 
         _m = folium.Map(location=[st.session_state.mapa_lat, st.session_state.mapa_lon],
                          zoom_start=8, tiles="CartoDB positron")
@@ -264,47 +298,41 @@ with col_config:
             [st.session_state.mapa_lat, st.session_state.mapa_lon], tooltip="Ubicación del proyecto",
             icon=folium.Icon(color="red", icon="crosshairs"),
         ).add_to(_m)
-        for _s in (st.session_state.mapa_cercanas or []):
-            folium.Marker(
-                [_s["lat"], _s["lon"]], tooltip=f"{_s['name']} ({_s['distancia_km']} km)",
-                icon=folium.Icon(color="blue", icon="cloud"),
-            ).add_to(_m)
-        _salida_mapa = st_folium(_m, height=340, use_container_width=True, key="mapa_estaciones_cr")
+        _df_cerc = st.session_state.mapa_cercanas
+        if _df_cerc is not None and not _df_cerc.empty:
+            for _, _row in _df_cerc.iterrows():
+                if pd.notna(_row.get("lat")) and pd.notna(_row.get("lon")):
+                    folium.Marker(
+                        [_row["lat"], _row["lon"]],
+                        tooltip=f"{_row['name']} ({_row['distancia_km']} km)",
+                        icon=folium.Icon(color="blue", icon="cloud"),
+                    ).add_to(_m)
+        _salida_mapa = st_folium(_m, height=340, use_container_width=True, key="mapa_estaciones")
 
         if _salida_mapa and _salida_mapa.get("last_clicked"):
             _c_lat, _c_lon = _salida_mapa["last_clicked"]["lat"], _salida_mapa["last_clicked"]["lng"]
             if (round(_c_lat, 4), round(_c_lon, 4)) != (
                     round(st.session_state.mapa_lat, 4), round(st.session_state.mapa_lon, 4)):
-                st.session_state.mapa_lat, st.session_state.mapa_lon = _c_lat, _c_lon
-                st.session_state.mapa_cercanas, st.session_state.mapa_sin_coord = \
-                    buscar_estaciones_cercanas(_c_lat, _c_lon)
+                _buscar_y_guardar(_c_lat, _c_lon)
                 st.rerun()
 
-        def _boton_usar_estacion(_s, _key):
-            _c1, _c2 = st.columns([3, 1])
-            _c1.write(f"**{_s['name']}** ({_s['state']}) -- {_s.get('distancia_km', '?')} km")
-            if _c2.button("Usar", key=_key):
-                with st.spinner(f"Descargando {_s['name']}..."):
-                    try:
-                        _ruta = descargar_y_extraer_epw(_s["url"])
-                        st.session_state.mapa_epw_seleccionado = _ruta
-                        st.session_state.mapa_estacion_nombre = _s["name"]
-                        st.rerun()
-                    except Exception as _e:
-                        st.error(
-                            f"No se pudo descargar {_s['name']}: {_e} -- necesita internet real "
-                            "(no funciona en este sandbox de desarrollo, Hallazgo 2/18)."
-                        )
-
-        if st.session_state.mapa_cercanas:
-            st.caption("Estaciones más cercanas (clic en el mapa para buscar de nuevo):")
-            for _i, _s in enumerate(st.session_state.mapa_cercanas):
-                _boton_usar_estacion(_s, f"btn_mapa_est_{_i}")
-            if st.session_state.mapa_sin_coord:
-                with st.expander(f"{len(st.session_state.mapa_sin_coord)} estaciones más, "
-                                  f"sin coordenada conocida en el catálogo"):
-                    for _i, _s in enumerate(st.session_state.mapa_sin_coord):
-                        _boton_usar_estacion(_s, f"btn_mapa_sc_{_i}")
+        if _df_cerc is not None and not _df_cerc.empty:
+            st.caption("Estaciones más cercanas (clic en el mapa, o buscá arriba, para actualizar):")
+            for _i, _row in _df_cerc.iterrows():
+                _c1, _c2 = st.columns([3, 1])
+                _c1.write(f"**{_row['name']}** ({_row.get('state', '')}) -- {_row['distancia_km']} km")
+                if _c2.button("Usar", key=f"btn_mapa_est_{_i}"):
+                    with st.spinner(f"Descargando {_row['name']}..."):
+                        try:
+                            _ruta = descargar_y_extraer_epw(_row["url"])
+                            st.session_state.mapa_epw_seleccionado = _ruta
+                            st.session_state.mapa_estacion_nombre = _row["name"]
+                            st.rerun()
+                        except Exception as _e:
+                            st.error(
+                                f"No se pudo descargar {_row['name']}: {_e} -- necesita internet "
+                                "real (no funciona en este sandbox de desarrollo, Hallazgo 2)."
+                            )
 
         if st.session_state.mapa_epw_seleccionado:
             st.success(f"Estación activa: {st.session_state.mapa_estacion_nombre}")
