@@ -70,6 +70,28 @@ def excedencia_json_desde_epw(df_clima, n_puntos=50):
     return [{"perc": float(p), "val": float(v)} for p, v in zip(percs, vals)]
 
 
+def excedencia_json_desde_epw_residual(df_clima, hm_json, n_puntos=50):
+    """
+    Igual que excedencia_json_desde_epw(), pero construida sobre los
+    RESIDUOS (v(t) dividido entre el factor de heatmap de su propio
+    mes×hora) en vez de la serie cruda -- arregla (parcialmente, ver
+    Hallazgo 21 continuación) el artefacto encontrado ahí: cuando la curva
+    se arma de la serie cruda, ya contiene el patrón diurno/estacional
+    completo, y generar_clima_gwa() lo vuelve a inyectar al multiplicar
+    por el heatmap -- duplica esa variación y por eso E[v^3]/media^3 salía
+    ~2x inflado en Guanacaste. Esta versión divide el patrón ANTES de
+    construir la curva, para que generar_clima_gwa() lo aplique una sola
+    vez. `hm_json` debe ser EXACTAMENTE el mismo heatmap que después se le
+    pase a generar_clima_gwa() junto con esta curva -- si no coinciden, la
+    corrección no cierra matemáticamente.
+    """
+    idx_lookup = {(r["month"], r["hour"]): r["value"] for r in hm_json}
+    factor = np.array([idx_lookup[(m, h)] for m, h in zip(df_clima.index.month, df_clima.index.hour)])
+    ws_residual = df_clima["WS10M"].values / factor
+    df_residual = pd.DataFrame({"WS10M": ws_residual}, index=df_clima.index)
+    return excedencia_json_desde_epw(df_residual, n_puntos=n_puntos)
+
+
 def _cargar_forma_san_jose():
     sitio = SITIOS_DISPONIBLES["san_jose_juan_santamaria"]
     ws_json, hm_json = cargar_gwa_json(os.path.join(_BASE, sitio["carpeta_gwa"]))
@@ -77,21 +99,30 @@ def _cargar_forma_san_jose():
                 elevacion_m=sitio["elevacion_m"], ws_json=ws_json, hm_json=hm_json)
 
 
-def _cargar_forma_epw(clave):
+def _cargar_forma_epw(clave, usar_residuo=False):
     sitio = SITIOS_EPW_REAL[clave]
     df_clima, meta = cargar_epw_real(sitio["ruta_epw"])
+    hm_json = heatmap_json_desde_epw(df_clima)
+    ws_json = (excedencia_json_desde_epw_residual(df_clima, hm_json) if usar_residuo
+               else excedencia_json_desde_epw(df_clima))
     return dict(nombre=sitio["nombre"], lat=meta["lat"], lon=meta["lon"],
-                elevacion_m=meta["elevacion_m"], ws_json=excedencia_json_desde_epw(df_clima),
-                hm_json=heatmap_json_desde_epw(df_clima), df_real=df_clima)
+                elevacion_m=meta["elevacion_m"], ws_json=ws_json, hm_json=hm_json, df_real=df_clima)
 
 
-def cargar_formas_conocidas():
+def cargar_formas_conocidas(usar_residuo=False):
     """Las 4 formas reales disponibles hoy -- carga todo en memoria (liviano,
     4 sitios). Devuelve {clave: {nombre, lat, lon, elevacion_m, ws_json,
-    hm_json, [df_real si viene de EPW]}}."""
+    hm_json, [df_real si viene de EPW]}}.
+
+    usar_residuo: si True, las 3 formas EPW-derivadas usan
+    excedencia_json_desde_epw_residual() (Hallazgo 21 continuación) en vez
+    de la curva cruda -- default False para no cambiar por sorpresa los
+    números ya documentados en Hallazgo 21; compárense ambas explícitamente.
+    San José no se ve afectado (su forma es nativa de GWA, no EPW-derivada).
+    """
     formas = {"san_jose": _cargar_forma_san_jose()}
     for clave in SITIOS_EPW_REAL:
-        formas[clave] = _cargar_forma_epw(clave)
+        formas[clave] = _cargar_forma_epw(clave, usar_residuo=usar_residuo)
     return formas
 
 
@@ -131,7 +162,7 @@ def generar_clima_prestado(lat, lon, media_objetivo, año=2023, seed=42, formas=
     return df_clima, clave_donante, dist_km
 
 
-def validar_leave_one_out(modelo="medium_tulip", N=3, altura_buje=3.0):
+def validar_leave_one_out(modelo="medium_tulip", N=3, altura_buje=3.0, usar_residuo=False):
     """
     Para cada uno de los 4 sitios reales, por turno: tapar su propia forma,
     predecir su producción con su propia media real + la forma del vecino
@@ -148,8 +179,12 @@ def validar_leave_one_out(modelo="medium_tulip", N=3, altura_buje=3.0):
     vecino-más-cercano) con el pipeline ACTUAL, ya corregido -- los
     porcentajes de error salen distintos a los citados en el pedido, pero
     es la comparación correcta, no un error de cálculo.
+
+    usar_residuo: ver cargar_formas_conocidas() -- corrección de Hallazgo 21
+    (continuación) para el artefacto de doble conteo de varianza. False
+    reproduce exactamente los números ya documentados en Hallazgo 21.
     """
-    formas = cargar_formas_conocidas()
+    formas = cargar_formas_conocidas(usar_residuo=usar_residuo)
     filas = []
     for clave, sitio in formas.items():
         # "Verdad de terreno": producción real de este sitio con su propia forma real.
@@ -215,3 +250,10 @@ if __name__ == "__main__":
     print("=" * 100)
     resultado = validar_leave_one_out()
     print(resultado.to_string(index=False))
+
+    print()
+    print("=" * 100)
+    print("Misma validación CON la corrección de curva por residuos (Hallazgo 22, usar_residuo=True)")
+    print("=" * 100)
+    resultado_residuo = validar_leave_one_out(usar_residuo=True)
+    print(resultado_residuo.to_string(index=False))

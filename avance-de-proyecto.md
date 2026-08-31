@@ -1,7 +1,7 @@
 # ECO | Wind — Avance de Proyecto
 
 **Documento de referencia (alcance):** [`plan-tecnico-eco-wind.md`](./plan-tecnico-eco-wind.md)
-**Última actualización:** 31 de agosto, 2026 (Hallazgo 19 v3 — consolidado en UN SOLO flujo de búsqueda de clima, igual que DDP-lite/Skyplus: sin selector de modos, estación real siempre, aproximación como fallback automático sólo cuando hace falta; Hallazgo 20 — corrección real en el perfil de viento por altura, z0 de referencia distinto de z0 destino; Hallazgo 21 — vecino más cercano validado por leave-one-out, con un artefacto real de `generar_clima_gwa()` encontrado en el camino; quantile mapping probado (mecánica) y acceso a ERA5/CDS investigado)
+**Última actualización:** 31 de agosto, 2026 (Hallazgo 19 v3 — consolidado en UN SOLO flujo de búsqueda de clima, igual que DDP-lite/Skyplus: sin selector de modos, estación real siempre, aproximación como fallback automático sólo cuando hace falta; Hallazgo 20 — corrección real en el perfil de viento por altura, z0 de referencia distinto de z0 destino; Hallazgo 21 — vecino más cercano validado por leave-one-out, con un artefacto real de `generar_clima_gwa()` encontrado en el camino; quantile mapping probado (mecánica) y acceso a ERA5/CDS investigado; Hallazgo 22 — mitigación parcial de ese artefacto vía curva de excedencia por residuos: Liberia ya muestra una mejora clara y real con el vecino más cercano)
 **Propósito:** comparar el alcance planeado contra el avance real, y dejar constancia de los
 hallazgos que no estaban previstos en el plan original. Se actualiza en cada avance
 significativo — no es una foto única.
@@ -1390,6 +1390,57 @@ Ninguna de las dos cosas se implementó en este hallazgo — quedan como decisi�
 
 ---
 
+### Hallazgo 22 — Mitigación parcial del artefacto de Hallazgo 21: curva de excedencia por residuos, y el primer caso claro donde el vecino más cercano gana
+
+Continuación directa de Hallazgo 21: de las 3 direcciones propuestas para el artefacto de doble
+conteo de varianza, se implementó y probó la (a) — construir la curva de excedencia desde
+RESIDUOS (`v(t)` dividido entre el factor de heatmap de su propio mes×hora) en vez de la serie
+cruda, para que `generar_clima_gwa()` no vuelva a inyectar el patrón diurno/estacional una segunda
+vez al multiplicar por el heatmap. Nueva función `excedencia_json_desde_epw_residual()` en
+`engine/formas_regionales.py`; `cargar_formas_conocidas()` y `validar_leave_one_out()` ahora
+aceptan `usar_residuo=True/False` (default `False`, para que los números ya documentados en
+Hallazgo 21 sigan siendo reproducibles exactos sin este cambio).
+
+**No es un arreglo completo, pero es una mejora real y grande.** Repitiendo la prueba de
+self-reconstrucción de Hallazgo 21 (reconstruir la forma de un sitio desde sí mismo, sin vecinos):
+
+| Sitio | Inflación de `E[v³]/media³` SIN residuo (Hallazgo 21) | Inflación CON residuo |
+|---|---|---|
+| Nicoya | +106% | +14% |
+| Liberia | +105% | +30% |
+| Finca Favorita | +14% | +7% |
+
+Queda inflación residual (7-30%, no 0%) porque dividir por un promedio de 288 casillas mes×hora es
+una manera gruesa de quitar la estacionalidad -- probablemente la VARIANZA (no sólo la media) del
+viento también cambia por mes/hora, y una corrección puramente de razón de medias no lo captura.
+No se investigó más a fondo (fuera del alcance de esto).
+
+**Con la corrección, se repitió la validación leave-one-out completa:**
+
+| Sitio evaluado | Error nuevo SIN residuo (Hallazgo 21) | Error nuevo CON residuo | Error viejo (San José) |
+|---|---|---|---|
+| San José (dona Nicoya) | +280.9% | **+105.7%** | — |
+| Nicoya (dona Liberia) | +134.2% | **+47.6%** | -41.5% |
+| Liberia (dona Nicoya) | +114.7% | **+15.9%** | -43.7% |
+| Finca Favorita (dona San José) | +19.2% | +19.2% (sin cambio -- el donante es San José, forma nativa de GWA, no EPW-derivada) | +19.2% |
+
+Lectura honesta, sin forzarla: **Liberia ya tiene un caso claro y real donde el vecino más cercano
+gana** -- +15.9% de error nuevo contra -43.7% del viejo, una mejora de casi 3x en magnitud. Es la
+primera confirmación limpia (no sólo en la forma real, como en Hallazgo 21, sino en la validación
+completa) de que prestar de la misma zona climática ayuda. Nicoya (donante Liberia) mejoró mucho
+en términos absolutos (+134%→+48%) pero queda en el mismo orden de magnitud que el error viejo
+(-41.5%) -- ya no es claramente peor, pero tampoco es todavía una victoria clara. San José, sin un
+vecino real de su propia zona entre los otros 3, se sigue prediciendo mal (+105.7%) -- esperable,
+no es una falla del método.
+
+**Conclusión:** vale la pena seguir con esta línea (Alternativa 4) para sitios que sí tengan un
+vecino real de su misma zona -- Liberia ya lo demuestra. No se declara resuelto ni se conecta a
+`app.py` todavía: falta terminar de cerrar la inflación residual (7-30%) y, sobre todo, tener más
+de 4 sitios reales para que la validación leave-one-out deje de depender de un solo par
+Nicoya-Liberia. `usar_residuo=True` queda disponible en el código para seguir iterando.
+
+---
+
 ## 6. Pendientes activos / bloqueos
 
 - [x] ~~Conseguir A/k reales del Global Wind Atlas~~ — resuelto, y con datos más ricos de lo
@@ -1561,14 +1612,12 @@ Ninguna de las dos cosas se implementó en este hallazgo — quedan como decisi�
       Liberia difiere sólo 4.7% entre sí, vs. 44-51% contra San José), pero la validación como tal
       salió peor que prestar siempre San José (+114% a +281% de error) por un artefacto real de
       `generar_clima_gwa()` — no por el concepto en sí. Ver el siguiente pendiente.
-- [ ] **Nuevo, de Hallazgo 21:** `generar_clima_gwa()` infla `E[v³]/media³` (~2x en Nicoya/Liberia)
-      cuando reconstruye desde una curva de excedencia Y un heatmap derivados AMBOS de la misma
-      serie horaria de EPW (dibuja un percentil aleatorio independiente de la curva marginal Y
-      aparte multiplica por el heatmap mes×hora — reinyecta la variación diurna/estacional dos
-      veces). No pasa con la forma NATIVA de GWA (panel web), sólo con formas EPW-derivadas. Hace
-      falta resolver esto (ver 3 direcciones propuestas en Hallazgo 21, ninguna implementada)
-      antes de poder decidir si Alternativa 4 (vecino más cercano) reemplaza la aproximación
-      actual — la validación leave-one-out de Hallazgo 21 no es todavía un veredicto confiable.
+- [x] ~~Nuevo, de Hallazgo 21: `generar_clima_gwa()` infla `E[v³]/media³` (~2x en Nicoya/Liberia)~~
+      — mitigado (no resuelto del todo) con curva de excedencia por residuos (Hallazgo 22):
+      inflación baja de ~105% a 14-30%. Liberia ya muestra una mejora clara y real (+15.9% nuevo
+      vs -43.7% viejo). Sigue pendiente: cerrar el 7-30% de inflación residual, y conseguir más de
+      4 sitios reales antes de que la validación leave-one-out sea un veredicto sólido para
+      Alternativa 4 — sigue sin conectarse a `app.py`.
 - [ ] **Nuevo, de Hallazgo 21:** conseguir una serie horaria real de NASA POWER (de una corrida en
       Colab con internet, o que Pablo la provea) o acceso a ERA5 (registro CDS, gratuito, ver
       Hallazgo 21) para validar quantile mapping contra un sesgo real — hoy sólo está probada la
@@ -1617,7 +1666,8 @@ ECO-Wind/
 │   │                                     descarga de estaciones, 20 países, homologado con
 │   │                                     DDP-lite/Skyplus (Hallazgo 19)
 │   ├── formas_regionales.py          ← investigación, NO conectado a app.py: vecino más cercano +
-│   │                                     leave-one-out entre los 4 sitios reales (Hallazgo 21)
+│   │                                     leave-one-out entre los 4 sitios reales (Hallazgo 21) +
+│   │                                     curva de excedencia por residuos, usar_residuo=True (Hallazgo 22)
 │   ├── quantile_mapping.py           ← investigación, NO conectado a app.py: quantile mapping
 │   │                                     genérico + prueba de mecánica contra EPW real (Hallazgo 21)
 │   ├── dmst_model.py, rotor_combinado.py, polar_hibrido.py, naca0018_polar.py  ← Pista B aerodinámica
