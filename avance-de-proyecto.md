@@ -1,7 +1,7 @@
 # ECO | Wind — Avance de Proyecto
 
 **Documento de referencia (alcance):** [`plan-tecnico-eco-wind.md`](./plan-tecnico-eco-wind.md)
-**Última actualización:** 30 de agosto, 2026 (Hallazgo 7 — inducción conjunta entre niveles de pala)
+**Última actualización:** 30 de agosto, 2026 (Hallazgo 8 — Glauert implementado; vía aerodinámica agotada, sobre-predicción sigue abierta)
 **Propósito:** comparar el alcance planeado contra el avance real, y dejar constancia de los
 hallazgos que no estaban previstos en el plan original. Se actualiza en cada avance
 significativo — no es una foto única.
@@ -13,7 +13,7 @@ significativo — no es una foto única.
 | Fase / Pista | Estado |
 |---|---|
 | **Fase 1 — Pista A** (motor empírico) | 🟢 Sólida — mecánica y fuentes de datos climáticos (EPW + GWA) validadas con datos reales; z0/afinación fina quedó pendiente para más adelante (decisión del Director del Proyecto) |
-| **Fase 1 — Pista B** (motor físico DMST + CFD) | 🟡 Primer avance — combinación sustentación+arrastre implementada con la arquitectura real (dos niveles de pala, patente US9255567B2) y verificada (Betz + 4 modelos); combinarla bien no resuelve la sobre-predicción, que sigue siendo el problema abierto (Hallazgo 6) |
+| **Fase 1 — Pista B** (motor físico DMST + CFD) | 🟡 Vía aerodinámica agotada — arquitectura real de dos niveles, inducción conjunta y corrección de Glauert, todas implementadas y verificadas (Betz genuinamente resuelto en todo TSR); ninguna cierra la sobre-predicción, la hipótesis principal ahora son pérdidas electromecánicas sin explorar (Hallazgo 8) |
 | **Fase 2** (productización: Streamlit + Cloud Run) | ⚪ No iniciada |
 
 ---
@@ -381,10 +381,48 @@ real y consistente, pero ocurre en un régimen que en rigor necesitaría esa cor
 confirmarse con confianza fuera del rango TSR 0.75–1.25 (donde sí se mantiene Betz-compatible
 en todo momento; por encima, TSR≥1.5, vuelve a romper Betz por la misma causa).
 
-**Conclusión:** la inducción conjunta era la pieza que faltaba — no resuelve del todo la
-brecha (Medium y 3-M siguen sobre-prediciendo ~1.7x) pero la reduce de forma consistente y
-sin necesitar datos nuevos, y expone con evidencia concreta (no solo como límite teórico
-listado) que la corrección de Glauert es el siguiente paso necesario, no opcional.
+**Conclusión (de este paso — ver Hallazgo 8 para la corrección):** la inducción conjunta
+parecía ser la pieza que faltaba — no resolvía del todo la brecha pero la reducía de forma
+consistente, y exponía con evidencia concreta que la corrección de Glauert era el siguiente
+paso necesario.
+
+### Hallazgo 8 — Con Glauert implementado correctamente, la mejora de Hallazgo 7 resulta ser un artefacto: la sobre-predicción empeora, no mejora
+
+Se implementó la corrección empírica de Glauert a alta inducción (estándar, ver Hansen
+*Aerodynamics of Wind Turbines* o Manwell et al. *Wind Energy Explained*: para a≤0.2,
+CT=4a(1-a) igual que antes; para a>0.2, CT=4[0.04+0.6a], una recta continua en valor y
+pendiente con la parábola en a=0.2, que sigue creciendo con `a` sin techo — ya no hace falta
+el recorte artificial en a=0.49 que traía Hallazgo 7). Nota de precisión: una fuente externa
+sugirió `ac=1/3` como umbral — eso es un número distinto (el `a` del pico de Cp del disco
+ideal), no el umbral de Glauert; se implementó el valor estándar (ac=0.2), verificado con
+ida-y-vuelta a→CT→a exacta y continuidad de valor y pendiente en el punto de empalme antes de
+confiar en los resultados.
+
+**Con la inducción resuelta correctamente (no recortada), el resultado honesto revierte el de
+Hallazgo 7:**
+
+| Modelo | Discos independientes (H6) | Inducción conjunta, recortada (H7) | Inducción conjunta + Glauert (H8) |
+|---|---|---|---|
+| Small Tulip | 5.39x | 4.61x | 5.68x |
+| Medium Tulip | 2.01x | 1.72x | 2.12x |
+| 3-M Tulip | 2.04x | 1.75x | 2.15x |
+| Large Tulip | 1.23x | 1.05x | 1.29x |
+
+El "casi exacto" de Large Tulip (1.05x) de Hallazgo 7 era un artefacto del recorte artificial
+en a=0.49, que suprimía potencia de forma no física — no una mejora real. Con Glauert, la
+sobre-predicción es peor que con discos independientes en los 4 modelos.
+
+**Lo que sí es una mejora real y verificada:** Betz se respeta ahora en todo el rango de TSR
+probado (0.3 a 5.0), sin ninguna excepción — antes rompía en TSR=1.25 (H6) y de nuevo en
+TSR≥1.5 (H7, por el recorte). Ese problema queda genuinamente cerrado.
+
+**Conclusión:** la vía aerodinámica (combinar los dos niveles, resolver la inducción
+conjunta, corregir a alta inducción con Glauert) está agotada — cada pieza se implementó
+correctamente y se verificó, y ninguna cierra la brecha de sobre-predicción; de hecho, la
+versión más rigurosa (con Glauert) da el peor ajuste de todos los intentados. Esto aumenta la
+confianza en que la causa dominante no es aerodinámica sin resolver, sino la otra hipótesis
+de Hallazgo 6 que sigue sin explorar: pérdidas electromecánicas de generador y controlador de
+carga.
 
 ---
 
@@ -426,17 +464,18 @@ listado) que la corrección de Glauert es el siguiente paso necesario, no opcion
       implementado en `engine/rotor_combinado.py` y verificado (Betz + 4 modelos). Resultado
       honesto: combinar bien **no** resuelve la sobre-predicción — sigue siendo el problema
       abierto de la Pista B. Ver Hallazgo 6.
-- [ ] Investigar pérdidas electromecánicas (generador, rectificador/controlador de carga)
-      como posible causa de la sobre-predicción residual que la inducción conjunta no cerró
-      del todo (Medium/3-M siguen ~1.7x) — ningún cálculo de esta pista las incluye todavía
-      (Hallazgo 6/7).
-- [x] ~~Resolver una inducción conjunta entre los dos niveles de pala (arrastre +
-      sustentación) en vez de sumarlos como discos actuadores independientes~~ — implementado
-      y validado: mejora consistente en los 4 modelos (Large casi exacto, 1.05x) y corrige la
-      violación de Betz en TSR=1.25. Ver Hallazgo 7.
-- [ ] Agregar corrección de Glauert a alta inducción — la inducción conjunta (Hallazgo 7)
-      queda pegada en el techo numérico (a=0.49) en los 4 modelos reales al TSR objetivo,
-      señal concreta (no solo teórica) de que esta corrección ya hace falta, no es opcional.
+- [ ] **Investigar pérdidas electromecánicas (generador, rectificador/controlador de
+      carga)** — con la vía aerodinámica agotada (inducción conjunta + Glauert, Hallazgo 8,
+      sin cerrar la brecha, de hecho empeorándola), esta es ahora la hipótesis principal para
+      la sobre-predicción residual en los 4 modelos. Ningún cálculo de esta pista las incluye
+      todavía.
+- [x] ~~Resolver una inducción conjunta entre los dos niveles de pala~~ — implementado y
+      verificado (Hallazgo 7); la mejora que mostró resultó ser un artefacto del recorte
+      numérico, corregido en el siguiente punto (Hallazgo 8).
+- [x] ~~Agregar corrección de Glauert a alta inducción~~ — implementado y verificado
+      (ida-y-vuelta a→CT→a exacta, continuidad en el punto de empalme). Cierra genuinamente
+      el problema de Betz en todo el rango de TSR probado, pero revierte la mejora de
+      Hallazgo 7: la sobre-predicción empeora, no mejora. Ver Hallazgo 8.
 - [x] ~~Resincronizar `documentos_tecnicos/` con el contenido real desde Drive~~ — resuelto,
       90 de 91 archivos. El manual de SolArk (inversor de terceros) queda fuera de alcance por
       decisión del Director del Proyecto — no bloquea nada. Ver Hallazgo 6.

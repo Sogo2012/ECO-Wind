@@ -30,32 +30,62 @@ tolerancia +-25% que la propia patente declara), porque el termino de
 sustentacion sigue creciendo con TSR mientras el termino de arrastre se
 mantiene fijo (Cp=0.34 constante).
 
-ACTUALIZACION -- induccion conjunta implementada y validada
-(potencia_combinada_induccion_conjunta(), ver mas abajo): resuelve UN solo
-factor de induccion compartido entre ambos niveles. Resultado honesto:
-- Corrige la violacion de Betz encontrada en TSR=1.25 (Cp baja de ~0.61 a
-  ~0.54, dentro del limite).
-- Reduce la sobre-prediccion contra los 4 modelos reales de forma
-  consistente (Small 5.39x->4.61x, Medium 2.01x->1.72x, 3M 2.04x->1.75x,
-  Large 1.23x->1.05x -- este ultimo casi exacto).
-- PERO el factor de induccion queda pegado en el techo numerico (a=0.49)
-  en los 4 modelos reales al TSR objetivo -- señal de que el sistema esta
-  en la zona de induccion alta donde la teoria de momento simple (sin
-  correccion de Glauert) deja de ser confiable. La mejora es real, pero
-  ocurre en un regimen que en rigor necesitaria esa correccion para
-  confirmarse -- sigue como el siguiente paso natural, no resuelto aqui.
+ACTUALIZACION 1 -- induccion conjunta (potencia_combinada_induccion_conjunta(),
+ver mas abajo): resuelve UN solo factor de induccion compartido entre ambos
+niveles, en vez de sumar dos discos independientes. Corrige la violacion de
+Betz de TSR=1.25 y reduce la sobre-prediccion en los 4 modelos reales --
+PERO el factor de induccion queda pegado en el techo numerico (a=0.49) en
+los 4 casos: señal de que el sistema opera en la zona de induccion alta,
+donde la teoria de momento simple (sin correccion de Glauert) no es
+confiable, y el clip en 0.49 era un parche numerico, no una respuesta.
+
+ACTUALIZACION 2 -- correccion de Glauert a alta induccion agregada
+(a_desde_ct_glauert() en dmst_model.py, usada aqui tambien para el nivel
+de arrastre vía _ct_glauert_forma()). Con la induccion resuelta
+correctamente (verificado: ida y vuelta a->CT->a exacta, continuidad de
+valor y pendiente en ac=0.2) en vez de recortada en 0.49, el resultado
+HONESTO es que la sobre-prediccion contra los 4 modelos reales EMPEORA,
+no mejora -- 5.68x/2.12x/2.15x/1.29x (vs. 4.61x/1.72x/1.75x/1.05x con el
+recorte artificial, y vs. 5.39x/2.01x/2.04x/1.23x del modelo de discos
+independientes original). El "casi exacto" de Large Tulip (1.05x) del
+paso anterior era un artefacto del recorte en 0.49, que suprimia potencia
+de forma no fisica -- no una mejora real. Betz sigue respetado en todo el
+rango de TSR probado (0.3 a 5.0) con la correccion de Glauert -- eso si
+es una mejora real y verificada. La sobre-prediccion en si sigue sin
+resolverse; la pista de perdidas electromecanicas (Hallazgo 6, sin
+explorar) queda como la hipotesis principal que falta investigar.
+
+CAVEAT adicional sobre el nivel de arrastre en alta induccion: Glauert se
+ajusto originalmente contra datos experimentales de EMPUJE (CT), no de
+potencia -- la potencia en la rama de alta induccion se deriva aqui via
+P=T*u (siempre valida como relacion mecanica), pero esa combinacion
+especifica es una extension de ingenieria estandar en codigos BEM, no una
+curva Cp(a) medida de forma independiente. Se documenta como limitacion
+adicional del nivel de arrastre (que ya de por si es un disco actuador
+ideal escalado, sin datos Cp(a) propios del Savonius, ver mas abajo).
 """
 import numpy as np
 
 try:
-    from engine.dmst_model import resolver_dmst, fuerzas_azimut, _trapz, RHO_AIRE
+    from engine.dmst_model import (resolver_dmst, fuerzas_azimut, _trapz, RHO_AIRE,
+                                    a_desde_ct_glauert, AC_GLAUERT)
     from engine.savonius_model import potencia_savonius, CP_PATENTE
 except ImportError:
-    from dmst_model import resolver_dmst, fuerzas_azimut, _trapz, RHO_AIRE
+    from dmst_model import (resolver_dmst, fuerzas_azimut, _trapz, RHO_AIRE,
+                             a_desde_ct_glauert, AC_GLAUERT)
     from savonius_model import potencia_savonius, CP_PATENTE
 
 TSR_OBJETIVO = 1.0  # de la formula de rpm objetivo de US9255567B2, ver docstring
 CP_BETZ = 16 / 27  # 0.5926 -- limite ideal de disco actuador (a=1/3)
+
+
+def _ct_glauert_forma(a, ac=AC_GLAUERT):
+    """CT(a) con la correccion de Glauert (forma SIN escalar por eta) --
+    ver a_desde_ct_glauert() en dmst_model.py para la version invertida."""
+    a = np.asarray(a, dtype=float)
+    ct_bajo = 4 * a * (1 - a)
+    ct_alto = 4 * (ac ** 2 + (1 - 2 * ac) * a)
+    return np.where(a <= ac, ct_bajo, ct_alto)
 
 
 def potencia_combinada(V_inf, diametro, H, R=None, c=None, N=2, rho=RHO_AIRE,
@@ -135,12 +165,12 @@ def potencia_combinada_induccion_conjunta(V_inf, diametro, H, R=None, c=None, N=
         Fx_vals = np.array([fuerzas_azimut(th, u, Omega, R, c, rho, re_dependiente=False)[1]
                              for th in thetas])
         T_lift = (N / (2 * np.pi)) * _trapz(Fx_vals, thetas) * H
-        T_drag = eta_drag * 4 * a * (1 - a) * 0.5 * rho * A * V_inf ** 2
+        T_drag = eta_drag * float(_ct_glauert_forma(a)) * 0.5 * rho * A * V_inf ** 2
         T_total = T_lift + T_drag
-        CT = np.clip(T_total / (0.5 * rho * A * V_inf ** 2), 0.0, 0.9999) if V_inf > 0 else 0.0
-        a_nuevo = 0.5 * (1 - np.sqrt(max(1 - CT, 0.0)))
+        CT = T_total / (0.5 * rho * A * V_inf ** 2) if V_inf > 0 else 0.0
+        a_nuevo = a_desde_ct_glauert(CT)
         a = a + relax * (a_nuevo - a)
-        a = np.clip(a, 0.0, 0.49)
+        a = np.clip(a, 0.0, 0.9)  # limite de sanidad numerica, no un techo fisico
         if abs(a_nuevo - a) < tol:
             break
 
@@ -149,7 +179,10 @@ def potencia_combinada_induccion_conjunta(V_inf, diametro, H, R=None, c=None, N=
                          for th in thetas])
     Q_lift = (N / (2 * np.pi)) * _trapz(Ft_vals, thetas) * R
     p_lift = Q_lift * Omega * H
-    p_drag = eta_drag * 4 * a * (1 - a) ** 2 * 0.5 * rho * A * V_inf ** 3
+    # P = T*u = CT(a)*(1-a) * 0.5*rho*A*V^3 -- se deriva de P=T*u (siempre valida)
+    # en vez de reusar Cp=4a(1-a)^2 (que solo vale en la rama de momento simple,
+    # a<=ac); se extiende igual a la rama de Glauert para a>ac.
+    p_drag = eta_drag * float(_ct_glauert_forma(a)) * (1 - a) * 0.5 * rho * A * V_inf ** 3
 
     return {"potencia_W": p_lift + p_drag, "potencia_sustentacion_W": p_lift,
             "potencia_arrastre_W": p_drag, "a": a}

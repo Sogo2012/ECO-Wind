@@ -78,22 +78,55 @@ def _thrust_media(u, Omega, R, c, N, thetas, rho=RHO_AIRE, cd_extra=0.0, re_depe
     return (N / (2 * np.pi)) * _trapz(Fx_vals, thetas)
 
 
+AC_GLAUERT = 0.2  # umbral clasico de Glauert -- NO es 1/3 (eso es el a del pico de Cp ideal,
+                   # un numero distinto). Ver docstring de a_desde_ct_glauert().
+
+
+def a_desde_ct_glauert(CT, ac=AC_GLAUERT):
+    """
+    Invierte CT -> a usando la correccion empirica de Glauert a alta induccion,
+    en vez de la parabola pura de la teoria de momento simple (CT=4a(1-a)),
+    que es invalida mas alla de a~0.4 (el rotor entra en "turbulent wake
+    state": la estela deja de organizarse limpio y la teoria de momento no
+    aplica). Referencia estandar (Glauert 1926, ver p.ej. Hansen "Aerodynamics
+    of Wind Turbines" o Manwell/McGowan/Rogers "Wind Energy Explained"):
+
+        a <= ac:  CT = 4a(1-a)                      (parabola de momento)
+        a >  ac:  CT = 4*(ac^2 + (1-2*ac)*a)         (recta empirica,
+                                                       continua en valor Y
+                                                       pendiente con la
+                                                       parabola en a=ac)
+
+    A diferencia de la parabola pura (que tiene maximo CT=1 en a=0.5 y
+    LUEGO DECAE -- fisicamente invalido, un rotor mas cargado no frena
+    menos el viento), la recta de Glauert sigue creciendo con 'a' sin
+    limite, asi que para cualquier CT>=0 existe una solucion valida --
+    ya no hace falta un clip artificial en a=0.49 para evitar que el
+    solver diverja.
+    """
+    CT = max(CT, 0.0)
+    CT_en_ac = 4 * ac * (1 - ac)
+    if CT <= CT_en_ac:
+        return 0.5 * (1 - np.sqrt(max(1 - CT, 0.0)))
+    return (CT - 4 * ac ** 2) / (4 * (1 - 2 * ac))
+
+
 def resolver_induccion(V_ref, Omega, R, c, N, thetas, rho=RHO_AIRE, cd_extra=0.0,
                         a0=0.2, tol=1e-4, max_iter=100, relax=0.3, re_dependiente=True,
                         polar="naca"):
     """Itera el factor de induccion 'a' para un semicirculo (upwind o downwind),
-    balanceando el empuje de disco actuador (2*rho*A*V_ref^2*a(1-a)) contra el
-    empuje derivado de las fuerzas de pala."""
+    balanceando el empuje de disco actuador contra el empuje derivado de las
+    fuerzas de pala. Usa la correccion de Glauert a alta induccion (a>0.2,
+    ver a_desde_ct_glauert) en vez de la parabola pura de momento simple."""
     A = 2 * R  # ancho frontal (por unidad de altura); el area completa es A*H
     a = a0
     for _ in range(max_iter):
         u = V_ref * (1 - a)
         T_palas = _thrust_media(u, Omega, R, c, N, thetas, rho, cd_extra, re_dependiente, polar)
         T_momento_coef = T_palas / (0.5 * rho * A * V_ref ** 2) if V_ref > 0 else 0.0  # CT estandar = T/(0.5*rho*A*V^2)
-        T_momento_coef = np.clip(T_momento_coef, 0.0, 0.9999)
-        a_nuevo = 0.5 * (1 - np.sqrt(max(1 - T_momento_coef, 0.0)))
+        a_nuevo = a_desde_ct_glauert(T_momento_coef)
         a = a + relax * (a_nuevo - a)
-        a = np.clip(a, 0.0, 0.49)
+        a = np.clip(a, 0.0, 0.9)  # limite de sanidad numerica, no un techo fisico como antes
         if abs(a_nuevo - a) < tol:
             break
     return a
