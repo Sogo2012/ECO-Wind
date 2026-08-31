@@ -1,7 +1,7 @@
 # ECO | Wind — Avance de Proyecto
 
 **Documento de referencia (alcance):** [`plan-tecnico-eco-wind.md`](./plan-tecnico-eco-wind.md)
-**Última actualización:** 31 de agosto, 2026 (Hallazgo 16 — arranca Fase 2: MVP de Streamlit sobre Pista A, con dos límites reales del MVP comunicados explícitamente)
+**Última actualización:** 31 de agosto, 2026 (Hallazgo 16 — arranca Fase 2: MVP de Streamlit + Dockerfile listo, build sin verificar del todo por bloqueo de red del sandbox)
 **Propósito:** comparar el alcance planeado contra el avance real, y dejar constancia de los
 hallazgos que no estaban previstos en el plan original. Se actualiza en cada avance
 significativo — no es una foto única.
@@ -885,6 +885,25 @@ Hallazgo 1 (NASA POWER subestima ~3x en el Valle Central) y con lo que ya estaba
 ubicación, más de un sitio, PDF de cotización, registro de leads, ni despliegue a Cloud Run —
 corre local por ahora. La app misma lo dice en un aviso visible, no queda implícito.
 
+**Adenda — Docker local, pedido explícito de Pablo:** se creó `Dockerfile` y `.dockerignore` en
+la raíz del repo (build de contexto = raíz, porque la app necesita `engine/` y `datos_clima/`,
+que están fuera de `app/`). Respeta `$PORT` (default 8501 para Docker local) para que la misma
+imagen sirva sin cambios el día que se despliegue a Cloud Run — no es funcionalidad de más, es
+el destino que el propio plan ya señala para esto.
+
+**No se pudo verificar el build completo en este entorno** — `docker build` falló al intentar
+bajar la imagen base (`python:3.11-slim`): `production.cloudfront.docker.com` (CDN de Docker
+Hub) está bloqueado por la política de red de esta sesión (denegación de política, 403 —
+confirmado en el estado del proxy, no un error de certificado/configuración). Por instrucción
+explícita del entorno, una denegación de política no se debe intentar rodear, así que no se
+buscó un mirror alternativo ni ninguna otra vía. Se verificó en cambio todo lo que SÍ se podía
+verificar sin red: la lógica de rutas del Dockerfile (dónde queda cada archivo dentro del
+contenedor vs. dónde lo busca `app.py`, coincide), y la sintaxis exacta del `CMD` (con
+`${PORT:-8501}` y flags en formato `--flag=valor`) corriendo streamlit directo con `PORT=8502`
+de prueba — funcionó igual que en el `CMD`. Falta la verificación final: correr `docker build -t
+eco-wind-app .` y `docker run -p 8501:8501 eco-wind-app` en una máquina con salida a internet
+normal (la tuya) para confirmar el build de punta a punta.
+
 ---
 
 ## 6. Pendientes activos / bloqueos
@@ -1032,6 +1051,9 @@ corre local por ahora. La app misma lo dice en un aviso visible, no queda implí
 - [ ] Conseguir datos GWA reales para más sitios (hoy solo hay uno preparado, San José/Juan
       Santamaría) o resolver una ingesta automática por coordenada — bloquea el flujo
       "coordenada → pronóstico instantáneo" del plan, sección 5 (Hallazgo 16).
+- [ ] Correr `docker build -t eco-wind-app .` y `docker run -p 8501:8501 eco-wind-app` en una
+      máquina con salida a internet normal — no se pudo verificar el build completo en este
+      entorno (Docker Hub bloqueado por la política de red del sandbox, Hallazgo 16).
 - [ ] Desplegar `app/` a Cloud Run (Docker + Cloud Build, mismo patrón de Skyplus/DDP-Lite) — hoy
       solo corre local (Hallazgo 16).
 - [ ] Agregar al MVP: mapa de ubicación, PDF de cotización, registro de leads (Sheets vs.
@@ -1043,6 +1065,8 @@ corre local por ahora. La app misma lo dice en un aviso visible, no queda implí
 ECO-Wind/
 ├── plan-tecnico-eco-wind.md          ← alcance (este documento lo compara contra avance real)
 ├── avance-de-proyecto.md             ← este documento
+├── Dockerfile, .dockerignore          ← Docker local (Hallazgo 16) -- build sin verificar en
+│                                         este entorno, ver adenda de Hallazgo 16
 ├── app/                               ← Fase 2, MVP de Streamlit (Hallazgo 16)
 │   ├── app.py                         ← interfaz, corre local con `streamlit run app/app.py`
 │   └── requirements.txt

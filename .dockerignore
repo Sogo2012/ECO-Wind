@@ -1,0 +1,30 @@
+# ECO | Wind -- excluye del build de Docker todo lo que la app de Fase 2
+# (app/app.py) no necesita en tiempo de ejecucion. Ver Dockerfile.
+
+.git/
+.gitignore
+
+# Investigacion/desarrollo, no runtime de la app
+notebooks/
+documentos_tecnicos/
+Simulación VAWT y Efecto Cluster*.docx
+plan-tecnico-eco-wind.md
+avance-de-proyecto.md
+README.md
+
+# Datos climaticos que la app todavia no usa (solo lee datos_clima/gwa_juan_santamaria/,
+# copiado explicitamente aparte en el Dockerfile)
+datos_clima/*.epw
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Artefactos locales
+.ipynb_checkpoints/
+*.log
