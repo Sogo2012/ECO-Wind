@@ -1,7 +1,7 @@
 # ECO | Wind — Avance de Proyecto
 
 **Documento de referencia (alcance):** [`plan-tecnico-eco-wind.md`](./plan-tecnico-eco-wind.md)
-**Última actualización:** 31 de agosto, 2026 (Hallazgo 17 — clima multi-sitio, densidad por elevación, cálculo horario probado con el efecto de Jensen cuantificado, multi-clúster y gráficos)
+**Última actualización:** 31 de agosto, 2026 (Hallazgo 18 — 3 sitios EPW reales de climate.onebuilding.org, error de la forma prestada de San José cuantificado (-44% a +18%), patrón de EPW personalizado de DDP-lite adoptado, UWG evaluado y descartado con evidencia de código)
 **Propósito:** comparar el alcance planeado contra el avance real, y dejar constancia de los
 hallazgos que no estaban previstos en el plan original. Se actualiza en cada avance
 significativo — no es una foto única.
@@ -14,7 +14,7 @@ significativo — no es una foto única.
 |---|---|
 | **Fase 1 — Pista A** (motor empírico) | 🟢 Sólida — mecánica y fuentes de datos climáticos (EPW + GWA) validadas con datos reales; z0/afinación fina quedó pendiente para más adelante (decisión del Director del Proyecto) |
 | **Fase 1 — Pista B** (motor físico DMST + CFD) | 🟡 Aerodinámica congelada (vía agotada, sobre-predicción sigue abierta, Hallazgo 8); curvas de potencia re-verificadas contra el calculador oficial, sin dudas reales (Hallazgo 12) — módulo estructural ASCE 7 con demanda de anclaje para 5 modelos y carga de clúster conservadora (Hallazgos 9-10, 13); Cilindro Actuador implementado y validado, pero no reproduce el Efecto Bouquet real todavía (Hallazgo 15) |
-| **Fase 2** (productización: Streamlit + Cloud Run) | 🟡 Multi-clúster, corrección de densidad, cálculo horario probado (Jensen), gráficos (rosa de vientos, heatmap, curva de duración), y arquitectura para cualquier coordenada de Costa Rica (ráster+forma prestada, pendiente el archivo real). Falta: mapa, PDF, leads, despliegue a Cloud Run (Hallazgos 16-17) |
+| **Fase 2** (productización: Streamlit + Cloud Run) | 🟡 Multi-clúster, corrección de densidad, cálculo horario probado (Jensen), gráficos (rosa de vientos, heatmap, curva de duración), 4 sitios con datos climáticos reales propios (San José + Nicoya/Liberia/Finca Favorita) más subida de EPW propio, y arquitectura para cualquier otra coordenada (ráster+forma prestada, error ya cuantificado -44%/+18%, pendiente el archivo real). Falta: mapa, PDF, leads, despliegue a Cloud Run (Hallazgos 16-18) |
 
 ---
 
@@ -75,6 +75,11 @@ organización del proxy de red:
 - `globalwindatlas.info` (Global Wind Atlas)
 - `cds.climate.copernicus.eu` (Copernicus CDS / ERA5)
 - `help.emd.dk`, `en.wikipedia.org` (investigación general)
+- `climate.onebuilding.org` (confirmado 31/ago/2026, dos métodos independientes -- curl y
+  WebFetch, ambos con rechazo explícito de política, no un error de configuración. Ver
+  Hallazgo 18: Pablo bajó los EPW él mismo con internet real y los subió al chat, mismo patrón
+  que EPW/GWA-San José.)
+- `www.ladybug.tools` (confirmado 31/ago/2026, mismo patrón -- ver Hallazgo 18)
 
 **Consecuencia práctica:** cualquier fuente de datos que dependa de una llamada de red en
 vivo tiene que escribirse y probarse "a ciegas" acá, y validarse recién en Google Colab (que
@@ -967,6 +972,93 @@ energía viene de relativamente pocas horas de alta producción).
 José con 2 clústers agregados, las 4 pestañas/secciones de gráficos, y el camino de coordenada
 personalizada mostrando el mensaje de error claro (no un traceback) cuando falta el ráster.
 
+### Hallazgo 18 — 3 sitios EPW reales de climate.onebuilding.org: la forma prestada de San José falla entre -44% y +18% según el sitio; patrón de DDP-lite revisado; UWG descartado con evidencia de código, no de docs
+
+Pablo pidió tres cosas en paralelo: (1) bajar los EPW de Costa Rica de climate.onebuilding.org,
+(2) revisar cómo el proyecto hermano DDP-lite (`Sogo2012/DDP-lite`, "Prodex DDP") resuelve la
+extracción de clima y la opción de EPW personalizado, y (3) si se lograban los EPW, comparar
+esos datos reales contra lo que da la app.
+
+**(1) climate.onebuilding.org bloqueado, igual que los demás.** Confirmado con dos métodos
+independientes (`curl` y `WebFetch`) que el dominio está bloqueado por política del sandbox —
+ver Hallazgo 2, ahora extendido a 6 hosts. Pablo bajó él mismo, con internet real, 3 EPW reales
+de climate.onebuilding.org y los subió al chat: **Nicoya A.P.** (Guanacaste, Pacífico seco, WMO
+787550), **Daniel Oduber/Liberia Intl. A.P.** (Guanacaste, Pacífico, WMO 787740) y **Finca
+Favorita** (Limón, Caribe, WMO 749033) — mismo patrón ya usado para el EPW/GWA de San José.
+
+**(2) Patrón de DDP-lite, revisado en el código real (no de memoria).** `weather_utils.py`
+resuelve "clima real por sitio" con un catálogo estático pre-scrapeado
+(`epw_catalog_global.json`, 5,276 estaciones, USA/CAN/MEX + 17 países LATAM) + búsqueda
+geodésica Haversine + geocodificación inversa como fallback — búsqueda <100ms, sin red en
+runtime. Ese catálogo completo queda fuera de alcance por ahora (no se construyó uno análogo
+para Costa Rica). Lo que SÍ se adoptó, ya en código: el patrón de **"EPW personalizado"**
+(`app.py` líneas ~1259-1298 de DDP-lite): un toggle "¿Usar archivo EPW personalizado?" +
+`st.file_uploader` que guarda el .epw subido, lo parsea con `ladybug.epw.EPW`, y reemplaza la
+fuente climática activa. ECO-Wind no depende de `ladybug` (evita esa dependencia pesada) —
+`engine/epw_real.py` implementa un parser EPW propio, liviano, basado en el formato estándar de
+EnergyPlus (8 líneas de encabezado + CSV horario, campo 21=dirección, campo 22=velocidad a
+10m), y la app ahora tiene el mismo toggle+uploader que DDP-lite.
+
+**(3) Comparación cuantificada — el hallazgo real.** Se simuló Medium Tulip×3, buje 3m, en cada
+sitio, dos veces: (a) con el EPW real completo de ese sitio, y (b) con el enfoque actual de la
+app para "coordenada nueva" (Requisito 1, Hallazgo 17): forma de San José reescalada a la media
+real de ese sitio (usando la propia media real del EPW en vez del ráster, que sigue sin
+descargarse — la mejor prueba posible de la aproximación en sí).
+
+| Sitio | Media real (10m) | kWh/año real (EPW) | kWh/año forma-SJ | Diferencia | Razón estacional real (máx/mín mensual) |
+|---|---|---|---|---|---|
+| Nicoya (Guanacaste) | 2.09 m/s | 119.6 | 70.6 | **-41.0%** | 4.37x (ene=4.41 m/s, sep=1.01 m/s) |
+| Liberia (Guanacaste) | 3.63 m/s | 660.5 | 372.5 | **-43.6%** | 3.66x (feb=6.52 m/s, sep=1.78 m/s) |
+| Finca Favorita (Limón) | 1.41 m/s | 18.0 | 21.4 | **+18.4%** | 1.51x (nov=1.72 m/s, sep=1.14 m/s) |
+| *San José (referencia, forma que se presta)* | 3.67 m/s | — | — | — | 3.85x |
+
+**Lectura honesta: la aproximación de Hallazgo 17 NO es confiable fuera del Valle Central.**
+El caso más claro es Liberia: su media real (3.63 m/s) es casi idéntica a la de San José (3.67
+m/s) — si el error viniera solo de la magnitud, debería ser mínimo. Aun así la producción sale
+43.6% distinta, porque la FORMA (estacionalidad + ciclo diurno) es la que de verdad importa
+cuando P∝v³ es convexa (mismo mecanismo del Hallazgo 17 Requisito 3/Jensen, aplicado ahora a un
+error de forma, no solo de cálculo ingenuo vs. horario). Guanacaste tiene el corredor seco del
+Pacífico (vientos alisios/Papagayo muy estacionales, dic-abr fuertes, may-nov casi calmos —
+razón estacional real 3.7-4.4x) mientras Limón (Caribe) es casi lo opuesto: la más plana de los
+4 sitios (1.51x) — San José, en el medio, no representa bien a ninguno de los dos extremos.
+Efecto práctico: Guanacaste es, además, la zona de mejor recurso eólico real de Costa Rica (ahí
+operan los parques eólicos reales del país) — es justo donde más importa no subestimar 41-44%.
+
+**Implementado en código, no solo documentado:** `engine/epw_real.py` (parser EPW +
+`SITIOS_EPW_REAL` con los 3 sitios + `heatmap_json_desde_epw()`/`rosa_frecuencia_desde_epw()`
+para que la rosa de vientos y el heatmap de clima salgan de datos reales de cada sitio, no
+prestados). `app/app.py`: selector de sitio ahora lista los 4 sitios con datos propios (San
+José + los 3 EPW reales) además de "coordenada personalizada" (aproximación, con la advertencia
+ahora cuantificada con estos números), más el toggle+uploader de EPW propio. Probado extremo a
+extremo (los 4 sitios, `simular()` completo) y con `streamlit run` arrancando sin errores
+(HTTP 200, sin traceback).
+
+**UWG (Urban Weather Generator, ladybug-tools) — evaluado y descartado, con evidencia de
+código fuente, no de documentación.** `ladybug.tools`/`www.ladybug.tools` está bloqueado en
+este sandbox (mismo Hallazgo 2), así que en vez de los docs se clonó y leyó el repo real,
+`ladybug-tools/uwg` (commit `ddedeac`). Hallazgo concreto en `uwg/uwg.py`: UWG sí calcula
+internamente una velocidad de viento de cañón urbano (`UCM.canWind`, a partir de altura de
+edificio/cobertura del sitio/ancho de calle), pero **`write_epw()` escribe en la columna de
+viento del EPW de salida la velocidad RURAL de entrada sin tocar** (`self.forc.wind`, línea
+~1406) — la línea que sí escribiría el viento de cañón (`Uforc.wind =
+copy.copy(self.UCM.canWind)`, línea ~1370) está **comentada en el código**, con una nota propia
+del equipo de UWG: el modelo de difusión urbana experimental da **logaritmo de dominio negativo
+para edificios ≥40m** y por eso quedó deshabilitado. Es decir: **correr UWG sobre nuestros datos
+de viento (GWA o EPW real) y tomar su EPW de salida nos devolvería exactamente el mismo viento
+que entró — cero efecto, por diseño del código tal cual está hoy**, sin importar qué geometría
+urbana le diéramos. (Aparte, y a favor de ser justos: UWG en sí es liviano —
+`requirements.txt` vacío, sin depender de Honeybee/EnergyPlus; esa pila pesada es de DDP-lite
+para simulación térmica completa, no de UWG. El costo real de integrarlo no sería de peso de
+dependencia, sino de tener que pedirle al usuario datos de geometría urbana -altura de
+edificio, cobertura del sitio, ancho de calle, uso de HVAC de referencia- que la app no
+recolecta hoy, para un resultado que hoy no cambiaría el viento en absoluto.) Esto confirma con
+evidencia de código, no solo de intuición, la decisión que ya tenía el plan original
+(`plan-tecnico-eco-wind.md`, líneas 36 y 49: "sin pasar por UWG si sólo interesa el viento") —
+**no se integra UWG para el cálculo de viento.** Si en el futuro ECO Consultor necesita el lado
+térmico (temperatura/humedad de isla de calor urbana, no viento) para otro producto, esa parte
+de UWG sí está implementada y probada -- sería una evaluación aparte, no relacionada con este
+simulador de viento.
+
 ---
 
 ## 6. Pendientes activos / bloqueos
@@ -1123,12 +1215,20 @@ personalizada mostrando el mensaje de error claro (no un traceback) cuando falta
       Airtable, todavía sin decidir) (Hallazgo 16, plan sección 5).
 - [ ] Descargar el ráster real de Costa Rica (`datos_clima/gwa_costa_rica_10m.tif`) desde un
       entorno con internet real (Colab) usando `descargar_raster_costa_rica()` — sin esto, el
-      camino de "coordenada personalizada" de la app no funciona (Hallazgo 17).
+      camino de "coordenada personalizada" de la app sigue siendo una aproximación con error
+      ya cuantificado de -44% a +18% (Hallazgo 18), no un cálculo confiable (Hallazgo 17).
 - [ ] Resolver búsqueda automática de elevación por DEM — hoy es manual en la app para
       coordenadas nuevas (Hallazgo 17).
-- [ ] Validar la aproximación de "forma prestada de San José" contra datos reales de al menos
-      un segundo sitio con export propio de GWA, para tener una idea de cuánto error introduce
-      la aproximación en la práctica (Hallazgo 17).
+- [x] ~~Validar la aproximación de "forma prestada de San José" contra datos reales de al menos
+      un segundo sitio con export propio~~ — resuelto contra 3 sitios reales (Nicoya, Liberia,
+      Finca Favorita): error de -41% a -44% en Guanacaste, +18% en Limón. La aproximación NO es
+      confiable fuera del Valle Central — ver Hallazgo 18.
+- [ ] **Nuevo, de Hallazgo 18:** con el error de la forma prestada ya cuantificado y grande
+      (hasta 44%), evaluar si conviene tener más de una "forma de referencia" regional (p.ej.
+      Pacífico seco/Guanacaste vs. Caribe/Limón vs. Valle Central) en vez de prestar siempre la
+      de San José — ya hay 2 formas reales adicionales (Liberia, Finca Favorita) disponibles en
+      `engine/epw_real.py` para esto. No implementado todavía, es una decisión de producto
+      (¿vale la pena la complejidad extra vs. simplemente pedir el EPW real cuando se pueda?).
 - [ ] Cuando exista el ráster real, decidir si vale la pena pedir también capacity-factor
       (`/api/gis/country/CRI/capacity-factor_IEC{1,2,3}`) del mismo endpoint oficial, como
       dato adicional (Hallazgo 17).
@@ -1150,6 +1250,7 @@ ECO-Wind/
 │   ├── simulador_pista_a.py          ← simular()/wind_at_height()/GWA/wind rose/Jensen (Hallazgos 16-17)
 │   ├── atmosfera_estandar.py         ← densidad ISA por elevación (Hallazgo 17)
 │   ├── gwa_raster.py                 ← clima para cualquier coordenada de CR, ráster+forma prestada (Hallazgo 17)
+│   ├── epw_real.py                   ← parser EPW propio + 3 sitios reales (Nicoya/Liberia/Finca Favorita, Hallazgo 18)
 │   ├── dmst_model.py, rotor_combinado.py, polar_hibrido.py, naca0018_polar.py  ← Pista B aerodinámica
 │   ├── estructural_asce7.py          ← Pista B estructural, ASCE 7 (Hallazgos 9-10, 13-14)
 │   └── actuator_cylinder.py          ← Pista B efecto clúster, Cilindro Actuador (Hallazgo 15)
@@ -1157,8 +1258,10 @@ ECO-Wind/
 │   ├── pista_a_motor_empirico.ipynb  ← sandbox Pista A completo, corre en Colab o local
 │   └── pista_b_motor_fisico.ipynb    ← sandbox Pista B, aerodinámica
 ├── datos_clima/
-│   ├── *.epw                          ← EPWs de estación real (por ahora: aeropuerto Juan Santamaría)
-│   ├── gwa_juan_santamaria/           ← export real del Global Wind Atlas (único sitio con datos propios)
+│   ├── *.epw                          ← EPWs de estación real (aeropuerto Juan Santamaría)
+│   ├── gwa_juan_santamaria/           ← export real del Global Wind Atlas
+│   ├── epw_real/                      ← 3 EPW reales de climate.onebuilding.org (Hallazgo 18):
+│   │                                     Nicoya, Liberia, Finca Favorita
 │   └── gwa_costa_rica_10m.tif          ← (falta) ráster de todo el país, ver pendientes Hallazgo 17
 └── documentos_tecnicos/               ← research, fichas técnicas, insumos originales
 ```

@@ -7,23 +7,36 @@ multi-sitio, corrección de densidad, multi-clúster y gráficos (Hallazgo 17
 -- ver avance-de-proyecto.md).
 
 ALCANCE HONESTO:
-- San José (Juan Santamaría) tiene datos GWA reales y completos (curva de
-  excedencia + patrón diurno propios). Cualquier OTRA coordenada de Costa
-  Rica usa la velocidad media real del ráster de GWA (si está descargado
-  en datos_clima/gwa_costa_rica_10m.tif -- ver engine/gwa_raster.py) con
-  la FORMA prestada de San José, escalada a esa media -- una aproximación
-  declarada, no datos propios del sitio nuevo.
+- San José (Juan Santamaría), Nicoya, Liberia y Finca Favorita (Limón)
+  tienen datos climáticos REALES completos y propios: San José vía export
+  del panel de Global Wind Atlas (curva de excedencia + patrón diurno
+  reales), y los otros 3 vía EPW real de climate.onebuilding.org (Hallazgo
+  18 -- descargados por Pablo, ver engine/epw_real.py). Ninguno de estos 4
+  usa aproximación.
+- Cualquier OTRA coordenada de Costa Rica usa la velocidad media real del
+  ráster de GWA (si está descargado en datos_clima/gwa_costa_rica_10m.tif
+  -- ver engine/gwa_raster.py) con la FORMA prestada de San José, escalada
+  a esa media -- una aproximación declarada, no datos propios del sitio
+  nuevo. Hallazgo 18 cuantificó el error de esta aproximación contra los 3
+  sitios EPW reales: entre -44% y +18% en producción anual estimada según
+  el sitio -- se muestra un aviso explícito en la app cuando se usa.
 - El ráster de Costa Rica no se pudo descargar en este entorno de
   desarrollo (globalwindatlas.info bloqueado, Hallazgo 2) -- si no existe
   el archivo, la app lo dice claramente en vez de fallar oscuro.
-- Elevación: para San José ya está confirmada (921m, AIP/DGAC). Para
-  coordenadas nuevas se pide manual por ahora -- la búsqueda automática
-  por DEM queda pendiente (Hallazgo 17).
+- ¿Tenés el EPW real de tu sitio (climate.onebuilding.org u otra fuente)?
+  Subilo directo -- patrón adoptado de DDP-lite (Sogo2012/DDP-lite,
+  Hallazgo 18) -- y se usa sin aproximación, sin importar si el sitio está
+  en la lista de arriba.
+- Elevación: para los 4 sitios con datos propios ya está confirmada (AIP/
+  DGAC para San José, el propio encabezado del EPW para los otros 3). Para
+  coordenadas nuevas (aproximación) se pide manual por ahora -- la
+  búsqueda automática por DEM queda pendiente (Hallazgo 17).
 - Sin mapa, sin PDF, sin registro de leads todavía.
 - Corre local; despliegue a Cloud Run sigue pendiente.
 """
 import os
 import sys
+import tempfile
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -38,6 +51,9 @@ from engine.simulador_pista_a import (
 )
 from engine.flower_turbines_curves import CURVE_COEFFICIENTS
 from engine.gwa_raster import generar_clima_sitio_nuevo, RUTA_RASTER_CR_DEFAULT
+from engine.epw_real import (
+    SITIOS_EPW_REAL, cargar_epw_real, heatmap_json_desde_epw, rosa_frecuencia_desde_epw,
+)
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -80,28 +96,59 @@ if "clusters" not in st.session_state:
 
 # --- Helpers de clima/geometría ---
 
-def cargar_clima_sitio(modo, sitio_key, lat, lon, elevacion_m):
-    """Devuelve (df_clima, media_confirmada, ws_json, hm_json, es_aproximacion, error)."""
-    if modo == "San José (datos completos)":
+def _rosa_y_heatmap_san_jose():
+    sitio = SITIOS_DISPONIBLES["san_jose_juan_santamaria"]
+    ws_json, hm_json = cargar_gwa_json(os.path.join(BASE_DIR, sitio["carpeta_gwa"]))
+    ruta_lib = os.path.join(BASE_DIR, sitio["carpeta_gwa"], "gwc_point_1_10m.lib")
+    rosa_freq = cargar_wind_rose_lib(ruta_lib)["freq"]
+    return ws_json, hm_json, rosa_freq
+
+
+def cargar_clima_sitio(modo, sitio_key, lat, lon, elevacion_m, ruta_epw_custom=None):
+    """
+    Devuelve un dict: df_clima, media, hm_json (índice mes×hora), rosa_freq
+    (12 sectores, %), es_aproximacion, elevacion_m (la real del sitio si
+    viene de un EPW propio -- ignora el valor tecleado en ese caso), error.
+
+    modo: "san_jose" | "epw_real" (sitio_key = clave en SITIOS_EPW_REAL) |
+          "epw_custom" (usa ruta_epw_custom, subido por el usuario -- mismo
+          patrón que el "¿Usar EPW personalizado?" de DDP-lite) |
+          "coordenada" (ráster GWA + forma prestada de San José, aproximación).
+    """
+    if modo == "san_jose":
         sitio = SITIOS_DISPONIBLES[sitio_key]
-        ws_json, hm_json = cargar_gwa_json(os.path.join(BASE_DIR, sitio["carpeta_gwa"]))
+        ws_json, hm_json, rosa_freq = _rosa_y_heatmap_san_jose()
         df_clima, media = generar_clima_gwa(ws_json, hm_json)
-        return df_clima, media, ws_json, hm_json, False, None
-    else:
-        if not os.path.exists(RUTA_RASTER_CR_DEFAULT):
-            return None, None, None, None, True, (
-                f"No existe el ráster de Costa Rica ({os.path.basename(RUTA_RASTER_CR_DEFAULT)}). "
-                "Hay que descargarlo primero desde un entorno con internet real (Colab) -- "
-                "ver engine/gwa_raster.py, descargar_raster_costa_rica(). No se puede calcular "
-                "para una coordenada nueva sin ese archivo."
-            )
+        return dict(df_clima=df_clima, media=media, hm_json=hm_json, rosa_freq=rosa_freq,
+                    es_aproximacion=False, elevacion_m=elevacion_m, error=None)
+
+    if modo in ("epw_real", "epw_custom"):
         try:
-            df_clima, media = generar_clima_sitio_nuevo(lat, lon)
+            ruta = SITIOS_EPW_REAL[sitio_key]["ruta_epw"] if modo == "epw_real" else ruta_epw_custom
+            df_clima, meta = cargar_epw_real(ruta)
         except (FileNotFoundError, ValueError, KeyError) as e:
-            return None, None, None, None, True, str(e)
-        sitio_forma = SITIOS_DISPONIBLES["san_jose_juan_santamaria"]
-        ws_json, hm_json = cargar_gwa_json(os.path.join(BASE_DIR, sitio_forma["carpeta_gwa"]))
-        return df_clima, media, ws_json, hm_json, True, None
+            return dict(error=str(e))
+        hm_json = heatmap_json_desde_epw(df_clima)
+        rosa_freq = rosa_frecuencia_desde_epw(df_clima)
+        return dict(df_clima=df_clima, media=float(df_clima["WS10M"].mean()), hm_json=hm_json,
+                    rosa_freq=rosa_freq, es_aproximacion=False, elevacion_m=meta["elevacion_m"],
+                    error=None, meta=meta)
+
+    # modo == "coordenada" -- ráster GWA + forma prestada de San José (Requisito 1, aproximación)
+    if not os.path.exists(RUTA_RASTER_CR_DEFAULT):
+        return dict(error=(
+            f"No existe el ráster de Costa Rica ({os.path.basename(RUTA_RASTER_CR_DEFAULT)}). "
+            "Hay que descargarlo primero desde un entorno con internet real (Colab) -- "
+            "ver engine/gwa_raster.py, descargar_raster_costa_rica(). No se puede calcular "
+            "para una coordenada nueva sin ese archivo (o subí el EPW real del sitio si lo tenés)."
+        ))
+    try:
+        df_clima, media = generar_clima_sitio_nuevo(lat, lon)
+    except (FileNotFoundError, ValueError, KeyError) as e:
+        return dict(error=str(e))
+    _, hm_json, rosa_freq = _rosa_y_heatmap_san_jose()
+    return dict(df_clima=df_clima, media=media, hm_json=hm_json, rosa_freq=rosa_freq,
+                es_aproximacion=True, elevacion_m=elevacion_m, error=None)
 
 
 # --- Helpers de gráficos ---
@@ -157,19 +204,34 @@ col_config, col_resultado = st.columns([1, 2])
 
 with col_config:
     st.subheader("Sitio")
-    modo_sitio = st.radio("Fuente de datos", options=["San José (datos completos)", "Coordenada personalizada"])
 
-    if modo_sitio == "San José (datos completos)":
-        sitio_key = "san_jose_juan_santamaria"
+    _opciones_sitio = {"san_jose": ("San José (Juan Santamaría) — datos GWA completos", "san_jose_juan_santamaria")}
+    for _k, _s in SITIOS_EPW_REAL.items():
+        _opciones_sitio[f"epw_{_k}"] = (f"{_s['nombre']} — EPW real", _k)
+    _opciones_sitio["coordenada"] = ("Coordenada personalizada (aproximación)", None)
+
+    _modo_ui = st.selectbox(
+        "Sitio del proyecto", options=list(_opciones_sitio.keys()),
+        format_func=lambda k: _opciones_sitio[k][0],
+    )
+    modo_sitio = "san_jose" if _modo_ui == "san_jose" else (
+        "coordenada" if _modo_ui == "coordenada" else "epw_real")
+    sitio_key = _opciones_sitio[_modo_ui][1]
+
+    if modo_sitio == "san_jose":
         sitio = SITIOS_DISPONIBLES[sitio_key]
         lat, lon = sitio["lat"], sitio["lon"]
         elevacion_m = sitio["elevacion_m"]
-        st.caption(f"lat={lat}, lon={lon}, elevación={elevacion_m:.0f}m (AIP/DGAC)")
+        st.caption(f"lat={lat}, lon={lon}, elevación={elevacion_m:.0f}m (AIP/DGAC) -- datos GWA reales propios.")
+    elif modo_sitio == "epw_real":
+        lat, lon, elevacion_m = None, None, None  # se completan con el EPW real al cargar
+        st.caption(f"EPW real de climate.onebuilding.org (Hallazgo 18) -- sin aproximación.")
     else:
-        sitio_key = None
         st.warning(
             "Aproximación (Requisito 1, Hallazgo 17): magnitud real del ráster de GWA, forma "
-            "(variabilidad, estacionalidad) prestada de San José. No son datos propios del sitio.",
+            "(variabilidad, estacionalidad) prestada de San José. Hallazgo 18 midió el error de esto "
+            "contra 3 sitios reales: entre -44% y +18% en producción anual según el sitio -- no son "
+            "datos propios de esta coordenada.",
             icon="⚠️",
         )
         lat = st.number_input("Latitud", value=9.9, min_value=8.0, max_value=11.3, format="%.4f")
@@ -177,6 +239,21 @@ with col_config:
         elevacion_m = st.number_input("Elevación (m sobre el nivel del mar)", value=800.0, min_value=0.0,
                                        max_value=3800.0, step=50.0,
                                        help="Búsqueda automática por DEM pendiente (Hallazgo 17) -- por ahora, manual.")
+
+    with st.expander("¿Tenés el EPW real de tu sitio? Subilo directo"):
+        st.caption(
+            "Patrón adoptado de DDP-lite (Sogo2012/DDP-lite, Hallazgo 18) -- si subís un .epw, se usa "
+            "directo (sin aproximación) y reemplaza la selección de arriba para este cálculo."
+        )
+        _usar_custom = st.toggle("¿Usar mi propio archivo EPW?", value=False, key="usar_epw_custom")
+        ruta_epw_custom = None
+        if _usar_custom:
+            _archivo = st.file_uploader("Cargar archivo .epw", type=["epw"], key="archivo_epw_custom")
+            if _archivo is not None:
+                ruta_epw_custom = os.path.join(tempfile.gettempdir(), f"eco_wind_custom_{_archivo.name}")
+                with open(ruta_epw_custom, "wb") as _f:
+                    _f.write(_archivo.getbuffer())
+                modo_sitio = "epw_custom"
 
     st.subheader("Clústers del proyecto")
     for i, c in enumerate(st.session_state.clusters):
@@ -217,12 +294,24 @@ with col_resultado:
     st.subheader("Resultado")
 
     if calcular:
-        df_clima, media_confirmada, ws_json, hm_json, es_aproximacion, error = cargar_clima_sitio(
-            modo_sitio, sitio_key, lat, lon, elevacion_m)
+        resultado_clima = cargar_clima_sitio(modo_sitio, sitio_key, lat, lon, elevacion_m, ruta_epw_custom)
+        error = resultado_clima.get("error")
 
         if error:
             st.error(error, icon="🚫")
         else:
+            df_clima = resultado_clima["df_clima"]
+            media_confirmada = resultado_clima["media"]
+            hm_json = resultado_clima["hm_json"]
+            rosa_freq = resultado_clima["rosa_freq"]
+            es_aproximacion = resultado_clima["es_aproximacion"]
+            elevacion_m = resultado_clima["elevacion_m"]  # real del EPW si aplica, sobreescribe el input
+
+            if modo_sitio in ("epw_real", "epw_custom"):
+                _m = resultado_clima["meta"]
+                st.success(f"EPW real: {_m['estacion']} ({_m['pais']}, WMO {_m['wmo']}) -- "
+                           f"lat={_m['lat']:.4f}, lon={_m['lon']:.4f}, elevación={_m['elevacion_m']:.0f}m. "
+                           f"Media anual real (10m): {media_confirmada:.2f} m/s.", icon="✅")
             if es_aproximacion:
                 st.info(f"Velocidad media real (ráster GWA, coordenada {lat:.4f},{lon:.4f}): "
                         f"{media_confirmada:.2f} m/s -- forma prestada de San José.", icon="ℹ️")
@@ -278,11 +367,8 @@ with col_resultado:
             with tab_clima:
                 if es_aproximacion:
                     st.caption("Rosa de vientos y patrón diurno: prestados de San José (forma), no del sitio nuevo.")
-                ruta_lib = os.path.join(BASE_DIR, SITIOS_DISPONIBLES["san_jose_juan_santamaria"]["carpeta_gwa"],
-                                         "gwc_point_1_10m.lib")
-                rosa = cargar_wind_rose_lib(ruta_lib)
                 cg1, cg2 = st.columns(2)
-                cg1.pyplot(graficar_rosa_vientos(rosa["freq"]))
+                cg1.pyplot(graficar_rosa_vientos(rosa_freq))
                 cg2.pyplot(graficar_heatmap_clima(hm_json))
 
             st.caption(
