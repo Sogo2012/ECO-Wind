@@ -1,7 +1,7 @@
 # ECO | Wind — Avance de Proyecto
 
 **Documento de referencia (alcance):** [`plan-tecnico-eco-wind.md`](./plan-tecnico-eco-wind.md)
-**Última actualización:** 31 de agosto, 2026 (Hallazgo 9 — primer módulo estructural ASCE 7, validado)
+**Última actualización:** 31 de agosto, 2026 (Hallazgo 9 — módulo estructural ASCE 7, validado + demanda de anclaje con planos reales)
 **Propósito:** comparar el alcance planeado contra el avance real, y dejar constancia de los
 hallazgos que no estaban previstos en el plan original. Se actualiza en cada avance
 significativo — no es una foto única.
@@ -475,6 +475,35 @@ flexible (Gf), que depende de la frecuencia natural del pedestal, dato no dispon
 frecuencia de vórtices (fs) solo da la frecuencia de excitación, no evalúa resonancia real
 sin la frecuencia natural de la estructura de soporte.
 
+**Actualización — Pablo compartió 3 documentos reales adicionales que no se habían revisado
+todavía** (subidos antes pero no abiertos hasta este punto — corregido en cuanto se detectó):
+
+- **`3 meter AL13 Side Forces at 50 mps.pdf`:** dato real independiente — F=13,000 N,
+  Torque=31,200 N·m a 50 m/s, "área transversal de pala" ≈5 m², altura total 4.4m. El Cd
+  efectivo implícito (≈1.70) **no coincide** con el ≈2.21 encontrado en External Load
+  Calculations — es más cercano a un promedio de las dos caras (1.2/2.3→1.75) que al peor
+  caso solo. Diferencia real entre fuentes, documentada, **no resuelta**: podría deberse a
+  que "área transversal de pala" en este documento no sea la misma convención D×H (caja
+  envolvente) usada en el resto de la Pista B, sino el área real proyectada de las palas —
+  necesitaría geometría CAD real para reconciliarse con confianza.
+- **`Big Pedestal Concrete Base ASSY` (Large Tulip) y `Power Tower Concrete Base ASSY`
+  (AL13):** planos reales de la base de concreto — patrones de anclaje con varillas roscadas
+  M18×2.5 (12 unidades, patrón cuadrado 874.4×874.4mm para Large Tulip, 774.4×774.4mm para
+  AL13, más un patrón circular de 6 unidades para un accesorio de poste de soporte separado,
+  explícitamente no usado en instalaciones standalone del Power Tower). **Nota importante de
+  alcance, del propio plano:** *"CONCRETE BASE DIMENSIONS AND OTHER PROPERTIES WILL BE
+  PROVIDED BY A CIVIL ENGINEER, NOT IN RESPONSIBILITY OF FLOWER TURBINES"* — Flower Turbines
+  solo especifica el patrón de anclaje, no diseña la base de concreto completa.
+
+**Agregado a `engine/estructural_asce7.py`:** `tension_maxima_pernos()`, usando los patrones
+reales de anclaje (`PATRONES_ANCLAJE`). Da la **demanda** de tensión en el perno más cargado
+a partir del momento de vuelco — NO evalúa si el perno M18×2.5 aguanta (eso requiere la
+capacidad admisible del perno y del concreto, responsabilidad del ingeniero civil según los
+propios planos). Caso de prueba: Large Tulip a 40 m/s ráfaga, a nivel de piso →
+Mw=50.93 kN·m → tensión estimada ≈9.71 kN en el perno más cargado (cálculo simplificado de
+cupla en el ancho exterior del patrón, no un análisis riguroso de grupo de anclajes tipo ACI
+318 Apéndice D).
+
 ---
 
 ## 6. Pendientes activos / bloqueos
@@ -552,6 +581,14 @@ sin la frecuencia natural de la estructura de soporte.
 - [ ] Extender el análisis estructural ASCE 7 a los otros 3 modelos Tulip y AL13 (solo
       Medium Tulip probado hasta ahora) y a la carga de un clúster completo, no solo una
       turbina aislada.
+- [ ] Reconciliar el Cd efectivo discrepante entre `External Load Calculations` (≈2.21) y
+      `3 meter AL13 Side Forces at 50 mps.pdf` (≈1.70) — probablemente distintas convenciones
+      de área frontal (caja envolvente D×H vs. área real proyectada de pala); necesita
+      geometría CAD real para resolverse con confianza (Hallazgo 9).
+- [ ] Conseguir la capacidad admisible de las varillas M18×2.5 (fluencia + arranque del
+      concreto) para poder evaluar adecuación de los anclajes, no solo la demanda de tensión
+      ya calculada — responsabilidad del ingeniero civil según los propios planos de Flower
+      Turbines (Hallazgo 9).
 - [ ] Decidir registro de leads para la Fase 2 (Sheets vs. Airtable — abierto en el plan,
       sección 7).
 

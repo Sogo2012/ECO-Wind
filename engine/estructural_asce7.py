@@ -64,6 +64,17 @@ import numpy as np
 ST_CILINDRO = 0.2  # numero de Strouhal para cilindros circulares en regimen
                     # subcritico -- valor estandar de la literatura
 
+# Patrones de anclaje REALES, de los planos de base de concreto de Flower
+# Turbines (Big Pedestal Concrete Base ASSY / Power Tower Concrete Base
+# ASSY). n_pernos: cantidad de varillas roscadas M18x2.5. ancho_patron_m:
+# dimension exterior del patron cuadrado (m). peso_distribuido_kg: carga
+# distribuida nominal indicada en el plano (no es capacidad de diseño de
+# los pernos, es una referencia del propio plano).
+PATRONES_ANCLAJE = {
+    "large_tulip":       {"n_pernos": 12, "ancho_patron_m": 0.8744, "peso_distribuido_kg": 675},
+    "al13_power_tower":  {"n_pernos": 12, "ancho_patron_m": 0.7744, "peso_distribuido_kg": 816},
+}
+
 
 def presion_dinamica(v_rafaga, Kz=1.0, Kzt=1.0, Kd=0.85):
     """
@@ -121,6 +132,33 @@ def frecuencia_desprendimiento_vortices(v_rafaga, diametro, st=ST_CILINDRO):
     evalua resonancia por si sola (ver limitaciones del modulo).
     """
     return st * v_rafaga / diametro
+
+
+def tension_maxima_pernos(mw, n_pernos, ancho_patron_m):
+    """
+    Demanda de tension MAXIMA por perno de anclaje, a partir del momento
+    de vuelco Mw, usando un patron de pernos REAL (ver PATRONES_ANCLAJE,
+    de los planos "Big Pedestal Concrete Base ASSY" y "Power Tower
+    Concrete Base ASSY" de Flower Turbines).
+
+    SIMPLIFICACION CONSERVADORA, no un analisis de grupo de pernos
+    riguroso: se trata el patron como una cupla pura en el ancho exterior
+    del patron (brazo de palanca = ancho_patron_m), con la MITAD de los
+    pernos resistiendo en tension del lado que se levanta. Un analisis
+    real de grupo de anclajes (ACI 318 Apendice D o equivalente) usaria
+    la posicion exacta de cada perno y el eje neutro real, no una cupla
+    simple -- eso, y la capacidad admisible de cada varilla M18 (fluencia
+    + arranque del concreto), es responsabilidad del ingeniero civil que
+    los propios planos de Flower Turbines señalan explicitamente
+    ("CONCRETE BASE DIMENSIONS AND OTHER PROPERTIES WILL BE PROVIDED BY A
+    CIVIL ENGINEER, NOT IN RESPONSIBILITY OF FLOWER TURBINES"). Esta
+    funcion calcula DEMANDA (cuanta tension pide el viento), NO evalua
+    capacidad ni adecuacion de los pernos.
+
+    Devuelve la tension (N) en el perno mas cargado.
+    """
+    n_pernos_tension = max(n_pernos // 2, 1)
+    return mw / (ancho_patron_m * n_pernos_tension)
 
 
 def calcular_cargas_viento_asce7(v_rafaga, altura_techo_m, diametro, altura_pala, cd_max,
@@ -203,3 +241,34 @@ if __name__ == "__main__":
     print("      formal) no tiene motivo para incluir. No es una señal de que este modulo este")
     print("      mal calibrado -- es la diferencia esperada entre \"fuerza de arrastre cruda\"")
     print("      y \"carga de diseño segun codigo\", que por diseño reduce la fuerza cruda.")
+
+    print()
+    print("=" * 78)
+    print("Segundo chequeo de plausibilidad -- 3-meter AL13 Side Forces at 50 mps.pdf")
+    print("(dato real: F=13,000 N, Torque=31,200 N*m a 50 m/s, area transversal ~5 m^2,")
+    print("altura total 4.4 m). NO se fuerza a que coincida -- se reporta la comparacion tal cual:")
+    cd_efectivo_al13 = 13000 / (0.5 * 1.225 * 5.0 * 50.0 ** 2)
+    print(f"  Cd efectivo implicito (con A=5 m^2): {cd_efectivo_al13:.2f}")
+    print("  Esto NO coincide con el Cd~2.2 efectivo encontrado en External Load Calculations")
+    print("  2m&5m.pdf -- es mas cercano a un promedio de las dos caras (1.2 y 2.3 -> 1.75) que")
+    print("  al peor caso solo. Posible causa: \"cross-sectional blade area\" en este documento no")
+    print("  es necesariamente el mismo D*H usado en el resto de la Pista B (podria ser el area")
+    print("  real proyectada de las palas, distinta de la caja envolvente diametro x altura).")
+    print("  Diferencia real entre fuentes, documentada aqui, NO resuelta -- necesitaria la")
+    print("  geometria CAD real de la pala para reconciliarse con confianza.")
+
+    print()
+    print("=" * 78)
+    print("Demanda de tension en pernos de anclaje -- Large Tulip, con el patron REAL del plano")
+    print("\"Big Pedestal Concrete Base ASSY\" (12x M18x2.5, patron 874.4x874.4mm):")
+    r_large = calcular_cargas_viento_asce7(v_rafaga=40.0, altura_techo_m=0.0,
+                                            diametro=2.50, altura_pala=5.0, cd_max=2.3)
+    patron = PATRONES_ANCLAJE["large_tulip"]
+    t_max = tension_maxima_pernos(r_large["Mw_Nm"], patron["n_pernos"], patron["ancho_patron_m"])
+    print(f"  Mw (Large Tulip, rafaga 40 m/s, a nivel de piso): {r_large['Mw_Nm']/1000:.2f} kN*m")
+    print(f"  Tension maxima estimada por perno (mitad de {patron['n_pernos']} en traccion,")
+    print(f"  brazo={patron['ancho_patron_m']*1000:.0f}mm): {t_max:.0f} N ({t_max/1000:.2f} kN)")
+    print("  ADVERTENCIA: esto es DEMANDA (lo que pide el viento), no una evaluacion de si el")
+    print("  perno M18x2.5 aguanta -- esa capacidad (fluencia + arranque del concreto) es")
+    print("  responsabilidad del ingeniero civil, tal como señalan los propios planos de")
+    print("  Flower Turbines. No se afirma aqui que el anclaje sea adecuado o inadecuado.")
