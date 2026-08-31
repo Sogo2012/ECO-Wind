@@ -1885,15 +1885,19 @@ este uso específico, distinto del quantile mapping ya probado en Hallazgo 23).
       validación leave-one-out con `factor_ajuste_gwa()`~~ — resuelto (Hallazgo 26): resultado
       mixto, mucho mejor que NASA POWER pero no una victoria limpia (bien en Guanacaste, mal en San
       José/Finca Favorita). Ver el siguiente pendiente.
-- [ ] **Nuevo, de Hallazgo 26:** investigar por qué el ráster crudo de GWA (sin ningún ajuste) se
-      aleja tanto de la realidad específicamente en San José (-43%) y Finca Favorita (-87%) — el
-      mecanismo de razón en sí funciona bien (Liberia mejoró sobre todo lo anterior), el problema
-      está en el dato crudo de esos dos sitios. Candidatos sin probar: otra altura del ráster, otro
-      producto de GWA, o una limitación real del downscaling en terreno de valle/costa-boscoso.
-- [ ] **Nuevo, de Hallazgo 26:** en paralelo, probar Köppen/polígonos climáticos (Alternativa 2
-      original del primer pedido de Pablo, nunca investigada) o ERA5 como fuente continua para el
-      mismo mecanismo de razón (distinto del quantile mapping de Hallazgo 23) — dos caminos
-      todavía sin explorar si GWA no termina de resolverse.
+- [ ] **Pausado, de Hallazgo 26 (decisión de Pablo):** investigar por qué el ráster crudo de GWA
+      (sin ningún ajuste) se aleja tanto de la realidad específicamente en San José (-43%) y Finca
+      Favorita (-87%) — el mecanismo de razón en sí funciona bien (Liberia mejoró sobre todo lo
+      anterior), el problema está en el dato crudo de esos dos sitios. Candidatos sin probar: otra
+      altura del ráster, otro producto de GWA, o una limitación real del downscaling en terreno de
+      valle/costa-boscoso. Pablo decidió seguir con ERA5 primero — esto queda como algo para afinar
+      más adelante si ERA5 (u otro método) también falla, no descartado.
+- [ ] **Nuevo, de Hallazgo 26/27:** correr la Parte 4 de `notebooks/sensibilizar_punto_exacto.ipynb`
+      en Colab para tener el número real de ERA5 — `engine/era5_client.py` (`factor_ajuste_era5()`)
+      construido y probado con un NetCDF sintético, pero necesita que Pablo tenga cuenta+token de
+      Copernicus CDS (paso nuevo, ni NASA POWER ni GWA lo pedían — ver instrucciones en la Parte 4
+      del notebook) antes de poder correr de verdad. Si ERA5 también falla, queda sin probar
+      Köppen/polígonos climáticos (Alternativa 2 original, nunca investigada).
 
 ## 7. Cómo navegar el repositorio en este punto
 
@@ -1914,7 +1918,10 @@ ECO-Wind/
 │   ├── atmosfera_estandar.py         ← densidad ISA por elevación (Hallazgo 17)
 │   ├── gwa_raster.py                 ← clima para cualquier coordenada de CR, ráster+forma prestada
 │   │                                     (Hallazgo 17) + descargar_raster_pais()/factor_ajuste_gwa(),
-│   │                                     generalizado a cualquier país (Hallazgo 25)
+│   │                                     generalizado a cualquier país (Hallazgo 25) -- pausado,
+│   │                                     resultado mixto (Hallazgo 26)
+│   ├── era5_client.py                ← ajuste espacial vía ERA5 (Hallazgo 25/26), la apuesta actual
+│   │                                     -- necesita cuenta+token de Copernicus CDS de Pablo
 │   ├── epw_real.py                   ← parser EPW propio + 3 sitios reales (Nicoya/Liberia/Finca
 │   │                                     Favorita, Hallazgo 18) + búsqueda/geocodificación/
 │   │                                     descarga de estaciones, 20 países, homologado con
@@ -1941,8 +1948,9 @@ ECO-Wind/
 │   │                                     cercana en cualquiera de los 20 países del catálogo, sin
 │   │                                     anclar nada a San José -- probado en 6 países (Hallazgo 24)
 │   └── sensibilizar_punto_exacto.ipynb  ← ajuste espacial de la estación donante al punto exacto:
-│                                         NASA POWER descartado (falla al revés en terreno
-│                                         accidentado), GWA como reemplazo candidato (Hallazgo 25)
+│                                         NASA POWER descartado (Hallazgo 25), GWA mixto/pausado
+│                                         (Hallazgo 26), ERA5 la apuesta actual (Parte 4, pendiente
+│                                         de correr con cuenta CDS real)
 ├── datos_clima/
 │   ├── *.epw                          ← EPWs de estación real (aeropuerto Juan Santamaría)
 │   ├── gwa_juan_santamaria/           ← export real del Global Wind Atlas
