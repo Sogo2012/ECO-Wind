@@ -36,23 +36,83 @@ except ImportError:
     from flower_turbines_curves import power_in_bouquet, CURVE_COEFFICIENTS
     from atmosfera_estandar import factor_correccion_densidad
 
-Z0_DEFAULT = 0.3  # rugosidad suburbana/urbana baja -- ver wind_at_height()
+Z0_DEFAULT = 0.3      # rugosidad del sitio DESTINO (donde va la turbina) -- ver wind_at_height()
+Z0_MET_DEFAULT = 0.1  # rugosidad del sitio de REFERENCIA meteorologica (aeropuerto/GWA/EPW) --
+                       # clase "country" de EnergyPlus/ladybug-tools, ver wind_at_height()
+
+# Tabla real de la ley de potencia que usa EnergyPlus por default (no la logaritmica) --
+# confirmada en el codigo fuente de ladybug-tools/ladybug, windprofile.py::TERRAIN_PARAMETERS
+# (revisado 31/ago/2026, Hallazgo 20 -- no es de memoria ni de un resumen sin verificar).
+# {terreno: (altura de capa limite [m], exponente de la ley de potencia, longitud de
+# rugosidad z0 [m])}. "country" es la clase que ladybug-tools documenta explicitamente como
+# "typical of most airports where wind measurements are taken" -- coincide con nuestra
+# situacion real (toda la referencia climatica del proyecto viene de aeropuertos/GWA/EPW).
+TERRENOS_ENERGYPLUS = {
+    "water": (210, 0.10, 0.03),
+    "country": (270, 0.14, 0.1),
+    "suburban": (370, 0.22, 0.5),
+    "city": (460, 0.33, 1.0),
+}
 
 
-def wind_at_height(v_ref, h_ref, h_target, z0=Z0_DEFAULT):
+def wind_at_height(v_ref, h_ref, h_target, z0=Z0_DEFAULT, z0_met=Z0_MET_DEFAULT):
     """
-    Perfil logaritmico de viento: v(h) = v_ref * ln(h_target/z0) / ln(h_ref/z0)
+    Perfil logaritmico de viento CON DOS rugosidades distintas (Hallazgo 20):
 
-    h_ref   : altura del dato de referencia (10 para GWA/WS10M).
+        v(h) = v_ref * ln(h_target/z0) / ln(h_ref/z0_met)
+
+    Corrige un error real que tenia esta funcion hasta Hallazgo 20: usaba
+    el MISMO z0 tanto para el sitio de referencia (donde se midio v_ref,
+    normalmente un aeropuerto/GWA/EPW a 10m) como para el sitio destino
+    (donde va la turbina) -- pero son sitios distintos con rugosidad
+    distinta casi siempre. Confirmado como un patron real (no una
+    idealizacion nuestra) en el codigo fuente de ladybug-tools/ladybug
+    (windprofile.py, WindProfile.calculate_wind() con log_law=True), que
+    SI distingue explicitamente "meteorological_terrain" de "terrain". Con
+    datos reales de San Jose, ignorar esta distincion sobreestimaba la
+    velocidad en buje 16-24% (segun el metodo de comparacion) -- y como
+    P∝v^3, eso es ~1.6-1.9x de mas en energia. Ver avance-de-proyecto.md.
+
+    h_ref   : altura del dato de referencia (10 para GWA/WS10M/EPW).
     h_target: altura real de buje de la turbina.
-    z0      : longitud de rugosidad (m) -- 0.03 campo abierto, 0.1 cultivos
-              bajos, 0.3 suburbano (default), 1.0 urbano denso. Las
-              turbinas Flower Turbines son muy bajas (buje 1-6m), casi
-              siempre POR DEBAJO de los 10m de referencia -- la correccion
-              casi siempre REDUCE la velocidad respecto al dato crudo.
+    z0      : rugosidad (m) del sitio DESTINO -- 0.03 campo abierto, 0.1
+              cultivos bajos, 0.3 suburbano (default), 1.0 urbano denso.
+    z0_met  : rugosidad (m) del sitio de REFERENCIA meteorologica -- 0.1
+              por default ("country"/aeropuerto, ver TERRENOS_ENERGYPLUS
+              arriba). Las turbinas Flower Turbines son muy bajas (buje
+              1-6m), casi siempre POR DEBAJO de los 10m de referencia -- la
+              correccion casi siempre REDUCE la velocidad respecto al dato
+              crudo.
+
+    Si h_target <= z0 (el buje queda dentro/debajo de la subcapa de
+    rugosidad del sitio destino), se devuelve 0 -- mismo criterio que
+    ladybug-tools/ladybug (el perfil logaritmico no es fisicamente
+    confiable ahi; mejor un 0 explicito que un numero negativo o
+    indefinido silencioso).
     """
     v_ref = np.asarray(v_ref, dtype=float)
-    return v_ref * np.log(h_target / z0) / np.log(h_ref / z0)
+    if h_target <= z0:
+        return v_ref * 0.0
+    return v_ref * np.log(h_target / z0) / np.log(h_ref / z0_met)
+
+
+def wind_at_height_potencia(v_ref, h_ref, h_target, terreno="suburban", terreno_met="country"):
+    """
+    Ley de potencia (la que usa EnergyPlus por default, NO la logaritmica
+    de wind_at_height()) -- cross-check independiente, misma tabla real de
+    terrenos que ladybug-tools/ladybug (TERRENOS_ENERGYPLUS arriba). No
+    reemplaza wind_at_height(): es una segunda fuente para comparar y
+    detectar si ambos metodos concuerdan razonablemente -- mismo patron de
+    doble verificacion ya usado en el proyecto (p.ej. GWA vs. EPW, Hallazgo 3).
+
+    terreno/terreno_met: uno de "water", "country", "suburban", "city" --
+    ver TERRENOS_ENERGYPLUS para la definicion de cada clase.
+    """
+    d_met, a_met, _ = TERRENOS_ENERGYPLUS[terreno_met]
+    d_dst, a_dst, _ = TERRENOS_ENERGYPLUS[terreno]
+    v_ref = np.asarray(v_ref, dtype=float)
+    factor_met = (d_met / h_ref) ** a_met
+    return ((h_target / d_dst) ** a_dst) * (v_ref * factor_met)
 
 
 def cargar_gwa_json(carpeta):
@@ -142,7 +202,7 @@ def cargar_wind_rose_lib(ruta_lib, z0=0.030, altura=10.0):
 
 
 def simular(df_clima, altura_buje, modelo, N, elevacion_m=0.0, h_ref=10, z0=Z0_DEFAULT,
-            metodo_bouquet="real"):
+            z0_met=Z0_MET_DEFAULT, metodo_bouquet="real"):
     """
     Ensambla la serie horaria de potencia del cluster y la agrega a kWh
     mensual/anual, usando P(v)=k*v^3 x M(N) del motor empirico
@@ -164,7 +224,7 @@ def simular(df_clima, altura_buje, modelo, N, elevacion_m=0.0, h_ref=10, z0=Z0_D
     (sin corregir, nivel del mar) -- pasar la elevacion real del sitio para
     que la correccion de densidad se aplique.
     """
-    v_hub = wind_at_height(df_clima["WS10M"].values, h_ref, altura_buje, z0=z0)
+    v_hub = wind_at_height(df_clima["WS10M"].values, h_ref, altura_buje, z0=z0, z0_met=z0_met)
     potencia_w_por_turbina = power_in_bouquet(v_hub, modelo, N, metodo=metodo_bouquet)
     factor_densidad = factor_correccion_densidad(elevacion_m)
     potencia_w_por_turbina = potencia_w_por_turbina * factor_densidad
@@ -184,7 +244,8 @@ def simular(df_clima, altura_buje, modelo, N, elevacion_m=0.0, h_ref=10, z0=Z0_D
 
 
 def comparar_metodo_ingenuo_vs_horario(df_clima, altura_buje, modelo, N, elevacion_m=0.0,
-                                        h_ref=10, z0=Z0_DEFAULT, metodo_bouquet="real"):
+                                        h_ref=10, z0=Z0_DEFAULT, z0_met=Z0_MET_DEFAULT,
+                                        metodo_bouquet="real"):
     """
     Cuantifica el efecto de Jensen (Requisito 3, Fase 2): compara el
     resultado CORRECTO (P=k*v^3 hora por hora, sumado sobre las 8760 horas
@@ -199,9 +260,9 @@ def comparar_metodo_ingenuo_vs_horario(df_clima, altura_buje, modelo, N, elevaci
 
     Devuelve un diccionario con ambos resultados y la razon entre ellos.
     """
-    correcto = simular(df_clima, altura_buje, modelo, N, elevacion_m, h_ref, z0, metodo_bouquet)
+    correcto = simular(df_clima, altura_buje, modelo, N, elevacion_m, h_ref, z0, z0_met, metodo_bouquet)
 
-    v_hub = wind_at_height(df_clima["WS10M"].values, h_ref, altura_buje, z0=z0)
+    v_hub = wind_at_height(df_clima["WS10M"].values, h_ref, altura_buje, z0=z0, z0_met=z0_met)
     v_media = float(np.mean(v_hub))
     n_horas = len(df_clima)
     potencia_en_media = float(power_in_bouquet(v_media, modelo, N, metodo=metodo_bouquet))

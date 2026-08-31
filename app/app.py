@@ -38,21 +38,24 @@ import os
 import sys
 import tempfile
 
+import folium
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import streamlit as st
+from streamlit_folium import st_folium
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.simulador_pista_a import (
     SITIOS_DISPONIBLES, cargar_gwa_json, generar_clima_gwa, cargar_wind_rose_lib,
-    simular, comparar_metodo_ingenuo_vs_horario,
+    simular, comparar_metodo_ingenuo_vs_horario, wind_at_height_potencia,
 )
 from engine.flower_turbines_curves import CURVE_COEFFICIENTS
 from engine.gwa_raster import generar_clima_sitio_nuevo, RUTA_RASTER_CR_DEFAULT
 from engine.epw_real import (
     SITIOS_EPW_REAL, cargar_epw_real, heatmap_json_desde_epw, rosa_frecuencia_desde_epw,
+    buscar_estaciones_cercanas, descargar_y_extraer_epw,
 )
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -111,9 +114,11 @@ def cargar_clima_sitio(modo, sitio_key, lat, lon, elevacion_m, ruta_epw_custom=N
     viene de un EPW propio -- ignora el valor tecleado en ese caso), error.
 
     modo: "san_jose" | "epw_real" (sitio_key = clave en SITIOS_EPW_REAL) |
-          "epw_custom" (usa ruta_epw_custom, subido por el usuario -- mismo
-          patrón que el "¿Usar EPW personalizado?" de DDP-lite) |
-          "coordenada" (ráster GWA + forma prestada de San José, aproximación).
+          "epw_custom" (usa ruta_epw_custom, subido por el usuario o
+          descargado desde el mapa -- mismo patrón que el "¿Usar EPW
+          personalizado?" de DDP-lite) | "mapa" (sin estación elegida
+          todavía -- error informativo) | "coordenada" (ráster GWA + forma
+          prestada de San José, aproximación).
     """
     if modo == "san_jose":
         sitio = SITIOS_DISPONIBLES[sitio_key]
@@ -121,6 +126,12 @@ def cargar_clima_sitio(modo, sitio_key, lat, lon, elevacion_m, ruta_epw_custom=N
         df_clima, media = generar_clima_gwa(ws_json, hm_json)
         return dict(df_clima=df_clima, media=media, hm_json=hm_json, rosa_freq=rosa_freq,
                     es_aproximacion=False, elevacion_m=elevacion_m, error=None)
+
+    if modo == "mapa":
+        return dict(error=(
+            "Todavía no elegiste ninguna estación. Hacé clic en el mapa para buscar las más "
+            "cercanas y presioná \"Usar\" en la que quieras."
+        ))
 
     if modo in ("epw_real", "epw_custom"):
         try:
@@ -208,15 +219,23 @@ with col_config:
     _opciones_sitio = {"san_jose": ("San José (Juan Santamaría) — datos GWA completos", "san_jose_juan_santamaria")}
     for _k, _s in SITIOS_EPW_REAL.items():
         _opciones_sitio[f"epw_{_k}"] = (f"{_s['nombre']} — EPW real", _k)
+    _opciones_sitio["mapa"] = ("🗺️ Buscar estación en el mapa (climate.onebuilding.org)", None)
     _opciones_sitio["coordenada"] = ("Coordenada personalizada (aproximación)", None)
 
     _modo_ui = st.selectbox(
         "Sitio del proyecto", options=list(_opciones_sitio.keys()),
         format_func=lambda k: _opciones_sitio[k][0],
     )
-    modo_sitio = "san_jose" if _modo_ui == "san_jose" else (
-        "coordenada" if _modo_ui == "coordenada" else "epw_real")
+    if _modo_ui == "san_jose":
+        modo_sitio = "san_jose"
+    elif _modo_ui == "coordenada":
+        modo_sitio = "coordenada"
+    elif _modo_ui == "mapa":
+        modo_sitio = "mapa"
+    else:
+        modo_sitio = "epw_real"
     sitio_key = _opciones_sitio[_modo_ui][1]
+    ruta_epw_custom = None  # se completa más abajo (mapa o uploader propio), si aplica
 
     if modo_sitio == "san_jose":
         sitio = SITIOS_DISPONIBLES[sitio_key]
@@ -226,6 +245,71 @@ with col_config:
     elif modo_sitio == "epw_real":
         lat, lon, elevacion_m = None, None, None  # se completan con el EPW real al cargar
         st.caption(f"EPW real de climate.onebuilding.org (Hallazgo 18) -- sin aproximación.")
+    elif modo_sitio == "mapa":
+        lat, lon, elevacion_m = None, None, None
+        st.caption(
+            "Patrón adoptado de DDP-lite (Sogo2012/DDP-lite, Hallazgo 19): clic en el mapa, "
+            "elegí la estación real más cercana y se descarga su EPW de climate.onebuilding.org "
+            "-- sin aproximación. La descarga necesita internet real: no funciona en este sandbox "
+            "de desarrollo (Hallazgo 2/18), sí en Docker local o Cloud Run."
+        )
+        if "mapa_lat" not in st.session_state:
+            st.session_state.mapa_lat, st.session_state.mapa_lon = 9.9, -84.0
+            st.session_state.mapa_cercanas, st.session_state.mapa_sin_coord = None, []
+            st.session_state.mapa_epw_seleccionado, st.session_state.mapa_estacion_nombre = None, None
+
+        _m = folium.Map(location=[st.session_state.mapa_lat, st.session_state.mapa_lon],
+                         zoom_start=8, tiles="CartoDB positron")
+        folium.Marker(
+            [st.session_state.mapa_lat, st.session_state.mapa_lon], tooltip="Ubicación del proyecto",
+            icon=folium.Icon(color="red", icon="crosshairs"),
+        ).add_to(_m)
+        for _s in (st.session_state.mapa_cercanas or []):
+            folium.Marker(
+                [_s["lat"], _s["lon"]], tooltip=f"{_s['name']} ({_s['distancia_km']} km)",
+                icon=folium.Icon(color="blue", icon="cloud"),
+            ).add_to(_m)
+        _salida_mapa = st_folium(_m, height=340, use_container_width=True, key="mapa_estaciones_cr")
+
+        if _salida_mapa and _salida_mapa.get("last_clicked"):
+            _c_lat, _c_lon = _salida_mapa["last_clicked"]["lat"], _salida_mapa["last_clicked"]["lng"]
+            if (round(_c_lat, 4), round(_c_lon, 4)) != (
+                    round(st.session_state.mapa_lat, 4), round(st.session_state.mapa_lon, 4)):
+                st.session_state.mapa_lat, st.session_state.mapa_lon = _c_lat, _c_lon
+                st.session_state.mapa_cercanas, st.session_state.mapa_sin_coord = \
+                    buscar_estaciones_cercanas(_c_lat, _c_lon)
+                st.rerun()
+
+        def _boton_usar_estacion(_s, _key):
+            _c1, _c2 = st.columns([3, 1])
+            _c1.write(f"**{_s['name']}** ({_s['state']}) -- {_s.get('distancia_km', '?')} km")
+            if _c2.button("Usar", key=_key):
+                with st.spinner(f"Descargando {_s['name']}..."):
+                    try:
+                        _ruta = descargar_y_extraer_epw(_s["url"])
+                        st.session_state.mapa_epw_seleccionado = _ruta
+                        st.session_state.mapa_estacion_nombre = _s["name"]
+                        st.rerun()
+                    except Exception as _e:
+                        st.error(
+                            f"No se pudo descargar {_s['name']}: {_e} -- necesita internet real "
+                            "(no funciona en este sandbox de desarrollo, Hallazgo 2/18)."
+                        )
+
+        if st.session_state.mapa_cercanas:
+            st.caption("Estaciones más cercanas (clic en el mapa para buscar de nuevo):")
+            for _i, _s in enumerate(st.session_state.mapa_cercanas):
+                _boton_usar_estacion(_s, f"btn_mapa_est_{_i}")
+            if st.session_state.mapa_sin_coord:
+                with st.expander(f"{len(st.session_state.mapa_sin_coord)} estaciones más, "
+                                  f"sin coordenada conocida en el catálogo"):
+                    for _i, _s in enumerate(st.session_state.mapa_sin_coord):
+                        _boton_usar_estacion(_s, f"btn_mapa_sc_{_i}")
+
+        if st.session_state.mapa_epw_seleccionado:
+            st.success(f"Estación activa: {st.session_state.mapa_estacion_nombre}")
+            ruta_epw_custom = st.session_state.mapa_epw_seleccionado
+            modo_sitio = "epw_custom"
     else:
         st.warning(
             "Aproximación (Requisito 1, Hallazgo 17): magnitud real del ráster de GWA, forma "
@@ -246,7 +330,6 @@ with col_config:
             "directo (sin aproximación) y reemplaza la selección de arriba para este cálculo."
         )
         _usar_custom = st.toggle("¿Usar mi propio archivo EPW?", value=False, key="usar_epw_custom")
-        ruta_epw_custom = None
         if _usar_custom:
             _archivo = st.file_uploader("Cargar archivo .epw", type=["epw"], key="archivo_epw_custom")
             if _archivo is not None:
@@ -277,10 +360,13 @@ with col_config:
 
     with st.expander("Parámetros avanzados"):
         z0 = st.selectbox(
-            "Rugosidad del terreno (z0)", options=[0.03, 0.1, 0.3, 1.0],
+            "Rugosidad DEL SITIO donde va la turbina (z0)", options=[0.03, 0.1, 0.3, 1.0],
             format_func=lambda z: {0.03: "0.03 — campo abierto", 0.1: "0.1 — cultivos bajos",
                                     0.3: "0.3 — suburbano (default)", 1.0: "1.0 — urbano denso"}[z],
             index=2,
+            help="Rugosidad del sitio DESTINO (donde se instala la turbina), no la del sitio "
+                 "de referencia climática. Desde Hallazgo 20, esta app usa dos rugosidades "
+                 "distintas -- ver la nota en Resultado.",
         )
         metodo_bouquet = st.radio(
             "Modelo de Efecto Bouquet", options=["real", "lineal"],
@@ -342,6 +428,27 @@ with col_resultado:
                 "% bajo cut-in": round(r["pct_horas_bajo_cutin"], 1),
             } for r in resultados])
             st.dataframe(tabla, hide_index=True, use_container_width=True)
+
+            with st.expander("Hallazgo 20 -- perfil de viento por altura: dos rugosidades, y un cross-check independiente"):
+                _r0 = resultados[0]
+                _v_pot = wind_at_height_potencia(
+                    media_confirmada, 10, _r0["altura_buje"], terreno="suburban", terreno_met="country")
+                st.write(
+                    f"El viento de referencia (10m, aeropuerto/GWA/EPW) y el sitio real donde va la "
+                    f"turbina casi nunca tienen la misma rugosidad -- hasta Hallazgo 20 esta app usaba "
+                    f"un solo z0 para los dos, lo que sobreestimaba la velocidad en buje 16-24% (según "
+                    f"el método) en el caso de San José, y como P∝v³ eso es ~1.6-1.9x de más en energía. "
+                    f"Ahora se usa z0 del sitio destino (seleccionable arriba, ver Parámetros avanzados) "
+                    f"**distinto** de z0 de referencia (0.1, clase \"country\"/aeropuerto -- fórmula "
+                    f"logarítmica, ver `engine/simulador_pista_a.py::wind_at_height()`)."
+                )
+                st.write(
+                    f"**Cross-check independiente** (ley de potencia que usa EnergyPlus por default, "
+                    f"misma tabla de terrenos que ladybug-tools/ladybug, terreno suburbano): "
+                    f"{_v_pot:.2f} m/s a {_r0['altura_buje']:.1f}m de buje, vs. "
+                    f"**{_r0['v_hub_medio']:.2f} m/s** con la fórmula logarítmica usada arriba -- "
+                    f"{'concuerdan razonablemente' if abs(_v_pot/_r0['v_hub_medio']-1) < 0.15 else 'difieren más de lo esperado, revisar'}."
+                )
 
             with st.expander("Requisito 3 -- ¿por qué el cálculo es hora por hora, no con la velocidad media?"):
                 cmp = comparar_metodo_ingenuo_vs_horario(

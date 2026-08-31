@@ -1,0 +1,86 @@
+[
+  {
+    "name": "San Jose Santamaria Intl AP",
+    "state": "AL",
+    "url": "https://climate.onebuilding.org/WMO_Region_4_North_and_Central_America/CRI_Costa_Rica/CRI_AL_San.Jose-Santamaria.Intl.AP.787620_TMYx.2009-2023.zip",
+    "lat": 9.9937,
+    "lon": -84.2088
+  },
+  {
+    "name": "Nicoya AP",
+    "state": "GU",
+    "url": "https://climate.onebuilding.org/WMO_Region_4_North_and_Central_America/CRI_Costa_Rica/CRI_GU_Nicoya.AP.787550_TMYx.2009-2023.zip",
+    "lat": 10.1422,
+    "lon": -85.4467
+  },
+  {
+    "name": "Quiros Liberia Intl AP",
+    "state": "GU",
+    "url": "https://climate.onebuilding.org/WMO_Region_4_North_and_Central_America/CRI_Costa_Rica/CRI_GU_Quiros-Liberia.Intl.AP.787740_TMYx.2009-2023.zip",
+    "lat": 10.5931,
+    "lon": -85.5353
+  },
+  {
+    "name": "Finca Favorita",
+    "state": "LI",
+    "url": "https://climate.onebuilding.org/WMO_Region_4_North_and_Central_America/CRI_Costa_Rica/CRI_LI_Finca.Favorita.749033_TMYx.2009-2023.zip",
+    "lat": 9.8833,
+    "lon": -83.9167
+  },
+  {
+    "name": "Limon Intl AP",
+    "state": "LI",
+    "url": "https://climate.onebuilding.org/WMO_Region_4_North_and_Central_America/CRI_Costa_Rica/CRI_LI_Limon.Intl.AP.787670_TMYx.2009-2023.zip",
+    "lat": 9.9578,
+    "lon": -83.0217
+  },
+  {
+    "name": "Chacarita Puntarenas AP",
+    "state": "PU",
+    "url": "https://climate.onebuilding.org/WMO_Region_4_North_and_Central_America/CRI_Costa_Rica/CRI_PU_Chacarita-Puntarenas.AP.787613_TMYx.2009-2023.zip",
+    "lat": null,
+    "lon": null
+  },
+  {
+    "name": "Palmar Sur Southern Zone Intl AP",
+    "state": "PU",
+    "url": "https://climate.onebuilding.org/WMO_Region_4_North_and_Central_America/CRI_Costa_Rica/CRI_PU_Palmar.Sur-Southern.Zone.Intl.AP.787720_TMYx.2009-2023.zip",
+    "lat": null,
+    "lon": null
+  },
+  {
+    "name": "Parrita",
+    "state": "PU",
+    "url": "https://climate.onebuilding.org/WMO_Region_4_North_and_Central_America/CRI_Costa_Rica/CRI_PU_Parrita.749036_TMYx.2009-2023.zip",
+    "lat": null,
+    "lon": null
+  },
+  {
+    "name": "Paso Canoas AP",
+    "state": "PU",
+    "url": "https://climate.onebuilding.org/WMO_Region_4_North_and_Central_America/CRI_Costa_Rica/CRI_PU_Paso.Canoas.AP.787606_TMYx.2009-2023.zip",
+    "lat": null,
+    "lon": null
+  },
+  {
+    "name": "Puntarenas",
+    "state": "PU",
+    "url": "https://climate.onebuilding.org/WMO_Region_4_North_and_Central_America/CRI_Costa_Rica/CRI_PU_Puntarenas.787600_TMYx.2009-2023.zip",
+    "lat": 9.96,
+    "lon": -84.13
+  },
+  {
+    "name": "San Jose Bolanos Intl AP",
+    "state": "SJ",
+    "url": "https://climate.onebuilding.org/WMO_Region_4_North_and_Central_America/CRI_Costa_Rica/CRI_SJ_San.Jose-Bolanos.Intl.AP.787640_TMYx.2009-2023.zip",
+    "lat": null,
+    "lon": null
+  },
+  {
+    "name": "San Jose La Sabana",
+    "state": "SJ",
+    "url": "https://climate.onebuilding.org/WMO_Region_4_North_and_Central_America/CRI_Costa_Rica/CRI_SJ_San.Jose-La.Sabana.787605_TMYx.2009-2023.zip",
+    "lat": 9.9368,
+    "lon": -84.1077
+  }
+]
