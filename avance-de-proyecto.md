@@ -1,7 +1,7 @@
 # ECO | Wind — Avance de Proyecto
 
 **Documento de referencia (alcance):** [`plan-tecnico-eco-wind.md`](./plan-tecnico-eco-wind.md)
-**Última actualización:** 30 de agosto, 2026 (Hallazgo 6 completo — resync, verificación cruzada de fichas técnicas y Matriz Maestra de bouquet)
+**Última actualización:** 30 de agosto, 2026 (Hallazgo 7 — inducción conjunta entre niveles de pala)
 **Propósito:** comparar el alcance planeado contra el avance real, y dejar constancia de los
 hallazgos que no estaban previstos en el plan original. Se actualiza en cada avance
 significativo — no es una foto única.
@@ -343,6 +343,49 @@ web") — el informe .md queda como documento de planificación/exploración, no
 verdad; su cifra de 2.40m para el Large Tulip es un error de ese documento, no del motor
 usado hasta aquí (que sigue en 2.50m, ahora triple-confirmado).
 
+### Hallazgo 7 — Inducción conjunta: mejora real y consistente, con una limitación nueva y honesta
+
+De las dos hipótesis que dejó Hallazgo 6 para la sobre-predicción residual (pérdidas
+electromecánicas, e inducción conjunta entre los dos niveles de pala), se atacó la segunda
+por ser la más directamente implementable sin datos externos nuevos.
+
+**Lo construido:** `potencia_combinada_induccion_conjunta()` en `engine/rotor_combinado.py`
+— en vez de sumar dos discos actuadores independientes (cada uno asumiendo que ve el viento
+V_inf sin perturbar, como en Hallazgo 6), resuelve **un solo factor de inducción compartido**
+a partir del empuje total (sustentación + arrastre) sobre el mismo disco. Simplificación
+deliberada respecto al DMST de doble tubo de corriente: aquí se usa un solo tubo (integración
+0 a 2π en una sola pasada) porque partir el empuje de arrastre entre upwind/downwind
+exigiría una regla de reparto sin datos que la respalden — mejor una asunción menos que una
+arbitraria. El nivel de arrastre se modela como un disco actuador ideal escalado por un
+factor de eficiencia η=0.34/(16/27)≈0.573 (para que su pico coincida exactamente con el
+Cp=0.34 de la patente en a=1/3) — una aproximación de ingeniería explícita, no una medición
+directa de cómo varía el Cp del Savonius con la inducción.
+
+**Resultado honesto — mejora real y consistente en los 4 modelos:**
+
+| Modelo | Razón (discos independientes) | Razón (inducción conjunta) |
+|---|---|---|
+| Small Tulip | 5.39x | 4.61x |
+| Medium Tulip | 2.01x | 1.72x |
+| 3-M Tulip | 2.04x | 1.75x |
+| Large Tulip | 1.23x | **1.05x** (casi exacto) |
+
+También corrige la violación de Betz que Hallazgo 6 encontró en TSR=1.25 (Cp baja de ~0.61 a
+~0.54, dentro del límite).
+
+**Pero con una limitación nueva, encontrada y no escondida:** el factor de inducción queda
+pegado en el techo numérico del modelo (a=0.49) en los 4 modelos reales al TSR objetivo —
+señal de que el sistema combinado opera en la zona de inducción alta donde la teoría de
+momento simple (Cp=4a(1-a)², sin corrección de Glauert) deja de ser confiable. La mejora es
+real y consistente, pero ocurre en un régimen que en rigor necesitaría esa corrección para
+confirmarse con confianza fuera del rango TSR 0.75–1.25 (donde sí se mantiene Betz-compatible
+en todo momento; por encima, TSR≥1.5, vuelve a romper Betz por la misma causa).
+
+**Conclusión:** la inducción conjunta era la pieza que faltaba — no resuelve del todo la
+brecha (Medium y 3-M siguen sobre-prediciendo ~1.7x) pero la reduce de forma consistente y
+sin necesitar datos nuevos, y expone con evidencia concreta (no solo como límite teórico
+listado) que la corrección de Glauert es el siguiente paso necesario, no opcional.
+
 ---
 
 ## 6. Pendientes activos / bloqueos
@@ -384,11 +427,16 @@ usado hasta aquí (que sigue en 2.50m, ahora triple-confirmado).
       honesto: combinar bien **no** resuelve la sobre-predicción — sigue siendo el problema
       abierto de la Pista B. Ver Hallazgo 6.
 - [ ] Investigar pérdidas electromecánicas (generador, rectificador/controlador de carga)
-      como posible causa dominante de la sobre-predicción residual — ningún cálculo de esta
-      pista las incluye todavía (Hallazgo 6).
-- [ ] Resolver una inducción conjunta entre los dos niveles de pala (arrastre + sustentación)
-      en vez de sumarlos como discos actuadores independientes — la suma simple rompe Betz en
-      el borde de la tolerancia ±25% de TSR de la patente (Hallazgo 6).
+      como posible causa de la sobre-predicción residual que la inducción conjunta no cerró
+      del todo (Medium/3-M siguen ~1.7x) — ningún cálculo de esta pista las incluye todavía
+      (Hallazgo 6/7).
+- [x] ~~Resolver una inducción conjunta entre los dos niveles de pala (arrastre +
+      sustentación) en vez de sumarlos como discos actuadores independientes~~ — implementado
+      y validado: mejora consistente en los 4 modelos (Large casi exacto, 1.05x) y corrige la
+      violación de Betz en TSR=1.25. Ver Hallazgo 7.
+- [ ] Agregar corrección de Glauert a alta inducción — la inducción conjunta (Hallazgo 7)
+      queda pegada en el techo numérico (a=0.49) en los 4 modelos reales al TSR objetivo,
+      señal concreta (no solo teórica) de que esta corrección ya hace falta, no es opcional.
 - [x] ~~Resincronizar `documentos_tecnicos/` con el contenido real desde Drive~~ — resuelto,
       90 de 91 archivos. El manual de SolArk (inversor de terceros) queda fuera de alcance por
       decisión del Director del Proyecto — no bloquea nada. Ver Hallazgo 6.
