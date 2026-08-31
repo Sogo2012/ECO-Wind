@@ -1,7 +1,7 @@
 # ECO | Wind — Avance de Proyecto
 
 **Documento de referencia (alcance):** [`plan-tecnico-eco-wind.md`](./plan-tecnico-eco-wind.md)
-**Última actualización:** 31 de agosto, 2026 (Hallazgo 16 — arranca Fase 2: MVP de Streamlit + Dockerfile listo, build sin verificar del todo por bloqueo de red del sandbox)
+**Última actualización:** 31 de agosto, 2026 (Hallazgo 17 — clima multi-sitio, densidad por elevación, cálculo horario probado con el efecto de Jensen cuantificado, multi-clúster y gráficos)
 **Propósito:** comparar el alcance planeado contra el avance real, y dejar constancia de los
 hallazgos que no estaban previstos en el plan original. Se actualiza en cada avance
 significativo — no es una foto única.
@@ -14,7 +14,7 @@ significativo — no es una foto única.
 |---|---|
 | **Fase 1 — Pista A** (motor empírico) | 🟢 Sólida — mecánica y fuentes de datos climáticos (EPW + GWA) validadas con datos reales; z0/afinación fina quedó pendiente para más adelante (decisión del Director del Proyecto) |
 | **Fase 1 — Pista B** (motor físico DMST + CFD) | 🟡 Aerodinámica congelada (vía agotada, sobre-predicción sigue abierta, Hallazgo 8); curvas de potencia re-verificadas contra el calculador oficial, sin dudas reales (Hallazgo 12) — módulo estructural ASCE 7 con demanda de anclaje para 5 modelos y carga de clúster conservadora (Hallazgos 9-10, 13); Cilindro Actuador implementado y validado, pero no reproduce el Efecto Bouquet real todavía (Hallazgo 15) |
-| **Fase 2** (productización: Streamlit + Cloud Run) | 🟡 MVP arrancado — app de Streamlit funcional corriendo local sobre Pista A, un sitio real (San José). Falta: más sitios/coordenada arbitraria, mapa, PDF, leads, despliegue a Cloud Run (Hallazgo 16) |
+| **Fase 2** (productización: Streamlit + Cloud Run) | 🟡 Multi-clúster, corrección de densidad, cálculo horario probado (Jensen), gráficos (rosa de vientos, heatmap, curva de duración), y arquitectura para cualquier coordenada de Costa Rica (ráster+forma prestada, pendiente el archivo real). Falta: mapa, PDF, leads, despliegue a Cloud Run (Hallazgos 16-17) |
 
 ---
 
@@ -904,6 +904,69 @@ de prueba — funcionó igual que en el `CMD`. Falta la verificación final: cor
 eco-wind-app .` y `docker run -p 8501:8501 eco-wind-app` en una máquina con salida a internet
 normal (la tuya) para confirmar el build de punta a punta.
 
+### Hallazgo 17 — Clima multi-sitio, densidad por elevación, cálculo horario probado (Jensen), multi-clúster y gráficos
+
+Pablo pidió 5 extensiones sobre la Pista A/MVP ya validados, con instrucción explícita de
+investigar antes de picar código en el Requisito 1 (multi-sitio). Resumen por requisito:
+
+**Requisito 1 — clima real para cualquier coordenada de Costa Rica.** Investigación previa
+(no se improvisó): Global Wind Atlas SÍ tiene una API oficial documentada, pero es de
+**rásters por país**, no de consulta puntual con distribución completa —
+`globalwindatlas.info/api/gis/country/{ISO3}/wind-speed/{altura}`, devuelve un GeoTIFF de
+velocidad media (~250m de resolución). Verificado leyendo el código fuente real del paquete de
+R `energyRt/globalwindatlas` (que ya usa este endpoint en producción), no de un resumen de
+búsqueda sin confirmar — `globalwindatlas.info` sigue bloqueado en este sandbox (Hallazgo 2)
+para probarlo directo. Con esto confirmado, Pablo eligió la opción recomendada: **ráster de
+Costa Rica completo (velocidad media real) + forma prestada de San José** (curva de excedencia
+normalizada + patrón diurno/estacional), escalada a la media real de cada coordenada nueva —
+aproximación declarada explícitamente en el código y en la UI, no presentada como si fuera tan
+buena como datos propios del sitio. Implementado en `engine/gwa_raster.py`. **No se pudo
+descargar el ráster real en este entorno** (mismo bloqueo de red que NASA POWER/GWA-San José,
+Hallazgo 2) — la función de descarga está lista pero debe correrse en Colab. Se verificó todo
+lo posible sin el archivo real: muestreo de un GeoTIFF sintético de prueba (interpolación e
+indexado correctos), y que `generar_clima_gwa(media_objetivo=...)` reproduce EXACTO (diferencia
+0.0) el resultado real de San José cuando se le da su propia media exacta — prueba matemática
+de que el escalado de forma es correcto, la mejor validación posible sin el archivo real.
+
+**Requisito 2 — corrección de densidad de aire por elevación.** Nuevo módulo
+`engine/atmosfera_estandar.py`, fórmula barométrica ISA estándar. Verificado contra tabla de
+atmósfera estándar publicada: error <0.04% en todo el rango 0-5000m. Caso real (Aeropuerto
+Juan Santamaría, 921m, verificado AIP/DGAC vía búsqueda — múltiples fuentes coinciden en
+920-921m): factor de corrección 0.9145, **8.5% menos producción** que si se ignorara la
+elevación — magnitud físicamente razonable (~1%/100m en ese rango). Aclarado explícitamente en
+el código: esto NO es lo mismo que el `powerDensity` que exporta GWA (ese es un indicador
+combinado de recurso, no una corrección de densidad aplicable a una curva ya calibrada a otra
+densidad).
+
+**Requisito 3 — cálculo horario real, no promedio.** Verificado (no solo afirmado): `simular()`
+YA aplicaba P=k·v³ sobre el arreglo horario completo (8760 valores), no sobre la velocidad
+media — esto ya era correcto desde Hallazgo 16, simplemente no estaba probado ni explicado
+explícitamente. Se agregó `comparar_metodo_ingenuo_vs_horario()` para cuantificarlo con datos
+reales: para San José (Medium Tulip×3, buje 3m), el método correcto da 354.7 kWh/año; el
+método ingenuo (potencia evaluada en la velocidad media, ×8760 horas) da solo 187.6 kWh/año —
+**el método ingenuo subestima 1.89x**, una diferencia grande, no un matiz menor, consecuencia
+directa de la desigualdad de Jensen (E[v³]≥(E[v])³) sobre un recurso con variabilidad real. La
+serie horaria completa ahora se expone en la UI vía una curva de duración anual (ver
+Requisito 5), no solo en el diccionario de retorno interno.
+
+**Requisito 4 — multi-clúster.** La app ahora permite agregar/quitar clústers independientes
+(cada uno con su propio modelo/N/altura de buje) al mismo proyecto, con producción total
+agregada y una tabla de detalle por clúster — mismo patrón que Kilowatts UK (varios bouquets
+independientes por sitio).
+
+**Requisito 5 — gráficos.** Clima: rosa de vientos direccional (parseada del `.lib` real de
+San José — 12 sectores, frecuencia + Weibull A/k por sector, ya confirmaba en Hallazgo 3 los
+sectores dominantes 90°-150°) y heatmap mes×hora del patrón diurno/estacional real. Generación:
+gráfico mensual (ya existía) + **curva de duración anual** (las 8760 horas ordenadas de mayor a
+menor producción) — se eligió esta forma en vez de graficar las 8760 horas directo (ilegible)
+porque es el estándar de la industria para mostrar un recurso horario completo en un gráfico
+legible, y conecta directamente con el hallazgo del Requisito 3 (muestra visualmente cuánta
+energía viene de relativamente pocas horas de alta producción).
+
+**Validado con Playwright** (clics reales, no solo "arrancó sin error"): flujo completo de San
+José con 2 clústers agregados, las 4 pestañas/secciones de gráficos, y el camino de coordenada
+personalizada mostrando el mensaje de error claro (no un traceback) cuando falta el ráster.
+
 ---
 
 ## 6. Pendientes activos / bloqueos
@@ -1058,6 +1121,17 @@ normal (la tuya) para confirmar el build de punta a punta.
       solo corre local (Hallazgo 16).
 - [ ] Agregar al MVP: mapa de ubicación, PDF de cotización, registro de leads (Sheets vs.
       Airtable, todavía sin decidir) (Hallazgo 16, plan sección 5).
+- [ ] Descargar el ráster real de Costa Rica (`datos_clima/gwa_costa_rica_10m.tif`) desde un
+      entorno con internet real (Colab) usando `descargar_raster_costa_rica()` — sin esto, el
+      camino de "coordenada personalizada" de la app no funciona (Hallazgo 17).
+- [ ] Resolver búsqueda automática de elevación por DEM — hoy es manual en la app para
+      coordenadas nuevas (Hallazgo 17).
+- [ ] Validar la aproximación de "forma prestada de San José" contra datos reales de al menos
+      un segundo sitio con export propio de GWA, para tener una idea de cuánto error introduce
+      la aproximación en la práctica (Hallazgo 17).
+- [ ] Cuando exista el ráster real, decidir si vale la pena pedir también capacity-factor
+      (`/api/gis/country/CRI/capacity-factor_IEC{1,2,3}`) del mismo endpoint oficial, como
+      dato adicional (Hallazgo 17).
 
 ## 7. Cómo navegar el repositorio en este punto
 
@@ -1067,12 +1141,15 @@ ECO-Wind/
 ├── avance-de-proyecto.md             ← este documento
 ├── Dockerfile, .dockerignore          ← Docker local (Hallazgo 16) -- build sin verificar en
 │                                         este entorno, ver adenda de Hallazgo 16
-├── app/                               ← Fase 2, MVP de Streamlit (Hallazgo 16)
-│   ├── app.py                         ← interfaz, corre local con `streamlit run app/app.py`
+├── app/                               ← Fase 2, MVP de Streamlit (Hallazgos 16-17)
+│   ├── app.py                         ← interfaz, multi-clúster + gráficos, corre local con
+│   │                                     `streamlit run app/app.py`
 │   └── requirements.txt
 ├── engine/
 │   ├── flower_turbines_curves.py     ← motor de curvas de potencia, validado (Hallazgo 12)
-│   ├── simulador_pista_a.py          ← simular()/wind_at_height()/GWA, extraído del notebook (Hallazgo 16)
+│   ├── simulador_pista_a.py          ← simular()/wind_at_height()/GWA/wind rose/Jensen (Hallazgos 16-17)
+│   ├── atmosfera_estandar.py         ← densidad ISA por elevación (Hallazgo 17)
+│   ├── gwa_raster.py                 ← clima para cualquier coordenada de CR, ráster+forma prestada (Hallazgo 17)
 │   ├── dmst_model.py, rotor_combinado.py, polar_hibrido.py, naca0018_polar.py  ← Pista B aerodinámica
 │   ├── estructural_asce7.py          ← Pista B estructural, ASCE 7 (Hallazgos 9-10, 13-14)
 │   └── actuator_cylinder.py          ← Pista B efecto clúster, Cilindro Actuador (Hallazgo 15)
@@ -1081,6 +1158,7 @@ ECO-Wind/
 │   └── pista_b_motor_fisico.ipynb    ← sandbox Pista B, aerodinámica
 ├── datos_clima/
 │   ├── *.epw                          ← EPWs de estación real (por ahora: aeropuerto Juan Santamaría)
-│   └── gwa_juan_santamaria/           ← export real del Global Wind Atlas (único sitio preparado)
+│   ├── gwa_juan_santamaria/           ← export real del Global Wind Atlas (único sitio con datos propios)
+│   └── gwa_costa_rica_10m.tif          ← (falta) ráster de todo el país, ver pendientes Hallazgo 17
 └── documentos_tecnicos/               ← research, fichas técnicas, insumos originales
 ```
