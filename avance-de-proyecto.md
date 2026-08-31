@@ -300,13 +300,39 @@ constante (Cp=0.34 fijo, sin curva Cp(TSR) completa disponible para ese nivel). 
 como limitación explícita del modelo: una versión más rigurosa necesitaría resolver una
 inducción conjunta entre ambos niveles, no sumarlos de forma independiente.
 
-**Problema de datos real encontrado en el repo (separado del hallazgo anterior):** cada PDF
-y DOCX en `documentos_tecnicos/` (~80 archivos) es un placeholder de 11 bytes, no el
-contenido real — causado por el commit `e53ebf5` ("Add files via upload", Pablo, 29/ago),
-donde el subidor web de GitHub no llevó el contenido binario. Los archivos reales sí existen
-en el Drive del proyecto; se confirmaron dos de ellos ahí (`External Load Calculations` y la
-ficha real de Medium Tulip, que reconfirma de forma independiente los 622 W a 12 m/s del
-motor empírico). Pendiente decidir con Pablo cómo resincronizar el resto.
+**Problema de datos real encontrado en el repo (separado del hallazgo anterior), ya
+resuelto:** cada PDF/DOCX/PNG/JPG en `documentos_tecnicos/` (91 archivos) era un placeholder
+de 11 bytes, no el contenido real — causado por el commit `e53ebf5` ("Add files via upload",
+Pablo, 29/ago), donde el subidor web de GitHub no llevó el contenido binario. Resincronizado
+desde el Drive del proyecto (90 de 91 — falta solo el manual de instalación de SolArk, ~6.5MB,
+por un corte de sesión de Drive; es documentación de un inversor de terceros, no de Flower
+Turbines, baja prioridad). Cada archivo se emparejó verificando el contenido contra la
+carpeta del repo, no solo el nombre — Drive tiene archivos duplicados con el mismo nombre en
+carpetas distintas (ej. "Medium Tulip Turbine.pdf" existe como ficha técnica, como
+declaración CE, y como guía de inicio rápido).
+
+**Con el contenido real ya disponible, verificación cruzada de las fichas técnicas:**
+diámetros de Small/Medium/3-M/Large Tulip (0.55/1.18/1.80/2.50m) confirmados exactos contra
+`flower_turbines_curves.py` en las fichas técnicas Y en `Turbine Diameters.pdf`(tercera
+fuente independiente) — **el diámetro del Large Tulip queda confirmado en 2.50m** (no 2.40m,
+ver más abajo). El AL13 Power Tower ahora tiene ficha técnica real por primera vez: 1.7m de
+diámetro de pala (antes sin dato confiable), 1kW con 2 módulos hasta 5kW con 8, ≈350W por
+módulo a 12 m/s. **Discrepancia real encontrada:** el coeficiente `al13_2m` ya en
+`flower_turbines_curves.py` predice 1523.7W a 12 m/s — más del doble de lo que implica la
+ficha real (~700-1000W para un stack de 2 módulos). El comentario original en el código ya
+avisaba que esos coeficientes eran "leídos aproximadamente de curvas suaves de un PDF" — con
+la ficha real ya disponible, los 4 coeficientes AL13 (`al13_2m/4m/6m/8m`) necesitan
+recalibrarse. No se tocó el motor todavía — queda como pendiente explícito.
+
+**Aclaración sobre `informe-plan-simulador-web-vawt.md`:** este documento (ya real, antes
+placeholder) incluye un motor de simulación en JavaScript completo y distinto al usado en
+Pista A/B — curvas de potencia por tabla de interpolación (no P=k·v³ continuo) y un
+multiplicador de bouquet escalonado (1.0/1.25/2.00/2.28, no la exponencial suave ya
+validada). También lista el diámetro del Large Tulip como 2.40m. Consultado con Pablo:
+**`flower_turbines_curves.py` es el vigente** ("es lo que comunica el fabricante en su sitio
+web") — el informe .md queda como documento de planificación/exploración, no como fuente de
+verdad; su cifra de 2.40m para el Large Tulip es un error de ese documento, no del motor
+usado hasta aquí (que sigue en 2.50m, ahora triple-confirmado).
 
 ---
 
@@ -354,15 +380,19 @@ motor empírico). Pendiente decidir con Pablo cómo resincronizar el resto.
 - [ ] Resolver una inducción conjunta entre los dos niveles de pala (arrastre + sustentación)
       en vez de sumarlos como discos actuadores independientes — la suma simple rompe Betz en
       el borde de la tolerancia ±25% de TSR de la patente (Hallazgo 6).
-- [ ] Resincronizar `documentos_tecnicos/` con el contenido real desde Drive — el repo solo
-      tiene placeholders de 11 bytes en ~80 archivos PDF/DOCX (causa raíz identificada:
-      commit `e53ebf5`, subida web de GitHub). Decidir con Pablo el alcance (todo, o solo lo
-      relevante a Pista B) — ver Hallazgo 6.
+- [x] ~~Resincronizar `documentos_tecnicos/` con el contenido real desde Drive~~ — resuelto,
+      90 de 91 archivos (falta el manual de SolArk por un corte de sesión de Drive, baja
+      prioridad, es de un tercero). Ver Hallazgo 6.
+- [ ] Recalibrar los coeficientes `al13_2m/4m/6m/8m` en `flower_turbines_curves.py` — con la
+      ficha técnica real del AL13 ya disponible (1.7m diámetro, ≈350W/módulo a 12 m/s), el
+      coeficiente actual de `al13_2m` predice más del doble de eso (1523.7W) — se leyó
+      aproximadamente de una gráfica sin la ficha real a mano. Ver Hallazgo 6.
 - [ ] Validar la calibración K(v) contra datos de campo reales (catálogo Flower Turbines
       vs. dispersión real) — necesita el CSV detrás de los gráficos de dispersión, no solo
       las imágenes PNG.
-- [ ] Evaluar los 4 modelos AL13 Power Tower (catálogo del motor empírico incluye 8 modelos,
-      no 4 — AL13 es una línea de producto distinta a la Tulip, sin cubrir todavía en Pista B).
+- [ ] Extender Pista B (DMST/Savonius/modelo combinado) a los modelos AL13 Power Tower — ya
+      tienen ficha técnica real (1.7m, módulos de 1m apilables), pero ningún cálculo de
+      Pista B los cubre todavía; toda la Pista B hecha hasta ahora es sobre la línea Tulip.
 - [ ] Decidir registro de leads para la Fase 2 (Sheets vs. Airtable — abierto en el plan,
       sección 7).
 
