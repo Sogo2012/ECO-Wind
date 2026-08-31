@@ -65,14 +65,22 @@ ST_CILINDRO = 0.2  # numero de Strouhal para cilindros circulares en regimen
                     # subcritico -- valor estandar de la literatura
 
 # Patrones de anclaje REALES, de los planos de base de concreto de Flower
-# Turbines (Big Pedestal Concrete Base ASSY / Power Tower Concrete Base
-# ASSY). n_pernos: cantidad de varillas roscadas M18x2.5. ancho_patron_m:
-# dimension exterior del patron cuadrado (m). peso_distribuido_kg: carga
-# distribuida nominal indicada en el plano (no es capacidad de diseño de
-# los pernos, es una referencia del propio plano).
+# Turbines (Big/Small Pedestal Concrete Base ASSY, Power Tower Concrete
+# Base ASSY). n_pernos: cantidad de varillas roscadas. diametro_perno:
+# rosca de la varilla. ancho_patron_m: dimension exterior del patron
+# cuadrado (m). peso_distribuido_kg: carga distribuida nominal indicada
+# en el plano (no es capacidad de diseño de los pernos, es una referencia
+# del propio plano).
+#
+# "Small Pedestal" (del plano) cubre Medium Tulip (2m) Y 3-M Tulip (3m)
+# con el MISMO patron -- es un nombre de TAMAÑO DE BASE relativo a "Big
+# Pedestal", no el producto "Small Tulip" (1.15m de pala). No hay plano
+# de base documentado especificamente para el Small Tulip todavia.
 PATRONES_ANCLAJE = {
-    "large_tulip":       {"n_pernos": 12, "ancho_patron_m": 0.8744, "peso_distribuido_kg": 675},
-    "al13_power_tower":  {"n_pernos": 12, "ancho_patron_m": 0.7744, "peso_distribuido_kg": 816},
+    "large_tulip":       {"n_pernos": 12, "diametro_perno": "M18x2.5", "ancho_patron_m": 0.8744, "peso_distribuido_kg": 675},
+    "al13_power_tower":  {"n_pernos": 12, "diametro_perno": "M18x2.5", "ancho_patron_m": 0.7744, "peso_distribuido_kg": 816},
+    "medium_tulip":      {"n_pernos": 12, "diametro_perno": "M14x2",   "ancho_patron_m": 0.6025, "peso_distribuido_kg": 311},
+    "three_m_tulip":     {"n_pernos": 12, "diametro_perno": "M14x2",   "ancho_patron_m": 0.6025, "peso_distribuido_kg": 311},
 }
 
 
@@ -272,3 +280,41 @@ if __name__ == "__main__":
     print("  perno M18x2.5 aguanta -- esa capacidad (fluencia + arranque del concreto) es")
     print("  responsabilidad del ingeniero civil, tal como señalan los propios planos de")
     print("  Flower Turbines. No se afirma aqui que el anclaje sea adecuado o inadecuado.")
+
+    print()
+    print("=" * 78)
+    print("Base de las turbinas PEQUEÑAS (Medium Tulip, 3-M Tulip) -- plano real")
+    print("\"Small Pedestal Concrete Base ASSY\" (12x M14x2, patron 602.5x602.5mm):")
+    r_3m = calcular_cargas_viento_asce7(v_rafaga=40.0, altura_techo_m=0.0,
+                                         diametro=1.80, altura_pala=3.0, cd_max=2.3)
+    patron_3m = PATRONES_ANCLAJE["three_m_tulip"]
+    t_max_3m = tension_maxima_pernos(r_3m["Mw_Nm"], patron_3m["n_pernos"], patron_3m["ancho_patron_m"])
+    print(f"  Mw (3-M Tulip, rafaga 40 m/s, a nivel de piso): {r_3m['Mw_Nm']/1000:.2f} kN*m")
+    print(f"  Tension maxima estimada por perno: {t_max_3m:.0f} N ({t_max_3m/1000:.2f} kN)")
+    print("  NOTA: \"Small Pedestal\" es el nombre de TAMAÑO DE BASE (vs. \"Big Pedestal\"), no el")
+    print("  producto \"Small Tulip\" (0.55m diametro, 1.15m pala) -- cubre Medium y 3-M Tulip.")
+    print("  No hay plano de base documentado todavia especificamente para el Small Tulip.")
+
+    print()
+    print("=" * 78)
+    print("Tercer chequeo -- Calculation of forces.pdf, un diagrama de cuerpo libre real con")
+    print("reacciones en la base (probable 3-M Tulip: W=3.9kN=400kg coincide con la ficha")
+    print("tecnica; T aplicado a 2.35m coincide con la mitad de la altura de pala + pedestal):")
+    print("  Datos del documento: T=1.08 kN a 30 m/s, W=3.9 kN, R1=1.44 kN, R2=5.34 kN")
+    print(f"  Chequeo 1 -- equilibrio vertical simple, R1+R2 debe ser = W:")
+    print(f"    R1+R2 = {1.44+5.34:.2f} kN  vs  W = 3.9 kN  -- NO COINCIDEN (diferencia 2.88 kN).")
+    print("    No se fuerza una explicacion: R1/R2 podrian no ser reacciones verticales puras")
+    print("    (la base es tipo tripode/patas, no la placa+pernos de los otros planos -- un")
+    print("    diagrama 2D con 2 reacciones etiquetadas puede no equivaler a un simple balance")
+    print("    de 2 apoyos verticales). Documentado como pregunta abierta, no resuelta aqui.")
+    cd_calc_forces = 1080 / (0.5 * 1.225 * 1.8 * 3.0 * 30.0 ** 2)
+    print(f"  Chequeo 2 -- Cd efectivo implicito en T=1.08kN (con A=D*H=5.4 m^2 del 3-M Tulip):")
+    print(f"    Cd efectivo = {cd_calc_forces:.2f}  -- MUY por debajo de 2.3 (peor caso) o incluso")
+    print("    del Cd~2.21 encontrado en External Load Calculations para el \"3m Turbine\"")
+    print("    (cuyo Frotor a 30 m/s es 2.7 kN, 2.5x mas que este T=1.08 kN).")
+    print("  Hipotesis mas probable (NO confirmada): este documento podria representar un caso")
+    print("  de carga distinto -- empuje de OPERACION normal (rotor girando, generando")
+    print("  sustentacion, no un cuerpo romo estatico) en vez del caso extremo de \"ambas palas")
+    print("  totalmente cargadas\" que usa External Load Calculations. Discrepancia real entre")
+    print("  documentos internos de Flower Turbines, documentada, no resuelta con los datos")
+    print("  disponibles -- no se uso este valor de T en el modulo, se dejo como hallazgo.")

@@ -1,7 +1,7 @@
 # ECO | Wind — Avance de Proyecto
 
 **Documento de referencia (alcance):** [`plan-tecnico-eco-wind.md`](./plan-tecnico-eco-wind.md)
-**Última actualización:** 31 de agosto, 2026 (Hallazgo 9 — módulo estructural ASCE 7, validado + demanda de anclaje con planos reales)
+**Última actualización:** 31 de agosto, 2026 (Hallazgo 10 — base de turbinas pequeñas + discrepancia real sin resolver entre documentos internos)
 **Propósito:** comparar el alcance planeado contra el avance real, y dejar constancia de los
 hallazgos que no estaban previstos en el plan original. Se actualiza en cada avance
 significativo — no es una foto única.
@@ -13,7 +13,7 @@ significativo — no es una foto única.
 | Fase / Pista | Estado |
 |---|---|
 | **Fase 1 — Pista A** (motor empírico) | 🟢 Sólida — mecánica y fuentes de datos climáticos (EPW + GWA) validadas con datos reales; z0/afinación fina quedó pendiente para más adelante (decisión del Director del Proyecto) |
-| **Fase 1 — Pista B** (motor físico DMST + CFD) | 🟡 Aerodinámica congelada (vía agotada, sobre-predicción sigue abierta, Hallazgo 8) — primer módulo estructural ASCE 7 construido y validado contra cargas reales de Flower Turbines (Hallazgo 9) |
+| **Fase 1 — Pista B** (motor físico DMST + CFD) | 🟡 Aerodinámica congelada (vía agotada, sobre-predicción sigue abierta, Hallazgo 8) — primer módulo estructural ASCE 7 construido y validado contra cargas reales de Flower Turbines, con demanda de anclaje para 4 modelos incluyendo la base de las turbinas pequeñas (Hallazgos 9 y 10) |
 | **Fase 2** (productización: Streamlit + Cloud Run) | ⚪ No iniciada |
 
 ---
@@ -131,7 +131,7 @@ combinado — útil más adelante para orientación de bouquets).
 | 1 | DMST turbina aislada (patentes CA2800765C/US9255567B2, ES2970155T3/AU2019380766B2) | 🟡 Sustentación (NACA 0018) y arrastre (Savonius) construidos y validados por separado; combinados con la arquitectura real de dos niveles de pala (`engine/rotor_combinado.py`) y verificados (Betz + 4 modelos) — combinar bien no resuelve la sobre-predicción, ver Hallazgo 6 |
 | 2 | Pérdida dinámica a TSR bajo (Leishman-Beddoes) | ⚪ No iniciado |
 | 3 | Efecto clúster (Cilindro Actuador, OpenFOAM offline) | ⚪ No iniciado |
-| 4 | Estructural (ASCE 7) | 🟡 Primer módulo construido y validado (`engine/estructural_asce7.py`) — presión dinámica, corte basal, momento de vuelco, frecuencia de vórtices. Ver Hallazgo 9 |
+| 4 | Estructural (ASCE 7) | 🟡 Primer módulo construido y validado (`engine/estructural_asce7.py`) — presión dinámica, corte basal, momento de vuelco, frecuencia de vórtices. Demanda de anclaje con patrones reales para 4 modelos (Large Tulip, AL13 Power Tower, Medium Tulip, 3-M Tulip). Ver Hallazgos 9 y 10 |
 
 **Lo construido:** `engine/dmst_model.py` (solver DMST de doble tubo de corriente —
 simplificado, un factor de inducción por semicírculo upwind/downwind, no multi-tubo por
@@ -504,6 +504,44 @@ Mw=50.93 kN·m → tensión estimada ≈9.71 kN en el perno más cargado (cálcu
 cupla en el ancho exterior del patrón, no un análisis riguroso de grupo de anclajes tipo ACI
 318 Apéndice D).
 
+### Hallazgo 10 — Base de las turbinas pequeñas: plano real incorporado, y una discrepancia real sin resolver entre dos documentos internos de Flower Turbines
+
+Pablo pidió analizar la base de las turbinas pequeñas, compartiendo 3 documentos — 2 nuevos
+sin revisar todavía (`Small Pedestal Concrete Base ASSY`, `Calculation of forces.pdf`) y
+`Turbine Diameters.pdf` (re-confirmado, idéntico a lo ya usado).
+
+**`Small Pedestal Concrete Base ASSY` — plano real, incorporado a `PATRONES_ANCLAJE`:** cubre
+Medium Tulip (2m) y 3-M Tulip (3m) con el **mismo patrón** — 12 varillas roscadas M14×2 (más
+delgadas que las M18×2.5 de Large Tulip/AL13), patrón cuadrado 602.5×602.5mm, espaciado
+370mm, empotramiento 80mm, 311kg de peso distribuido de referencia. **Aclaración de nombres,
+importante:** "Small Pedestal" es un nombre de *tamaño de base* (relativo a "Big Pedestal"),
+**no** el producto "Small Tulip" (0.55m diámetro, 1.15m de pala) — no hay plano de base
+documentado todavía específicamente para ese modelo, el más pequeño de la línea. Caso de
+prueba con este patrón: 3-M Tulip a 40 m/s ráfaga → Mw=13.20 kN·m → tensión estimada
+≈3.65 kN en el perno más cargado.
+
+**`Calculation of forces.pdf` — diagrama de cuerpo libre real, con una discrepancia real no
+resuelta.** El documento reporta (probablemente para 3-M Tulip: W=3.9kN≈400kg coincide con la
+ficha técnica, y la altura de aplicación de T, 2.35m, coincide con la mitad de la altura de
+pala más el pedestal): T=1.08 kN a 30 m/s, W=3.9 kN, R1=1.44 kN, R2=5.34 kN. Verificado antes
+de usarlo, no aceptado tal cual:
+
+1. **Equilibrio vertical simple no cierra:** R1+R2=6.78 kN ≠ W=3.9 kN (diferencia de 2.88 kN).
+   No se fuerza una explicación — la base en este documento es tipo trípode/patas (no la
+   placa+pernos de los otros planos), así que R1/R2 podrían no ser reacciones verticales
+   puras en el sentido simple que se asumió al chequear. Pregunta abierta, no resuelta.
+2. **Cd efectivo implícito en T=1.08kN (≈0.36, con A=D×H=5.4m² del 3-M Tulip) está muy por
+   debajo** tanto del peor caso (2.3) como del Cd≈2.21 ya validado en `External Load
+   Calculations` para lo que parece ser la misma turbina (cuyo Frotor a 30 m/s es 2.7 kN —
+   2.5 veces más que este T=1.08 kN).
+
+**Hipótesis más probable, no confirmada:** este documento podría representar un caso de carga
+distinto — empuje de **operación normal** (rotor girando, generando sustentación) en vez del
+caso extremo de "ambas palas totalmente cargadas" (cuerpo romo estático) que usa `External
+Load Calculations`. Es una discrepancia real entre dos documentos internos de Flower
+Turbines, documentada honestamente — **no se usó este valor de T en el módulo**, queda como
+hallazgo abierto en vez de forzarse a encajar.
+
 ---
 
 ## 6. Pendientes activos / bloqueos
@@ -585,10 +623,18 @@ cupla en el ancho exterior del patrón, no un análisis riguroso de grupo de anc
       `3 meter AL13 Side Forces at 50 mps.pdf` (≈1.70) — probablemente distintas convenciones
       de área frontal (caja envolvente D×H vs. área real proyectada de pala); necesita
       geometría CAD real para resolverse con confianza (Hallazgo 9).
-- [ ] Conseguir la capacidad admisible de las varillas M18×2.5 (fluencia + arranque del
-      concreto) para poder evaluar adecuación de los anclajes, no solo la demanda de tensión
-      ya calculada — responsabilidad del ingeniero civil según los propios planos de Flower
-      Turbines (Hallazgo 9).
+- [ ] Conseguir la capacidad admisible de las varillas M18×2.5 y M14×2 (fluencia + arranque
+      del concreto) para poder evaluar adecuación de los anclajes, no solo la demanda de
+      tensión ya calculada — responsabilidad del ingeniero civil según los propios planos de
+      Flower Turbines (Hallazgo 9/10).
+- [ ] Conseguir el plano de base real del Small Tulip (0.55m/1.15m) — el plano "Small
+      Pedestal" existente cubre Medium y 3-M Tulip, no el modelo más pequeño de la línea
+      (Hallazgo 10).
+- [ ] Reconciliar la discrepancia real entre `Calculation of forces.pdf` (T=1.08 kN a 30 m/s)
+      y `External Load Calculations` (Frotor=2.7 kN a 30 m/s) para lo que parece ser la misma
+      turbina — hipótesis principal: distintos casos de carga (operación normal vs. parked
+      worst-case), no confirmada. También pendiente entender por qué R1+R2≠W en el diagrama
+      de cuerpo libre de ese documento (Hallazgo 10).
 - [ ] Decidir registro de leads para la Fase 2 (Sheets vs. Airtable — abierto en el plan,
       sección 7).
 
