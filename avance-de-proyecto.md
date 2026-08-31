@@ -1,7 +1,7 @@
 # ECO | Wind — Avance de Proyecto
 
 **Documento de referencia (alcance):** [`plan-tecnico-eco-wind.md`](./plan-tecnico-eco-wind.md)
-**Última actualización:** 31 de agosto, 2026 (Hallazgo 15 — Cilindro Actuador implementado y validado contra la fuente original; no reproduce el Efecto Bouquet real, resultado honesto)
+**Última actualización:** 31 de agosto, 2026 (Hallazgo 16 — arranca Fase 2: MVP de Streamlit sobre Pista A, con dos límites reales del MVP comunicados explícitamente)
 **Propósito:** comparar el alcance planeado contra el avance real, y dejar constancia de los
 hallazgos que no estaban previstos en el plan original. Se actualiza en cada avance
 significativo — no es una foto única.
@@ -14,7 +14,7 @@ significativo — no es una foto única.
 |---|---|
 | **Fase 1 — Pista A** (motor empírico) | 🟢 Sólida — mecánica y fuentes de datos climáticos (EPW + GWA) validadas con datos reales; z0/afinación fina quedó pendiente para más adelante (decisión del Director del Proyecto) |
 | **Fase 1 — Pista B** (motor físico DMST + CFD) | 🟡 Aerodinámica congelada (vía agotada, sobre-predicción sigue abierta, Hallazgo 8); curvas de potencia re-verificadas contra el calculador oficial, sin dudas reales (Hallazgo 12) — módulo estructural ASCE 7 con demanda de anclaje para 5 modelos y carga de clúster conservadora (Hallazgos 9-10, 13); Cilindro Actuador implementado y validado, pero no reproduce el Efecto Bouquet real todavía (Hallazgo 15) |
-| **Fase 2** (productización: Streamlit + Cloud Run) | ⚪ No iniciada |
+| **Fase 2** (productización: Streamlit + Cloud Run) | 🟡 MVP arrancado — app de Streamlit funcional corriendo local sobre Pista A, un sitio real (San José). Falta: más sitios/coordenada arbitraria, mapa, PDF, leads, despliegue a Cloud Run (Hallazgo 16) |
 
 ---
 
@@ -845,6 +845,46 @@ real, del mismo tipo que Hallazgo 7-8 (varios intentos de refinamiento aerodiná
 cerraron la brecha de sobre-predicción) — se documenta completo, no se descarta silenciosamente
 ni se sigue iterando buscando una configuración que "sí calce" sin justificación física real.
 
+### Hallazgo 16 — Arranca Fase 2: MVP de Streamlit sobre Pista A, con dos límites reales detectados antes de prometer más de lo que hay
+
+Pablo, con presión de entregar algo el mismo día, decidió congelar la Pista B (Cilindro
+Actuador) para más adelante y avanzar con Fase 2 (productización) usando Pista A como motor.
+Antes de decir "sí, listos" se verificó Pista A de punta a punta (no solo se confió en el
+checklist previo) corriendo `notebooks/pista_a_motor_empirico.ipynb` completo — sin errores,
+pero reveló dos cosas reales que Pablo necesitaba saber antes de avanzar:
+
+1. **NASA POWER no es alcanzable desde este entorno de desarrollo** (`ProxyError... 403
+   Forbidden`) — el notebook cayó automáticamente a datos sintéticos para esa fuente. Sin
+   verificar todavía si esto es una restricción específica de este sandbox o si aplicaría igual
+   en producción (Cloud Run).
+2. **Global Wind Atlas (la fuente real y ya validada, Hallazgo 3) no es una API en vivo para
+   cualquier coordenada** — es una descarga manual del panel web, por sitio. Hoy solo existe UN
+   sitio preparado (San José/Juan Santamaría, `datos_clima/gwa_juan_santamaria/`). El flujo
+   "coordenada → pronóstico instantáneo" del plan (sección 5) para un sitio nuevo cualquiera
+   sigue sin resolverse — no es un bloqueo para entregar algo hoy (se puede usar el sitio ya
+   preparado), pero sí una limitación real del MVP, comunicada explícitamente en la app misma,
+   no escondida.
+
+Dado esto, se usó **GWA** (no NASA POWER) como fuente climática del MVP — coherente con
+Hallazgo 1 (NASA POWER subestima ~3x en el Valle Central) y con lo que ya estaba validado.
+
+**Trabajo hecho:**
+- `engine/simulador_pista_a.py` — se extrajo `simular()`, `wind_at_height()` y la carga/generación
+  de clima desde GWA del notebook a un módulo importable (el notebook las tenía solo como celdas
+  de Jupyter, no reusables desde una app). Verificado que da el mismo resultado exacto que el
+  notebook para el mismo escenario (387.9 kWh/año, Medium Tulip×3, buje 3m).
+- `app/app.py` — primer MVP de Streamlit: selector de sitio (solo San José por ahora), modelo de
+  turbina, N, altura de buje, parámetros avanzados (z0, método de bouquet real/lineal), botón de
+  cálculo, resultado (kWh/año, viento medio a la altura de buje, % horas bajo cut-in) y gráfico
+  mensual. Paleta corporativa ECO aplicada (azul #003C52, verde #4A7C2F). Corrida localmente y
+  probada con Playwright (clic real en el botón, captura de pantalla) — no solo "arrancó sin
+  error", se verificó que el resultado se ve y calcula bien.
+- `app/requirements.txt` — dependencias para el futuro Dockerfile/Cloud Build.
+
+**Lo que este MVP explícitamente NO tiene todavía** (para no prometer de más): mapa de
+ubicación, más de un sitio, PDF de cotización, registro de leads, ni despliegue a Cloud Run —
+corre local por ahora. La app misma lo dice en un aviso visible, no queda implícito.
+
 ---
 
 ## 6. Pendientes activos / bloqueos
@@ -987,6 +1027,15 @@ ni se sigue iterando buscando una configuración que "sí calce" sin justificaci
 - [ ] Calcular capacidad real de arranque del concreto (cone breakout, ACI 318 Apéndice D) con
       la profundidad de empotramiento real — `evaluar_capacidad_anclaje()` solo advierte que
       falta, no la calcula (Hallazgo 14).
+- [ ] Verificar si NASA POWER es alcanzable desde el entorno de producción (Cloud Run) — en este
+      entorno de desarrollo está bloqueado por el proxy de red (Hallazgo 16).
+- [ ] Conseguir datos GWA reales para más sitios (hoy solo hay uno preparado, San José/Juan
+      Santamaría) o resolver una ingesta automática por coordenada — bloquea el flujo
+      "coordenada → pronóstico instantáneo" del plan, sección 5 (Hallazgo 16).
+- [ ] Desplegar `app/` a Cloud Run (Docker + Cloud Build, mismo patrón de Skyplus/DDP-Lite) — hoy
+      solo corre local (Hallazgo 16).
+- [ ] Agregar al MVP: mapa de ubicación, PDF de cotización, registro de leads (Sheets vs.
+      Airtable, todavía sin decidir) (Hallazgo 16, plan sección 5).
 
 ## 7. Cómo navegar el repositorio en este punto
 
@@ -994,11 +1043,20 @@ ni se sigue iterando buscando una configuración que "sí calce" sin justificaci
 ECO-Wind/
 ├── plan-tecnico-eco-wind.md          ← alcance (este documento lo compara contra avance real)
 ├── avance-de-proyecto.md             ← este documento
+├── app/                               ← Fase 2, MVP de Streamlit (Hallazgo 16)
+│   ├── app.py                         ← interfaz, corre local con `streamlit run app/app.py`
+│   └── requirements.txt
 ├── engine/
-│   └── flower_turbines_curves.py     ← motor de curvas de potencia, validado
+│   ├── flower_turbines_curves.py     ← motor de curvas de potencia, validado (Hallazgo 12)
+│   ├── simulador_pista_a.py          ← simular()/wind_at_height()/GWA, extraído del notebook (Hallazgo 16)
+│   ├── dmst_model.py, rotor_combinado.py, polar_hibrido.py, naca0018_polar.py  ← Pista B aerodinámica
+│   ├── estructural_asce7.py          ← Pista B estructural, ASCE 7 (Hallazgos 9-10, 13-14)
+│   └── actuator_cylinder.py          ← Pista B efecto clúster, Cilindro Actuador (Hallazgo 15)
 ├── notebooks/
-│   └── pista_a_motor_empirico.ipynb  ← sandbox Pista A completo, corre en Colab o local
+│   ├── pista_a_motor_empirico.ipynb  ← sandbox Pista A completo, corre en Colab o local
+│   └── pista_b_motor_fisico.ipynb    ← sandbox Pista B, aerodinámica
 ├── datos_clima/
-│   └── *.epw                          ← EPWs de estación real (por ahora: aeropuerto Juan Santamaría)
+│   ├── *.epw                          ← EPWs de estación real (por ahora: aeropuerto Juan Santamaría)
+│   └── gwa_juan_santamaria/           ← export real del Global Wind Atlas (único sitio preparado)
 └── documentos_tecnicos/               ← research, fichas técnicas, insumos originales
 ```
