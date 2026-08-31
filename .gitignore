@@ -3,3 +3,10 @@ __pycache__/
 .ipynb_checkpoints/
 .venv/
 *.egg-info/
+
+# Rasters/datos descargados en tiempo de ejecución (GWA, Köppen, etc.) --
+# se re-descargan bajo demanda, no se versionan (mismo criterio ya usado
+# para gwa_costa_rica_10m.tif / gwa_cri_10m.tif).
+*.tif
+*.zip
+datos_clima/koppen/
