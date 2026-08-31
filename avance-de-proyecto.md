@@ -1,7 +1,7 @@
 # ECO | Wind — Avance de Proyecto
 
 **Documento de referencia (alcance):** [`plan-tecnico-eco-wind.md`](./plan-tecnico-eco-wind.md)
-**Última actualización:** 31 de agosto, 2026 (Hallazgo 13 — ASCE 7 extendido a Small Tulip y AL13, primera aproximación conservadora a carga de clúster)
+**Última actualización:** 31 de agosto, 2026 (Hallazgo 14 — capacidad de anclaje vs demanda implementada; discrepancia de norma de acero A193 B7/Grado 8.8 detectada antes de aceptar los datos)
 **Propósito:** comparar el alcance planeado contra el avance real, y dejar constancia de los
 hallazgos que no estaban previstos en el plan original. Se actualiza en cada avance
 significativo — no es una foto única.
@@ -747,6 +747,48 @@ Pendientes) y se documentó explícitamente que no debe confundirse con el Efect
 `power_in_bouquet()`, que va en la dirección contraria (más potencia por turbina agrupada, no
 menos empuje).
 
+### Hallazgo 14 — Capacidad de anclaje (demanda vs oferta de mercado): implementada, con una discrepancia real de norma de acero detectada antes de aceptar los datos
+
+Pablo pidió cruzar la demanda de tensión ya calculada contra capacidades reales de mercado en
+Costa Rica, reemplazando el "acero genérico" por varillas ASTM A193 Grado B7, con capacidades
+dadas: M12=54kN, 5/8"(~M16)=98kN, 3/4"(~M20)=146kN, y concreto CSCR f'c=21MPa.
+
+**Verificación antes de implementar (no se aceptaron los datos tal cual):** ASTM A193 B7
+(Fy=105 ksi=724 MPa) y "Grado 8.8" (ISO 898-1, Fy=640 MPa=93 ksi) **no son el mismo acero ni
+son equivalentes** — son normas distintas, con ~13% menos capacidad en Grado 8.8. Esto importa
+porque los planos reales de Flower Turbines ya leídos en este proyecto (Hallazgos 9-11)
+especifican varillas Grado 8.8 (DIN 975/976) para los 5 modelos, **no** A193 B7. Calculando
+capacidad de fluencia (área de tracción × Fy) para ambas normas: el valor de M12 dado (54.0 kN)
+coincide casi exacto con Grado 8.8 (640 MPa×84.3mm²=53.95 kN) y **no** con A193 B7 (724
+MPa×84.3mm²=61.0 kN); el de 5/8" (98.0 kN) también cae más cerca de Grado 8.8 (100.5 kN con
+M16) que de A193 B7 (113.7 kN). Sugiere que los 3 valores podrían venir de tablas de Grado 8.8,
+aunque se etiquetaron como A193 B7 al pedirlos — vale la pena confirmarlo contra la ficha
+técnica real del proveedor en Costa Rica antes de usar esto en una decisión de compra real. **Se
+implementó con los valores exactos que Pablo dio**, sin sustituirlos, pero con esta advertencia
+documentada en el código y aquí.
+
+**Otro dato no confirmado:** el "dado de concreto mínimo de 0.5×0.5×0.5m" mencionado para Small
+Tulip no aparece en ningún documento revisado hasta ahora en este proyecto. El único plano de
+cimentación real y verificado para instalación de Small Tulip en poste (`Installation Manual
+for the ZW-Pole`, Hallazgo 11) da **450×450×1060mm** — una profundidad más del doble (1060mm
+vs 500mm). Se usó el dato verificado en el mensaje de advertencia del código en vez del
+0.5×0.5×0.5m, sin forzar que coincidan.
+
+**Implementado en `engine/estructural_asce7.py`:** `evaluar_capacidad_anclaje()`, con la fórmula
+de demanda exacta que dio Pablo (`Torque/(0.5×n_pernos×radio_base)`). Nota de consistencia
+declarada: esa fórmula usa el RADIO de la base como brazo de palanca, mientras
+`tension_maxima_pernos()` (ya existente en el módulo) usa el ANCHO completo del patrón — para
+la misma geometría, la nueva función da el doble de tensión demandada (más conservadora, no
+menos segura, pero es una convención distinta, documentada para no comparar ambos números como
+si fueran la misma cantidad). También: los tamaños 5/8"/3/4" no coinciden exactamente con los
+pernos M14/M18 reales ya usados en `PATRONES_ANCLAJE` — son tamaños vecinos, no el mismo.
+
+**Caso de prueba pedido** (Small Tulip en poste de 3m, ráfaga 40 m/s, 4×M12, base de brida
+0.3m): Mw=3.68 kN·m → demanda 12.27 kN por perno → cumple fluencia del acero con factor de
+seguridad 4.40x. La función NO calcula capacidad de arranque del concreto (cone breakout) —
+solo advierte que falta, consistente con el resto del módulo (demanda de acero, no capacidad
+final de concreto, que sigue siendo responsabilidad del ingeniero civil).
+
 ---
 
 ## 6. Pendientes activos / bloqueos
@@ -869,6 +911,20 @@ menos empuje).
 - [ ] Cuando se construya el modelo CFD de efecto clúster (Cilindro Actuador/OpenFOAM), decidir
       si `cargas_viento_cluster_asce7()` debe incorporar crédito de apantallamiento aerodinámico
       en vez de la suma simple conservadora actual (Hallazgo 13).
+- [ ] Confirmar contra la ficha técnica real del proveedor en Costa Rica si las capacidades
+      dadas para `evaluar_capacidad_anclaje()` (M12/5-8"/3-4") corresponden a ASTM A193 Grado
+      B7 o a Grado 8.8 — los números coinciden más con Grado 8.8 en la verificación hecha
+      (Hallazgo 14).
+- [ ] Conseguir capacidad de M14/M18 (los pernos REALES ya usados en `PATRONES_ANCLAJE`) en la
+      misma norma que finalmente se confirme — hoy `evaluar_capacidad_anclaje()` solo cubre
+      M12/5-8"/3-4", que no son tamaños exactos para Medium/3-M Tulip (M14) ni Large
+      Tulip/AL13 (M18) (Hallazgo 14).
+- [ ] Confirmar o descartar el dado de concreto "0.5×0.5×0.5m" para Small Tulip — no aparece en
+      ningún documento revisado; el único plano real verificado (poste ZW) da 450×450×1060mm
+      (Hallazgo 14).
+- [ ] Calcular capacidad real de arranque del concreto (cone breakout, ACI 318 Apéndice D) con
+      la profundidad de empotramiento real — `evaluar_capacidad_anclaje()` solo advierte que
+      falta, no la calcula (Hallazgo 14).
 
 ## 7. Cómo navegar el repositorio en este punto
 

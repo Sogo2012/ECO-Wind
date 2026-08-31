@@ -237,6 +237,104 @@ def tension_maxima_pernos(mw, n_pernos, ancho_patron_m):
     return mw / (ancho_patron_m * n_pernos_tension)
 
 
+# --- Evaluacion de capacidad de anclaje: oferta de mercado (Costa Rica) vs demanda ---
+#
+# Pedido explicito de Pablo (31/ago/2026): cruzar la demanda de tension ya calculada
+# contra capacidad real de varillas ASTM A193 Grado B7 disponibles en Costa Rica, en vez
+# del "acero generico" usado hasta ahora.
+#
+# ADVERTENCIA TECNICA -- verificada antes de implementar, no aceptada tal cual:
+# ASTM A193 B7 (Fy=105 ksi=724 MPa) y "Grado 8.8" (ISO 898-1, Fy=640 MPa=93 ksi) NO son el
+# mismo acero ni son equivalentes -- son dos normas distintas, con ~13% menos capacidad en
+# 8.8. Esto importa porque los PLANOS REALES de Flower Turbines ya leidos en este proyecto
+# (Hallazgos 9-11) especifican varillas roscadas Grado 8.8 (DIN 975/976) para los 5
+# modelos -- NO A193 B7. Al verificar los 3 valores de capacidad recibidos contra ambas
+# normas (area de traccion x Fy): el de M12 (54.0 kN) coincide casi exacto con Grado 8.8
+# (640 MPa x 84.3 mm^2 = 53.95 kN) y NO con A193 B7 (724 MPa x 84.3 mm^2 = 61.0 kN); el de
+# 5/8" (98.0 kN) tambien cae mas cerca de Grado 8.8 (100.5 kN, usando M16) que de A193 B7
+# (113.7 kN). Sugiere que los 3 numeros podrian venir de tablas de Grado 8.8, aunque se
+# etiquetaron como A193 B7 al pedirlos -- vale la pena confirmarlo contra la ficha tecnica
+# real del proveedor en Costa Rica antes de usar esto en una decision de compra.
+#
+# Se implementa con los valores EXACTOS que Pablo dio (no se sustituyen sin que el lo pida).
+#
+# Ademas: "5/8" (~M16) y "3/4" (~M20) no coinciden exactamente con los pernos que ya estan
+# en PATRONES_ANCLAJE (M14x2 para Medium/3-M Tulip, M18x2.5 para Large Tulip/AL13) -- son
+# tamaños vecinos, no el mismo. Esta tabla cubre bien el caso de prueba pedido (M12, Small
+# Tulip/poste ZW), pero no se debe usar 5/8"/3/4" como si fueran exactamente M14/M18 sin
+# verificar la diferencia.
+FY_A193_B7_MPA = 724   # 105 ksi -- dato de Pablo, referencia (no se usa directo abajo)
+FC_CSCR_MPA = 21        # f'c tipico, Codigo Sismico de Costa Rica (3000 psi) -- referencia
+
+CAPACIDAD_FLUENCIA_PERNO_KN = {
+    # tipo_perno: capacidad de fluencia a traccion (kN) -- dato dado por Pablo, ver
+    # advertencia arriba sobre a que norma corresponden realmente estos valores.
+    "M12": 54.0,    # fijacion nativa Small Tulip en poste ZW (4x M12x90, confirmado Hallazgo 11)
+    "5/8": 98.0,    # "equivalente" M16 -- Medium/3-M Tulip usan M14 real, no exactamente esto
+    "3/4": 146.0,   # "equivalente" M20 -- Large Tulip/AL13 usan M18 real, no exactamente esto
+}
+
+
+def evaluar_capacidad_anclaje(torque_vuelco_Nm, diametro_base_m, num_pernos, tipo_perno):
+    """
+    Cruza la demanda de tension en el perno mas cargado (a partir del momento de vuelco)
+    contra la capacidad de fluencia del acero disponible en CAPACIDAD_FLUENCIA_PERNO_KN, y
+    advierte sobre el chequeo de concreto que sigue pendiente.
+
+    Formula de demanda (dada explicitamente por Pablo -- OJO, distinta de la que ya usa
+    tension_maxima_pernos() arriba en este mismo modulo, ver nota):
+
+        Tension_Demanda = Torque_Vuelco / (0.5 * num_pernos * radio_base)
+
+    NOTA DE CONSISTENCIA, no escondida: esta formula usa el RADIO de la base
+    (diametro_base_m/2) como brazo de palanca. tension_maxima_pernos() usa el ANCHO
+    completo del patron (ancho_patron_m) como brazo. Para la misma geometria fisica (mismo
+    diametro/ancho), esta funcion da EXACTAMENTE EL DOBLE de tension demandada -- mas
+    conservadora, no menos segura, pero es una convencion distinta a la ya usada en el
+    modulo. No se unificaron ambas porque esta formula se pidio explicitamente asi; queda
+    documentado para no comparar los dos numeros como si fueran la misma cantidad.
+
+    tipo_perno: clave de CAPACIDAD_FLUENCIA_PERNO_KN ("M12", "5/8", "3/4").
+
+    Devuelve un diccionario con la demanda, la capacidad de fluencia, si la cubre, el
+    factor de seguridad del acero, y un warning de concreto. NO calcula la capacidad real
+    de arranque del concreto (cone breakout) -- eso exige ACI 318 Apendice D con la
+    profundidad de empotramiento real, dato que sigue sin conseguirse (ver Pendientes);
+    consistente con el resto del modulo, esto es DEMANDA/chequeo de fluencia del acero
+    solamente, no una evaluacion final de adecuacion del anclaje completo.
+    """
+    if tipo_perno not in CAPACIDAD_FLUENCIA_PERNO_KN:
+        raise ValueError(f"tipo_perno desconocido: {tipo_perno!r}. "
+                          f"Opciones: {list(CAPACIDAD_FLUENCIA_PERNO_KN)}")
+
+    radio_base = diametro_base_m / 2
+    tension_demanda_N = torque_vuelco_Nm / (0.5 * num_pernos * radio_base)
+    capacidad_N = CAPACIDAD_FLUENCIA_PERNO_KN[tipo_perno] * 1000
+    cumple_fluencia_acero = tension_demanda_N <= capacidad_N
+    factor_seguridad_acero = capacidad_N / tension_demanda_N if tension_demanda_N > 0 else float("inf")
+
+    warning_concreto = (
+        f"La fluencia del acero {'SI' if cumple_fluencia_acero else 'NO'} cubre la demanda "
+        f"({factor_seguridad_acero:.2f}x), pero esto NO evalua el concreto. La profundidad de "
+        f"empotramiento (h_ef) debe validarse segun ACI 318 Apendice D para evitar "
+        f"desgarramiento (cone breakout) del concreto de {FC_CSCR_MPA} MPa (CSCR) ANTES de que "
+        f"el perno llegue a fluencia. Referencia real disponible: la fundacion del poste ZW "
+        f"(unico plano de cimentacion para instalacion de Small Tulip en poste ya verificado, "
+        f"Hallazgo 11) usa 450x450x1060mm -- NO se confirmo el dado de 0.5x0.5x0.5m mencionado "
+        f"como referencia; no aparece en ningun documento revisado hasta ahora en este "
+        f"proyecto. Capacidad de concreto NO calculada aqui de ninguna forma."
+    )
+
+    return {
+        "tension_demanda_N": tension_demanda_N,
+        "capacidad_fluencia_N": capacidad_N,
+        "cumple_fluencia_acero": cumple_fluencia_acero,
+        "factor_seguridad_acero": factor_seguridad_acero,
+        "tipo_perno": tipo_perno,
+        "warning_concreto": warning_concreto,
+    }
+
+
 def calcular_cargas_viento_asce7(v_rafaga, altura_techo_m, diametro, altura_pala, cd_max,
                                   Kz=1.0, Kzt=1.0, Kd=0.85, G=0.85, st=ST_CILINDRO):
     """
@@ -438,3 +536,22 @@ if __name__ == "__main__":
     print("  -- correcto para dimensionar una estructura de soporte compartida, pero NO intenta")
     print("  predecir generacion de energia del cluster (eso lo cubre power_in_bouquet(), Efecto")
     print("  Bouquet real, que va en sentido contrario: MAS potencia por turbina, no menos).")
+
+    print()
+    print("=" * 78)
+    print("Evaluacion de capacidad de anclaje (demanda vs oferta de mercado) --")
+    print("Small Tulip en poste de 3 m, rafaga de diseño 40 m/s, 4x M12 (poste ZW, Hallazgo 11):")
+    r_st_poste = calcular_cargas_viento_asce7(v_rafaga=40.0, altura_techo_m=3.0,
+                                               diametro=0.55, altura_pala=1.149, cd_max=2.3)
+    r_anclaje = evaluar_capacidad_anclaje(torque_vuelco_Nm=r_st_poste["Mw_Nm"],
+                                           diametro_base_m=0.3, num_pernos=4, tipo_perno="M12")
+    print(f"  Fw: {r_st_poste['Fw_N']:.1f} N   Mw (momento de vuelco): "
+          f"{r_st_poste['Mw_Nm']:.1f} N*m ({r_st_poste['Mw_Nm']/1000:.2f} kN*m)")
+    print(f"  Tension demanda por perno (diametro de base de brida 0.3m, 4 pernos):")
+    print(f"    {r_anclaje['tension_demanda_N']:.0f} N ({r_anclaje['tension_demanda_N']/1000:.2f} kN)")
+    print(f"  Capacidad de fluencia M12 (dato de Pablo -- ver advertencia arriba en el modulo")
+    print(f"  sobre a que norma de acero corresponde realmente): "
+          f"{r_anclaje['capacidad_fluencia_N']/1000:.1f} kN")
+    print(f"  Cumple fluencia del acero: {'SI' if r_anclaje['cumple_fluencia_acero'] else 'NO'}"
+          f"   (factor de seguridad = {r_anclaje['factor_seguridad_acero']:.2f}x)")
+    print(f"  {r_anclaje['warning_concreto']}")
