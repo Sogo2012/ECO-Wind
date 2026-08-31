@@ -1,7 +1,7 @@
 # ECO | Wind — Avance de Proyecto
 
 **Documento de referencia (alcance):** [`plan-tecnico-eco-wind.md`](./plan-tecnico-eco-wind.md)
-**Última actualización:** 30 de agosto, 2026 (Hallazgo 8 — Glauert implementado; vía aerodinámica agotada, sobre-predicción sigue abierta)
+**Última actualización:** 31 de agosto, 2026 (Hallazgo 9 — primer módulo estructural ASCE 7, validado)
 **Propósito:** comparar el alcance planeado contra el avance real, y dejar constancia de los
 hallazgos que no estaban previstos en el plan original. Se actualiza en cada avance
 significativo — no es una foto única.
@@ -13,7 +13,7 @@ significativo — no es una foto única.
 | Fase / Pista | Estado |
 |---|---|
 | **Fase 1 — Pista A** (motor empírico) | 🟢 Sólida — mecánica y fuentes de datos climáticos (EPW + GWA) validadas con datos reales; z0/afinación fina quedó pendiente para más adelante (decisión del Director del Proyecto) |
-| **Fase 1 — Pista B** (motor físico DMST + CFD) | 🟡 Vía aerodinámica agotada — arquitectura real de dos niveles, inducción conjunta y corrección de Glauert, todas implementadas y verificadas (Betz genuinamente resuelto en todo TSR); ninguna cierra la sobre-predicción, la hipótesis principal ahora son pérdidas electromecánicas sin explorar (Hallazgo 8) |
+| **Fase 1 — Pista B** (motor físico DMST + CFD) | 🟡 Aerodinámica congelada (vía agotada, sobre-predicción sigue abierta, Hallazgo 8) — primer módulo estructural ASCE 7 construido y validado contra cargas reales de Flower Turbines (Hallazgo 9) |
 | **Fase 2** (productización: Streamlit + Cloud Run) | ⚪ No iniciada |
 
 ---
@@ -131,7 +131,7 @@ combinado — útil más adelante para orientación de bouquets).
 | 1 | DMST turbina aislada (patentes CA2800765C/US9255567B2, ES2970155T3/AU2019380766B2) | 🟡 Sustentación (NACA 0018) y arrastre (Savonius) construidos y validados por separado; combinados con la arquitectura real de dos niveles de pala (`engine/rotor_combinado.py`) y verificados (Betz + 4 modelos) — combinar bien no resuelve la sobre-predicción, ver Hallazgo 6 |
 | 2 | Pérdida dinámica a TSR bajo (Leishman-Beddoes) | ⚪ No iniciado |
 | 3 | Efecto clúster (Cilindro Actuador, OpenFOAM offline) | ⚪ No iniciado |
-| 4 | Estructural (ASCE 7) | ⚪ No iniciado |
+| 4 | Estructural (ASCE 7) | 🟡 Primer módulo construido y validado (`engine/estructural_asce7.py`) — presión dinámica, corte basal, momento de vuelco, frecuencia de vórtices. Ver Hallazgo 9 |
 
 **Lo construido:** `engine/dmst_model.py` (solver DMST de doble tubo de corriente —
 simplificado, un factor de inducción por semicírculo upwind/downwind, no multi-tubo por
@@ -424,6 +424,57 @@ confianza en que la causa dominante no es aerodinámica sin resolver, sino la ot
 de Hallazgo 6 que sigue sin explorar: pérdidas electromecánicas de generador y controlador de
 carga.
 
+### Hallazgo 9 — Primer módulo estructural ASCE 7, validado contra cargas reales de Flower Turbines
+
+Con la aerodinámica congelada (Hallazgo 8), se arrancó el Paso 4 de la Pista B: cargas de
+viento estructurales según ASCE 7-16/22, sobre el mástil/pedestal de montaje.
+
+**Verificación de fuentes antes de implementar (no se asumieron las fórmulas de memoria):**
+`documentos_tecnicos/documentos de referencia/Simulación VAWT y Efecto Cluster.docx` describe
+el marco teórico ASCE 7, pero sus fórmulas están insertadas como **imágenes PNG dentro del
+.docx**, no como texto ni objetos de ecuación nativos — el texto plano las pierde por
+completo (aparecen como huecos vacíos). Se extrajeron las imágenes del archivo (un .docx es
+un .zip) y se revisaron visualmente antes de escribir una sola línea de código. Las cuatro
+fórmulas confirmadas coinciden exactamente con lo esperado de ASCE 7 estándar:
+
+- $q_z = 0.613 \cdot K_z \cdot K_{zt} \cdot K_d \cdot V_{basic}^2$ (Pa)
+- $F_w = q_z \cdot G \cdot C_{fs} \cdot A_f$ (N)
+- $M_w = F_w \times z_{cg}$ (N·m)
+- $f_s = St \cdot V_\infty / D$ (Hz)
+
+**Lo construido:** `engine/estructural_asce7.py`, con `calcular_cargas_viento_asce7()`
+implementando las cuatro fórmulas de arriba, usando Cd=2.3 (cara cóncava, peor caso, de
+`External Load Calculations 2m & 5m.pdf`, re-confirmado en este mismo commit) y St=0.2 para
+cilindros circulares.
+
+**Validación honesta contra el Frotor real de la propia ficha de Flower Turbines** (turbina
+de referencia con pala de 2.0m, D≈1.108m — geometría similar a Medium Tulip, no idéntica):
+el corte basal calculado salía **25-30% más bajo** que el Frotor real reportado a las mismas
+velocidades (2.03 vs 2.7 kN a 30 m/s; 3.98 vs 5.3 kN a 42 m/s) — investigado en vez de
+dejado sin explicar:
+
+1. El **Cd efectivo implícito** en el Frotor real (retro-calculado con la física simple
+   F=0.5·ρ·Cd·A·V²) es ≈2.21 — muy cercano al Cd=2.3 de peor caso usado aquí. Confirma que
+   la convención de área frontal (D×H, la misma del resto de la Pista B) y el Cd asumido son
+   razonables — el hueco no viene de ahí.
+2. Quitando los factores Kd y G de ASCE 7 (que el cálculo interno simple de Flower Turbines
+   no tiene motivo para incluir, al no ser un documento ASCE 7 formal), los números
+   coinciden bien: 2.81 vs 2.7 kN, 5.51 vs 5.3 kN.
+
+**Conclusión:** el hueco es exactamente Kd·G=0.85·0.85=0.72 — la diferencia esperada y
+correcta entre "fuerza de arrastre cruda" (lo que reporta la ficha del fabricante) y "carga
+de diseño según código" (lo que exige ASCE 7, con sus factores de reducción por
+direccionalidad y promediado de ráfaga). No es una señal de mala calibración del módulo.
+
+**Limitaciones conocidas, ya documentadas en el propio código:** Kz se trata como constante
+1.0 (en rigor depende de la altura y la categoría de exposición); Kd=0.85 es el valor típico
+para edificios, no confirmado contra la tabla ASCE 7 real para una estructura cilíndrica
+esbelta como este mástil; G=0.85 es el valor de "estructura rígida" — el propio documento de
+referencia señala que un mástil con componentes rotativos necesitaría el factor de ráfaga
+flexible (Gf), que depende de la frecuencia natural del pedestal, dato no disponible; la
+frecuencia de vórtices (fs) solo da la frecuencia de excitación, no evalúa resonancia real
+sin la frecuencia natural de la estructura de soporte.
+
 ---
 
 ## 6. Pendientes activos / bloqueos
@@ -489,6 +540,18 @@ carga.
 - [ ] Extender Pista B (DMST/Savonius/modelo combinado) a los modelos AL13 Power Tower — ya
       tienen ficha técnica real (1.7m, módulos de 1m apilables), pero ningún cálculo de
       Pista B los cubre todavía; toda la Pista B hecha hasta ahora es sobre la línea Tulip.
+- [ ] Confirmar el `Kd` correcto de la Tabla 26.6-1 de ASCE 7 para una estructura cilíndrica
+      esbelta (mástil de VAWT) — se usó 0.85 (valor típico de edificios) en el primer módulo
+      estructural; chimeneas/tanques redondos suelen usar 0.95-1.0 (Hallazgo 9).
+- [ ] Calcular el factor de ráfaga flexible (Gf) en vez de G=0.85 fijo — requiere la
+      frecuencia natural del pedestal/mástil, dato no disponible todavía (Hallazgo 9).
+- [ ] Conseguir la frecuencia natural del techo/pedestal para poder evaluar riesgo real de
+      resonancia por desprendimiento de vórtices (Strouhal) — el módulo estructural solo
+      calcula la frecuencia de excitación, no puede evaluar resonancia sin ese dato
+      (Hallazgo 9).
+- [ ] Extender el análisis estructural ASCE 7 a los otros 3 modelos Tulip y AL13 (solo
+      Medium Tulip probado hasta ahora) y a la carga de un clúster completo, no solo una
+      turbina aislada.
 - [ ] Decidir registro de leads para la Fase 2 (Sheets vs. Airtable — abierto en el plan,
       sección 7).
 
