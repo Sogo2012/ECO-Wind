@@ -68,8 +68,36 @@ def descargar_raster_costa_rica(destino=RUTA_RASTER_CR_DEFAULT, altura=10):
     EPW/GWA-San Jose) o en cualquier maquina con internet normal, y subir
     el .tif resultante a datos_clima/ en el repo.
     """
+    return descargar_raster_pais("CRI", altura=altura, destino=destino)
+
+
+def descargar_raster_pais(pais_iso3, altura=10, destino=None, capa="wind-speed"):
+    """
+    Version general de descargar_raster_costa_rica() -- mismo endpoint ya
+    confirmado arriba (codigo fuente de energyRt/globalwindatlas Y la
+    pagina real "GIS files & API access" de globalwindatlas.info,
+    Hallazgo 25), parametrizado por pais (codigo ISO3, los mismos que usan
+    las claves de datos_clima/epw_catalog_global.json: USA, CAN, BRA, MEX,
+    ARG, CHL, COL, ECU, PER, BOL, VEN, PRY, PAN, URY, DOM, HND, GTM, CRI,
+    NIC, SLV).
+
+    Confirmado en la pagina real (Hallazgo 25): NO hay una API de consulta
+    por punto separada -- "the provided URL can also be used as an API
+    service" se refiere a esta MISMA URL de descarga de raster por pais,
+    llamable por codigo en vez de clic. La pagina tambien advierte
+    explicitamente: "not to be used for bulk downloads of all countries or
+    datasets" -- bajar UN pais para trabajar con el (como ya se hace con
+    Costa Rica) esta bien; scriptear una descarga masiva de los 20 no.
+
+    NO EJECUTAR EN ESTE SANDBOX -- globalwindatlas.info esta bloqueado
+    (Hallazgo 2). Correr esto en Google Colab, un pais a la vez.
+    """
     import requests
-    url = f"https://globalwindatlas.info/api/gis/country/CRI/wind-speed/{altura}"
+    destino = destino or os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "datos_clima", f"gwa_{pais_iso3.lower()}_{altura}m.tif",
+    )
+    url = f"https://globalwindatlas.info/api/gis/country/{pais_iso3}/{capa}/{altura}"
     r = requests.get(url, stream=True, timeout=120)
     r.raise_for_status()
     os.makedirs(os.path.dirname(destino), exist_ok=True)
@@ -109,6 +137,27 @@ def muestrear_velocidad_media(lat, lon, ruta_raster=RUTA_RASTER_CR_DEFAULT):
         if valor == src.nodata or np.isnan(valor):
             raise ValueError(f"Sin dato de viento en ({lat}, {lon}) -- probablemente fuera de Costa Rica.")
         return float(valor)
+
+
+def factor_ajuste_gwa(lat_exacto, lon_exacto, lat_estacion, lon_estacion, ruta_raster=RUTA_RASTER_CR_DEFAULT):
+    """
+    Razon GWA(punto exacto) / GWA(ubicacion de la estacion donante) -- Hallazgo 25:
+    mismo mecanismo de ajuste espacial que factor_ajuste_nasa_power()
+    (notebooks/sensibilizar_punto_exacto.ipynb), pero usando el raster de
+    GWA (250m de resolucion) en vez de NASA POWER (~50-60km). NASA POWER
+    fallo de raiz en terreno accidentado (Hallazgo 25: su razon salio
+    literalmente al reves entre San Jose y Finca Favorita) -- GWA, siendo
+    ~200-1000x mas fino, deberia poder resolver la diferencia real de
+    microclima entre dos puntos cercanos donde NASA POWER no puede.
+
+    A diferencia de factor_ajuste_nasa_power() (dos llamadas a una API por
+    internet), esto son dos lecturas de pixel del MISMO raster ya
+    descargado -- mucho mas rapido, pero necesita el .tif del pais
+    correspondiente ya en disco (descargar_raster_pais()).
+    """
+    media_exacto = muestrear_velocidad_media(lat_exacto, lon_exacto, ruta_raster)
+    media_estacion = muestrear_velocidad_media(lat_estacion, lon_estacion, ruta_raster)
+    return media_exacto / media_estacion, media_exacto, media_estacion
 
 
 def generar_clima_sitio_nuevo(lat, lon, año=2023, seed=42, ruta_raster=RUTA_RASTER_CR_DEFAULT,
