@@ -1,7 +1,7 @@
 # ECO | Wind — Avance de Proyecto
 
 **Documento de referencia (alcance):** [`plan-tecnico-eco-wind.md`](./plan-tecnico-eco-wind.md)
-**Última actualización:** 31 de agosto, 2026 (Hallazgo 19 v3 — consolidado en UN SOLO flujo de búsqueda de clima, igual que DDP-lite/Skyplus: sin selector de modos, estación real siempre, aproximación como fallback automático sólo cuando hace falta; Hallazgo 20 — corrección real en el perfil de viento por altura, z0 de referencia distinto de z0 destino; Hallazgo 21 — vecino más cercano validado por leave-one-out, con un artefacto real de `generar_clima_gwa()` encontrado en el camino; quantile mapping probado (mecánica) y acceso a ERA5/CDS investigado; Hallazgo 22 — mitigación parcial de ese artefacto vía curva de excedencia por residuos: Liberia ya muestra una mejora clara y real con el vecino más cercano; Hallazgo 23 — validación REAL (Colab, no sintética) de quantile mapping contra NASA POWER: mejora real pero más modesta que la prueba sintética; Hallazgo 24 — corrección de rumbo: app internacional, sin anclar a San José, catálogo global de 5,276 estaciones/20 países probado y auto-pivotable en 6 países reales; Hallazgo 25 — NASA POWER descartado como ajuste espacial (falla al revés en terreno accidentado, confirmado con datos reales); GWA generalizado a cualquier país como reemplazo candidato; Hallazgo 26 — validación real de GWA: mucho mejor que NASA POWER pero mixto, el problema está en el ráster crudo de GWA en San José/Finca Favorita, no en el mecanismo de razón)
+**Última actualización:** 31 de agosto, 2026 (Hallazgo 19 v3 — consolidado en UN SOLO flujo de búsqueda de clima, igual que DDP-lite/Skyplus: sin selector de modos, estación real siempre, aproximación como fallback automático sólo cuando hace falta; Hallazgo 20 — corrección real en el perfil de viento por altura, z0 de referencia distinto de z0 destino; Hallazgo 21 — vecino más cercano validado por leave-one-out, con un artefacto real de `generar_clima_gwa()` encontrado en el camino; quantile mapping probado (mecánica) y acceso a ERA5/CDS investigado; Hallazgo 22 — mitigación parcial de ese artefacto vía curva de excedencia por residuos: Liberia ya muestra una mejora clara y real con el vecino más cercano; Hallazgo 23 — validación REAL (Colab, no sintética) de quantile mapping contra NASA POWER: mejora real pero más modesta que la prueba sintética; Hallazgo 24 — corrección de rumbo: app internacional, sin anclar a San José, catálogo global de 5,276 estaciones/20 países probado y auto-pivotable en 6 países reales; Hallazgo 25 — NASA POWER descartado como ajuste espacial (falla al revés en terreno accidentado, confirmado con datos reales); GWA generalizado a cualquier país como reemplazo candidato; Hallazgo 26 — validación real de GWA: mucho mejor que NASA POWER pero mixto, el problema está en el ráster crudo de GWA en San José/Finca Favorita, no en el mecanismo de razón; credencial CDS movida a Colab Secrets tras compartirse un token real en el chat; Hallazgo 27 — Köppen-Geiger encuadrado como filtro de selección de donante, no como cuarto candidato al mecanismo de razón de ajuste de magnitud)
 **Propósito:** comparar el alcance planeado contra el avance real, y dejar constancia de los
 hallazgos que no estaban previstos en el plan original. Se actualiza en cada avance
 significativo — no es una foto única.
@@ -1673,6 +1673,38 @@ terrenos?), o pasar en paralelo a probar Köppen/polígonos climáticos (Alterna
 investigada) o ERA5 como fuente continua para el mismo mecanismo de razón (nunca construido para
 este uso específico, distinto del quantile mapping ya probado en Hallazgo 23).
 
+### Hallazgo 27 — Köppen-Geiger no es un cuarto candidato al mecanismo de razón: es un eje distinto (selección de donante, no ajuste de magnitud)
+
+Mientras la validación real de ERA5 corría en Colab (Hallazgo 26/28, en curso), Pablo pidió arrancar
+Köppen en paralelo — con la limitante explícita de que la app internacional necesita alternativas
+sin costo y sin depender de un solo tipo de fuente meteorológica. Antes de construir nada, valía la
+pena confirmar qué problema resuelve Köppen realmente, porque no es el mismo que NASA POWER/GWA/
+ERA5.
+
+Esos tres dan una fuente CONTINUA de viento en cualquier punto, así que sirven para el mecanismo de
+razón `fuente(punto_exacto) / fuente(estación_donante)` que reescala la MAGNITUD de una forma real
+prestada. Köppen-Geiger (Beck et al. 2018) da una ETIQUETA categórica de zona climática derivada de
+temperatura/precipitación, no de viento — no puede alimentar ese mismo mecanismo. Lo que sí puede
+mejorar es el paso anterior: `vecino_mas_cercano()` elige de qué estación tomar prestada la FORMA de
+la curva de excedencia por pura distancia geográfica (Haversine), lo que puede fallar cuando el
+punto más cercano en línea recta cae en un régimen climático distinto (barlovento/sotavento, costa/
+interior) — relevante para una app internacional (Hallazgo 24) y posiblemente parte de por qué el
+ráster crudo de GWA falla tan fuerte en algunos sitios (Hallazgo 26). La idea concreta: usar la zona
+Köppen como filtro/desempate en la selección de donante (preferir la misma zona aunque esté un poco
+más lejos), no como una cuarta fuente de ajuste de magnitud.
+
+Fuente elegida por encajar con el pedido de Pablo (no meteorológica en el sentido de reanálisis/cola
+de procesamiento, sin registro ni pago): Beck et al. 2018, raster global de 1km publicado en
+Figshare, descarga directa. Notebook nuevo `notebooks/koppen_seleccion_donante.ipynb` con la
+explicación de encuadre, una celda de verificación de acceso real (API pública de Figshare, sin
+adivinar nombres de archivo — `api.figshare.com` está bloqueado en este sandbox igual que GWA/CDS,
+así que esa celda todavía no se corrió con red real) y un boceto sin terminar de
+`vecino_mas_cercano_por_zona()` — sin integrar a `engine/`, sin regla de desempate decidida, sin
+validación leave-one-out todavía.
+
+**Estado:** en investigación, no validado. Complementario al trabajo de ajuste de magnitud, no un
+sustituto — atacan preguntas distintas del mismo problema más grande.
+
 ---
 
 ## 6. Pendientes activos / bloqueos
@@ -1871,6 +1903,11 @@ este uso específico, distinto del quantile mapping ya probado en Hallazgo 23).
       no la geocodificación, el mapa visual, ni una descarga real exitosa (`nominatim.
       openstreetmap.org`, `photon.komoot.io`, `cdn.jsdelivr.net` y `climate.onebuilding.org`
       bloqueados acá).
+- [ ] **Nuevo, de Hallazgo 27:** correr en Colab la Parte 1 de `koppen_seleccion_donante.ipynb`
+      (acceso real al raster de Beck et al. 2018 vía la API pública de Figshare, bloqueada en este
+      sandbox) y, si responde bien, decidir la regla de desempate y terminar
+      `vecino_mas_cercano_por_zona()` + validación leave-one-out contra la selección por distancia
+      pura (mismo patrón de Hallazgo 21/22).
 - [ ] **Nuevo, de Hallazgo 19:** el catálogo (5,276 estaciones, 20 países) es el de DDP-lite/
       Skyplus tal cual — algunas estaciones no traen coordenada en el catálogo (se excluyen de
       la búsqueda por distancia, mismo comportamiento que el original). Si hace falta ampliar el
@@ -1947,10 +1984,14 @@ ECO-Wind/
 │   ├── prueba_internacional_estacion_mas_cercana.ipynb  ← auto-pivota a la estación real más
 │   │                                     cercana en cualquiera de los 20 países del catálogo, sin
 │   │                                     anclar nada a San José -- probado en 6 países (Hallazgo 24)
-│   └── sensibilizar_punto_exacto.ipynb  ← ajuste espacial de la estación donante al punto exacto:
-│                                         NASA POWER descartado (Hallazgo 25), GWA mixto/pausado
-│                                         (Hallazgo 26), ERA5 la apuesta actual (Parte 4, pendiente
-│                                         de correr con cuenta CDS real)
+│   ├── sensibilizar_punto_exacto.ipynb  ← ajuste espacial de la estación donante al punto exacto:
+│   │                                     NASA POWER descartado (Hallazgo 25), GWA mixto/pausado
+│   │                                     (Hallazgo 26), ERA5 la apuesta actual (Parte 4, pendiente
+│   │                                     de correr con cuenta CDS real)
+│   └── koppen_seleccion_donante.ipynb  ← eje distinto: filtro de zona Köppen para elegir QUÉ
+│                                         estación donar, no ajuste de magnitud (Hallazgo 27) --
+│                                         boceto, acceso al raster (Figshare) sin verificar en
+│                                         Colab todavía
 ├── datos_clima/
 │   ├── *.epw                          ← EPWs de estación real (aeropuerto Juan Santamaría)
 │   ├── gwa_juan_santamaria/           ← export real del Global Wind Atlas
