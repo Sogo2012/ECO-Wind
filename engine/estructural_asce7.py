@@ -142,6 +142,74 @@ def frecuencia_desprendimiento_vortices(v_rafaga, diametro, st=ST_CILINDRO):
     return st * v_rafaga / diametro
 
 
+ESPACIAMIENTO_IDEAL_FACTOR = 1.25  # diametro x 1.25, eje a eje -- "Guidance on Spacing Flower
+                                    # Turbines.pdf" (Hallazgo 11); rango aceptable 1.1-1.3x
+SEPARACION_FILAS_FACTOR = 4.0      # diametro x 4 (punto medio del rango 3-5x recomendado en el
+                                    # mismo documento) -- separacion entre filas de un cluster
+
+
+def espaciamiento_cluster(diametro, factor=ESPACIAMIENTO_IDEAL_FACTOR):
+    """
+    Espaciamiento ideal eje-a-eje DENTRO de una fila, para el efecto
+    Bouquet -- de "Guidance on Spacing Flower Turbines.pdf" (Hallazgo 11):
+    diametro x 1.25 (funciona tambien en 1.1x-1.3x). Ese mismo documento
+    tiene una inconsistencia aritmetica interna (dice tambien "diametro x
+    0.1" en un ejemplo distinto, ver Hallazgo 11) -- se usa aqui la regla
+    principal (1.25x), no la del ejemplo.
+    """
+    return diametro * factor
+
+
+def separacion_filas(diametro, factor=SEPARACION_FILAS_FACTOR):
+    """
+    Separacion recomendada ENTRE filas de un cluster, para que el viento
+    recupere velocidad antes de la siguiente fila -- ideal 5x diametro,
+    minimo 3x (Hallazgo 11); se usa el punto medio (4x) como valor por
+    defecto.
+    """
+    return diametro * factor
+
+
+def cargas_viento_cluster_asce7(v_rafaga, altura_techo_m, diametro, altura_pala, cd_max,
+                                 n_turbinas, Kz=1.0, Kzt=1.0, Kd=0.85, G=0.85, st=ST_CILINDRO,
+                                 factor_espaciamiento=ESPACIAMIENTO_IDEAL_FACTOR):
+    """
+    Demanda estructural TOTAL de un cluster/bouquet de n_turbinas del
+    mismo modelo, en una sola fila con el espaciamiento ideal de
+    Hallazgo 11.
+
+    SIMPLIFICACION IMPORTANTE, explicita: se suma la carga de cada
+    turbina SIN ningun credito de apantallamiento aerodinamico (no se
+    asume que las turbinas corriente abajo reciben menos empuje por
+    estar en la estela de las de adelante) -- eso requeriria el modelo
+    CFD de efecto cluster (Cilindro Actuador/OpenFOAM), que sigue sin
+    construirse (ver Pendientes). Es una simplificacion CONSERVADORA
+    para dimensionar una estructura de soporte compartida (marco,
+    rieles, cimentacion comun) -- no un intento de predecir generacion
+    de energia del cluster (eso ya lo cubre power_in_bouquet() en
+    engine/flower_turbines_curves.py, con el Efecto Bouquet real medido
+    por el fabricante, que va en la direccion CONTRARIA: mas potencia
+    por turbina, no menos empuje por turbina -- son dos efectos fisicos
+    distintos, no se debe confundir uno con el otro).
+
+    Devuelve el diccionario de calcular_cargas_viento_asce7() para UNA
+    turbina (bajo "individual"), mas la demanda total y la geometria del
+    arreglo.
+    """
+    individual = calcular_cargas_viento_asce7(v_rafaga, altura_techo_m, diametro, altura_pala,
+                                               cd_max, Kz, Kzt, Kd, G, st)
+    espaciamiento = espaciamiento_cluster(diametro, factor_espaciamiento)
+    ancho_fila_m = espaciamiento * (n_turbinas - 1) + diametro
+    return {
+        "individual": individual,
+        "n_turbinas": n_turbinas,
+        "Fw_total_N": individual["Fw_N"] * n_turbinas,
+        "Mw_total_Nm": individual["Mw_Nm"] * n_turbinas,
+        "espaciamiento_ideal_m": espaciamiento,
+        "ancho_fila_aprox_m": ancho_fila_m,
+    }
+
+
 def tension_maxima_pernos(mw, n_pernos, ancho_patron_m):
     """
     Demanda de tension MAXIMA por perno de anclaje, a partir del momento
@@ -318,3 +386,55 @@ if __name__ == "__main__":
     print("  totalmente cargadas\" que usa External Load Calculations. Discrepancia real entre")
     print("  documentos internos de Flower Turbines, documentada, no resuelta con los datos")
     print("  disponibles -- no se uso este valor de T en el modulo, se dejo como hallazgo.")
+
+    print()
+    print("=" * 78)
+    print("Extension a mas modelos (Hallazgo 12) -- Small Tulip (D=0.55m, H=1.149m):")
+    r_small = calcular_cargas_viento_asce7(v_rafaga=40.0, altura_techo_m=0.0,
+                                            diametro=0.55, altura_pala=1.149, cd_max=2.3)
+    print(f"  Fw: {r_small['Fw_N']:.1f} N   Mw: {r_small['Mw_Nm']:.1f} N*m   "
+          f"fs: {r_small['fs_Hz']:.3f} Hz")
+    print("  SIN demanda de anclaje: no existe todavia un plano de base de concreto con pernos")
+    print("  para este modelo especifico (PATRONES_ANCLAJE no tiene entrada 'small_tulip').")
+    print("  El 'EcoRoof Energy Hub' (Hallazgo 11) monta el Small Tulip SIN perforar/anclar --")
+    print("  peso + friccion, un tipo de analisis distinto (presion de apoyo distribuida sobre")
+    print("  el techo, 185-207 kg/m2 segun el propio manual) que este modulo no calcula todavia.")
+    print("  Fw/Mw de arriba son utiles si en cambio se monta en poste (como el de Medium Tulip,")
+    print("  0.1m dia x 2.44m, Hallazgo 11) -- no se asume cual instalacion aplica.")
+
+    print()
+    print("=" * 78)
+    print("AL13 Power Tower -- stack de 4 modulos (donde empieza a llevar poste estabilizador),")
+    print("D=1.7m (ancho FAQ; el propio manual tambien dice 1.6m en otra pagina -- Hallazgo 11,")
+    print("no resuelto, se usa el mas ancho por ser conservador), H=4x1m=4.0m:")
+    r_al13 = calcular_cargas_viento_asce7(v_rafaga=40.0, altura_techo_m=0.0,
+                                           diametro=1.7, altura_pala=4.0, cd_max=2.3)
+    patron_al13 = PATRONES_ANCLAJE["al13_power_tower"]
+    t_max_al13 = tension_maxima_pernos(r_al13["Mw_Nm"], patron_al13["n_pernos"],
+                                        patron_al13["ancho_patron_m"])
+    print(f"  Fw: {r_al13['Fw_N']:.1f} N ({r_al13['Fw_N']/1000:.2f} kN)   "
+          f"Mw: {r_al13['Mw_Nm']/1000:.2f} kN*m")
+    print(f"  Tension maxima estimada por perno (patron 'Power Tower Concrete Base ASSY',")
+    print(f"  12x M18x2.5, {patron_al13['ancho_patron_m']*1000:.0f}mm): "
+          f"{t_max_al13:.0f} N ({t_max_al13/1000:.2f} kN)")
+    print("  MISMA ADVERTENCIA que en los demas modelos: esto es demanda, no capacidad. Cd=2.3")
+    print("  tampoco esta re-verificado especificamente para la pala de aluminio del AL13 --")
+    print("  se hereda del mismo supuesto que Tulip por ser tambien VAWT de 2 palas.")
+
+    print()
+    print("=" * 78)
+    print("Primera aproximacion a carga de CLUSTER (Hallazgo 11: reglas reales de espaciamiento,")
+    print("SIN modelo CFD de apantallamiento -- ver docstring de cargas_viento_cluster_asce7):")
+    r_cluster = cargas_viento_cluster_asce7(v_rafaga=40.0, altura_techo_m=10.0, diametro=1.18,
+                                             altura_pala=2.0, cd_max=2.3, n_turbinas=5)
+    print(f"  Bouquet de 5 Medium Tulip (D=1.18m) sobre techo a 10m, rafaga 40 m/s:")
+    print(f"    Fw individual: {r_cluster['individual']['Fw_N']:.1f} N   "
+          f"Fw TOTAL (5x, sin apantallamiento): {r_cluster['Fw_total_N']:.1f} N "
+          f"({r_cluster['Fw_total_N']/1000:.2f} kN)")
+    print(f"    Espaciamiento ideal eje-a-eje: {r_cluster['espaciamiento_ideal_m']:.2f} m "
+          f"(=1.25 x diametro)")
+    print(f"    Ancho aproximado de la fila completa: {r_cluster['ancho_fila_aprox_m']:.2f} m")
+    print("  NOTA: Fw_total es conservador (suma simple, sin restar apantallamiento aerodinamico)")
+    print("  -- correcto para dimensionar una estructura de soporte compartida, pero NO intenta")
+    print("  predecir generacion de energia del cluster (eso lo cubre power_in_bouquet(), Efecto")
+    print("  Bouquet real, que va en sentido contrario: MAS potencia por turbina, no menos).")

@@ -1,7 +1,7 @@
 # ECO | Wind — Avance de Proyecto
 
 **Documento de referencia (alcance):** [`plan-tecnico-eco-wind.md`](./plan-tecnico-eco-wind.md)
-**Última actualización:** 31 de agosto, 2026 (Hallazgo 12 — curvas de potencia re-verificadas contra el calculador oficial, R²≥0.999996, sin dudas reales pendientes)
+**Última actualización:** 31 de agosto, 2026 (Hallazgo 13 — ASCE 7 extendido a Small Tulip y AL13, primera aproximación conservadora a carga de clúster)
 **Propósito:** comparar el alcance planeado contra el avance real, y dejar constancia de los
 hallazgos que no estaban previstos en el plan original. Se actualiza en cada avance
 significativo — no es una foto única.
@@ -13,7 +13,7 @@ significativo — no es una foto única.
 | Fase / Pista | Estado |
 |---|---|
 | **Fase 1 — Pista A** (motor empírico) | 🟢 Sólida — mecánica y fuentes de datos climáticos (EPW + GWA) validadas con datos reales; z0/afinación fina quedó pendiente para más adelante (decisión del Director del Proyecto) |
-| **Fase 1 — Pista B** (motor físico DMST + CFD) | 🟡 Aerodinámica congelada (vía agotada, sobre-predicción sigue abierta, Hallazgo 8) — módulo estructural ASCE 7 validado con demanda de anclaje para 4 modelos (Hallazgos 9-10); curvas de potencia del AL13 corregidas con tabla oficial (antes lectura aproximada) y revisión completa de 9 manuales del fabricante (Hallazgo 11) |
+| **Fase 1 — Pista B** (motor físico DMST + CFD) | 🟡 Aerodinámica congelada (vía agotada, sobre-predicción sigue abierta, Hallazgo 8); curvas de potencia re-verificadas contra el calculador oficial, sin dudas reales (Hallazgo 12) — módulo estructural ASCE 7 con demanda de anclaje para 5 modelos (Large/Medium/3-M Tulip/AL13) y primera aproximación conservadora a carga de clúster (Hallazgos 9-10, 13) |
 | **Fase 2** (productización: Streamlit + Cloud Run) | ⚪ No iniciada |
 
 ---
@@ -131,7 +131,7 @@ combinado — útil más adelante para orientación de bouquets).
 | 1 | DMST turbina aislada (patentes CA2800765C/US9255567B2, ES2970155T3/AU2019380766B2) | 🟡 Sustentación (NACA 0018) y arrastre (Savonius) construidos y validados por separado; combinados con la arquitectura real de dos niveles de pala (`engine/rotor_combinado.py`) y verificados (Betz + 4 modelos) — combinar bien no resuelve la sobre-predicción, ver Hallazgo 6 |
 | 2 | Pérdida dinámica a TSR bajo (Leishman-Beddoes) | ⚪ No iniciado |
 | 3 | Efecto clúster (Cilindro Actuador, OpenFOAM offline) | ⚪ No iniciado |
-| 4 | Estructural (ASCE 7) | 🟡 Primer módulo construido y validado (`engine/estructural_asce7.py`) — presión dinámica, corte basal, momento de vuelco, frecuencia de vórtices. Demanda de anclaje con patrones reales para 4 modelos (Large Tulip, AL13 Power Tower, Medium Tulip, 3-M Tulip). Ver Hallazgos 9 y 10 |
+| 4 | Estructural (ASCE 7) | 🟡 Módulo construido y validado (`engine/estructural_asce7.py`) — presión dinámica, corte basal, momento de vuelco, frecuencia de vórtices. Demanda de anclaje con patrones reales para 4 modelos + carga de viento (sin anclaje) para Small Tulip; primera aproximación conservadora a carga de clúster. Ver Hallazgos 9, 10 y 13 |
 
 **Lo construido:** `engine/dmst_model.py` (solver DMST de doble tubo de corriente —
 simplificado, un factor de inducción por semicírculo upwind/downwind, no multi-tubo por
@@ -713,6 +713,40 @@ Efecto Bouquet — el ajuste ya construido predice datos frescos del calculador,
 5), con los que no fue entrenado. No se modificó ningún coeficiente en `flower_turbines_curves.py`
 — solo se documentó la verificación adicional en el docstring del módulo.
 
+### Hallazgo 13 — ASCE 7 extendido a Small Tulip y AL13, y primera aproximación (conservadora) a carga de clúster
+
+Con las curvas de potencia confirmadas (Hallazgo 12), Pablo pidió seguir con la parte
+estructural pendiente, específicamente extender `estructural_asce7.py` a más modelos —no
+conseguir capacidad de pernos ni el plano del Small Tulip, que quedan pendientes y dependen de
+datos que él tiene que aportar.
+
+**Small Tulip (D=0.55m, H=1.149m):** se calculan `Fw`/`Mw`/`fs` igual que los demás modelos,
+pero **sin** demanda de anclaje — no existe un plano de base de concreto con pernos para este
+modelo (`PATRONES_ANCLAJE` no tiene entrada `small_tulip`), y el único sistema de montaje
+documentado hasta ahora (`EcoRoof Energy Hub`, Hallazgo 11) no usa pernos en absoluto: es peso +
+fricción, un problema de presión de apoyo distribuida sobre el techo (185-207 kg/m², ya
+documentado), no de tensión puntual — un tipo de análisis que este módulo todavía no cubre. No
+se asumió cuál instalación aplica a un caso real.
+
+**AL13 Power Tower (stack de 4 módulos, D=1.7m, H=4.0m):** se calcula `Fw`/`Mw` y la demanda de
+tensión en pernos usando el patrón ya existente en `PATRONES_ANCLAJE` (`Power Tower Concrete
+Base ASSY`, 12×M18×2.5, 774.4mm). Dos supuestos declarados explícitamente, no escondidos: (1)
+el ancho D=1.7m se tomó del FAQ del manual, que en otra página del mismo documento dice 1.6m —
+discrepancia ya documentada en Hallazgo 11, no resuelta, se usó el valor más ancho por ser
+conservador; (2) Cd=2.3 se heredó sin re-verificación específica para la pala de aluminio del
+AL13 (mismo supuesto que Tulip, por ser también VAWT de 2 palas).
+
+**Primera aproximación a carga de clúster**, usando las reglas reales de espaciamiento del
+Hallazgo 11 (`espaciamiento_cluster()`, `separacion_filas()`, `cargas_viento_cluster_asce7()`):
+para un bouquet de 5 Medium Tulip a 40 m/s sobre techo a 10m, la demanda estructural total (suma
+simple de 5 turbinas, **sin ningún crédito de apantallamiento aerodinámico**) da 19.23 kN, con
+un espaciamiento ideal de 1.47m eje-a-eje y una fila de ~7.08m de ancho. Esto es
+deliberadamente conservador para dimensionar una estructura de soporte compartida — **no** es
+un intento de modelar el efecto clúster aerodinámico real (que sigue sin construirse, ver
+Pendientes) y se documentó explícitamente que no debe confundirse con el Efecto Bouquet de
+`power_in_bouquet()`, que va en la dirección contraria (más potencia por turbina agrupada, no
+menos empuje).
+
 ---
 
 ## 6. Pendientes activos / bloqueos
@@ -827,6 +861,14 @@ Efecto Bouquet — el ajuste ya construido predice datos frescos del calculador,
       modelo actual solo tiene cut-in, no cut-out (Hallazgo 11).
 - [ ] Procesar las fichas "Specs_2025" restantes (Small Tulip, Large Tulip, AL13) cuando Pablo
       las comparta — ya se procesaron las de Medium y 3-M Tulip (Hallazgo 11).
+- [ ] Modelar presión de apoyo distribuida (peso + fricción, sin pernos) para instalaciones tipo
+      `EcoRoof Energy Hub` — hoy `estructural_asce7.py` solo calcula tensión puntual en pernos de
+      anclaje, un tipo de carga distinto (Hallazgo 13).
+- [ ] Confirmar el ancho real del AL13 (1.6m vs 1.7m, discrepancia entre páginas del mismo
+      manual, Hallazgo 11) antes de tomar como definitivo el caso de prueba de Hallazgo 13.
+- [ ] Cuando se construya el modelo CFD de efecto clúster (Cilindro Actuador/OpenFOAM), decidir
+      si `cargas_viento_cluster_asce7()` debe incorporar crédito de apantallamiento aerodinámico
+      en vez de la suma simple conservadora actual (Hallazgo 13).
 
 ## 7. Cómo navegar el repositorio en este punto
 
