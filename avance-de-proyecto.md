@@ -1,7 +1,7 @@
 # ECO | Wind — Avance de Proyecto
 
 **Documento de referencia (alcance):** [`plan-tecnico-eco-wind.md`](./plan-tecnico-eco-wind.md)
-**Última actualización:** 31 de agosto, 2026 (Hallazgo 19 v3 — consolidado en UN SOLO flujo de búsqueda de clima, igual que DDP-lite/Skyplus: sin selector de modos, estación real siempre, aproximación como fallback automático sólo cuando hace falta; Hallazgo 20 — corrección real en el perfil de viento por altura, z0 de referencia distinto de z0 destino; Hallazgo 21 — vecino más cercano validado por leave-one-out, con un artefacto real de `generar_clima_gwa()` encontrado en el camino; quantile mapping probado (mecánica) y acceso a ERA5/CDS investigado; Hallazgo 22 — mitigación parcial de ese artefacto vía curva de excedencia por residuos: Liberia ya muestra una mejora clara y real con el vecino más cercano; Hallazgo 23 — validación REAL (Colab, no sintética) de quantile mapping contra NASA POWER: mejora real pero más modesta que la prueba sintética; Hallazgo 24 — corrección de rumbo: app internacional, sin anclar a San José, catálogo global de 5,276 estaciones/20 países probado y auto-pivotable en 6 países reales; Hallazgo 25 — NASA POWER descartado como ajuste espacial (falla al revés en terreno accidentado, confirmado con datos reales); GWA generalizado a cualquier país como reemplazo candidato)
+**Última actualización:** 31 de agosto, 2026 (Hallazgo 19 v3 — consolidado en UN SOLO flujo de búsqueda de clima, igual que DDP-lite/Skyplus: sin selector de modos, estación real siempre, aproximación como fallback automático sólo cuando hace falta; Hallazgo 20 — corrección real en el perfil de viento por altura, z0 de referencia distinto de z0 destino; Hallazgo 21 — vecino más cercano validado por leave-one-out, con un artefacto real de `generar_clima_gwa()` encontrado en el camino; quantile mapping probado (mecánica) y acceso a ERA5/CDS investigado; Hallazgo 22 — mitigación parcial de ese artefacto vía curva de excedencia por residuos: Liberia ya muestra una mejora clara y real con el vecino más cercano; Hallazgo 23 — validación REAL (Colab, no sintética) de quantile mapping contra NASA POWER: mejora real pero más modesta que la prueba sintética; Hallazgo 24 — corrección de rumbo: app internacional, sin anclar a San José, catálogo global de 5,276 estaciones/20 países probado y auto-pivotable en 6 países reales; Hallazgo 25 — NASA POWER descartado como ajuste espacial (falla al revés en terreno accidentado, confirmado con datos reales); GWA generalizado a cualquier país como reemplazo candidato; Hallazgo 26 — validación real de GWA: mucho mejor que NASA POWER pero mixto, el problema está en el ráster crudo de GWA en San José/Finca Favorita, no en el mecanismo de razón)
 **Propósito:** comparar el alcance planeado contra el avance real, y dejar constancia de los
 hallazgos que no estaban previstos en el plan original. Se actualiza en cada avance
 significativo — no es una foto única.
@@ -1606,6 +1606,75 @@ sincroniza el repo, no después.
 
 ---
 
+### Hallazgo 26 — Validación real de GWA como ajuste espacial: mucho mejor que NASA POWER, pero mixto — el problema no está en el mecanismo de razón, está en el ráster crudo
+
+Continuación de Hallazgo 25: Pablo corrió el notebook completo en Colab con el bug de `ruta_raster`
+ya corregido. Dos hallazgos reales, con datos, no sintéticos.
+
+**Diagnóstico crudo (antes de cualquier ajuste) — el ráster de GWA solo en la propia coordenada de
+cada sitio, comparado contra la media real ya conocida:**
+
+| Sitio | Media real | GWA crudo | Diferencia |
+|---|---|---|---|
+| Nicoya | 2.091 | 2.252 | **+7.7%** |
+| Liberia | 3.629 | 3.390 | **-6.6%** |
+| San José | 3.669 | 2.088 | **-43.1%** |
+| Finca Favorita | 1.413 | 0.180 | **-87.2%** |
+
+Guanacaste (Nicoya, Liberia) sale razonablemente cerca de la realidad. San José y Finca Favorita se
+alejan mucho — **antes de aplicar ningún ajuste todavía**. San José tiene un precedente real ya
+documentado (Hallazgo 3): el archivo `.lib` (WAsP nativo) de GWA da 5.37 m/s contra 3.67 m/s del
+panel web — una brecha de +46% entre dos productos de GWA en el mismo punto, YA conocida antes de
+este hallazgo. Esta brecha nueva (ráster/API vs. panel, -43%) es del mismo orden de magnitud —
+consistente con que GWA simplemente tiene varios productos que no concuerdan entre sí para este
+sitio, sin ser necesariamente un problema nuevo. Es una hipótesis razonable, no confirmada. Finca
+Favorita (-87%) es un caso aparte, sin explicación confirmada — podría ser que el modelo de
+downscaling de GWA resuelva mal el terreno costero/boscoso del Caribe a 250m, distinto del problema
+de NASA POWER (que era resolución gruesa, no tipo de terreno).
+
+**Validación leave-one-out real con `factor_ajuste_gwa()` (el número que de verdad importa):**
+
+| Sitio | Donante | Factor GWA | kWh ajustado | Error |
+|---|---|---|---|---|
+| San José | Nicoya | 0.927 | 46.9 | **-70.0%** |
+| Nicoya | Liberia | 0.664 | 118.8 | **+126.7%** |
+| Liberia | Nicoya | 1.506 | 220.5 | **-24.4%** |
+| Finca Favorita | San José | 0.086 | ~0.0 | **-100.0%** |
+
+**Comparación completa contra todo lo ya documentado:**
+
+| Sitio | Siempre San José (H21) | Vecino+residuo, verdad conocida (H22) | Vecino+NASA POWER (H25) | Vecino+GWA (este hallazgo) |
+|---|---|---|---|---|
+| San José | — | — | -98.5% | -70.0% |
+| Nicoya | -41.5% | +47.6% | +593.4% | +126.7% |
+| Liberia | -43.7% | +15.9% | -75.4% | **-24.4%** |
+| Finca Favorita | +19.2% | +19.2% | +15,184.0% | -100.0% |
+
+**El -100% de Finca Favorita se verificó con cálculo, no es un bug nuevo — es la propagación
+directa del diagnóstico crudo.** La razón de los valores crudos de GWA (Finca Favorita/San José =
+0.180/2.088 = 0.0863) coincide exacta con el `factor_ajuste_gwa` reportado (0.0863). Esa razón,
+aplicada a la media real de San José (3.669 m/s), implica una media ajustada de apenas 0.317 m/s —
+muy por debajo del cut-in de cualquier modelo de Flower Turbines, así que la producción sale
+prácticamente cero. El mecanismo de razón no inventa un error nuevo: hereda (y en este caso,
+amplifica) el error que ya tenía el dato crudo de GWA en los dos sitios donde el crudo ya fallaba.
+
+**Lectura honesta, sin forzar una conclusión limpia:** GWA es sustancialmente mejor que NASA POWER
+(nada de miles de por ciento) y para Liberia específicamente da el segundo mejor resultado de los 4
+métodos comparados (sólo detrás de Hallazgo 22, que usa una ventaja injusta: la media real ya
+conocida del sitio). Pero no es una victoria limpia — funciona bien donde el ráster crudo de GWA ya
+era confiable (Guanacaste) y falla donde no lo era (San José, Finca Favorita), sin que el mecanismo
+de razón en sí pueda arreglar eso. **El problema real a investigar no es "la razón entre dos puntos
+no cancela el sesgo" (eso sí funciona, a diferencia de NASA POWER) — es por qué el ráster de GWA se
+aleja tanto de la realidad específicamente en San José y Finca Favorita.**
+
+**Pendiente, decisión de Pablo:** investigar la causa de la brecha del ráster crudo en San José y
+Finca Favorita (¿otra altura? ¿otro producto de GWA? ¿limitación real del downscaling en esos
+terrenos?), o pasar en paralelo a probar Köppen/polígonos climáticos (Alternativa 2 original, nunca
+investigada) o ERA5 como fuente continua para el mismo mecanismo de razón (nunca construido para
+este uso específico, distinto del quantile mapping ya probado en Hallazgo 23).
+
+---
+
 ## 6. Pendientes activos / bloqueos
 
 - [x] ~~Conseguir A/k reales del Global Wind Atlas~~ — resuelto, y con datos más ricos de lo
@@ -1812,12 +1881,19 @@ sincroniza el repo, no después.
       aeropuerto), pero no está validado contra producción real de una turbina instalada. Si en
       algún momento hay datos de producción real de un proyecto, es el punto más directo para
       validar (o ajustar) tanto `z0_met` como la elección entre ley logarítmica y de potencia.
-- [ ] **Nuevo, de Hallazgo 25:** correr `descargar_raster_pais("CRI")` en Colab y repetir la
-      validación leave-one-out con `factor_ajuste_gwa()` (Parte 3 de
-      `notebooks/sensibilizar_punto_exacto.ipynb`) — construido y probado con datos sintéticos, pero
-      todavía sin el número real. Si GWA tampoco resuelve el ajuste espacial bien, reconsiderar el
-      mecanismo (¿ERA5 a nivel local? ¿confiar en la estación real más cercana sin ajuste cuando ya
-      está razonablemente cerca?) — no forzar GWA como solución si el número real no lo sostiene.
+- [x] ~~Nuevo, de Hallazgo 25: correr `descargar_raster_pais("CRI")` en Colab y repetir la
+      validación leave-one-out con `factor_ajuste_gwa()`~~ — resuelto (Hallazgo 26): resultado
+      mixto, mucho mejor que NASA POWER pero no una victoria limpia (bien en Guanacaste, mal en San
+      José/Finca Favorita). Ver el siguiente pendiente.
+- [ ] **Nuevo, de Hallazgo 26:** investigar por qué el ráster crudo de GWA (sin ningún ajuste) se
+      aleja tanto de la realidad específicamente en San José (-43%) y Finca Favorita (-87%) — el
+      mecanismo de razón en sí funciona bien (Liberia mejoró sobre todo lo anterior), el problema
+      está en el dato crudo de esos dos sitios. Candidatos sin probar: otra altura del ráster, otro
+      producto de GWA, o una limitación real del downscaling en terreno de valle/costa-boscoso.
+- [ ] **Nuevo, de Hallazgo 26:** en paralelo, probar Köppen/polígonos climáticos (Alternativa 2
+      original del primer pedido de Pablo, nunca investigada) o ERA5 como fuente continua para el
+      mismo mecanismo de razón (distinto del quantile mapping de Hallazgo 23) — dos caminos
+      todavía sin explorar si GWA no termina de resolverse.
 
 ## 7. Cómo navegar el repositorio en este punto
 
