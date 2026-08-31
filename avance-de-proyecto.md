@@ -1255,6 +1255,14 @@ leave-one-out, sin necesitar el ráster todavía; (2) investigar qué hace falta
 vía Copernicus CDS; (3) probar la MECÁNICA de quantile mapping hoy mismo, sin esperar a (2).
 Explícito: nada de esto se conecta a `app.py` hasta tener los números.
 
+**Todo lo de este hallazgo y de Hallazgo 22 (más abajo) está también en
+[`notebooks/pista_c_forma_regional_y_quantile_mapping.ipynb`](./notebooks/pista_c_forma_regional_y_quantile_mapping.ipynb)**,
+corrible de punta a punta en Colab o local (mismo patrón que `pista_a_motor_empirico.ipynb` y
+`pista_b_motor_fisico.ipynb`) -- las tablas y números de abajo son exactamente los que produce ese
+notebook, no un resumen aparte. Las dos celdas que necesitan internet real (prueba de conectividad
+a CDS, e intento de descarga real de NASA POWER) están marcadas explícitamente y sólo dan resultado
+nuevo corriendo el notebook en un entorno con internet normal.
+
 **Parte 1 — Vecino más cercano + leave-one-out (`engine/formas_regionales.py`, nuevo)**
 
 `excedencia_json_desde_epw()` construye una curva de excedencia desde un EPW real en el MISMO
@@ -1675,7 +1683,11 @@ ECO-Wind/
 │   └── actuator_cylinder.py          ← Pista B efecto clúster, Cilindro Actuador (Hallazgo 15)
 ├── notebooks/
 │   ├── pista_a_motor_empirico.ipynb  ← sandbox Pista A completo, corre en Colab o local
-│   └── pista_b_motor_fisico.ipynb    ← sandbox Pista B, aerodinámica
+│   ├── pista_b_motor_fisico.ipynb    ← sandbox Pista B, aerodinámica
+│   └── pista_c_forma_regional_y_quantile_mapping.ipynb  ← vecino más cercano + leave-one-out +
+│                                         acceso a ERA5/CDS + quantile mapping (Hallazgo 21-22),
+│                                         corre de punta a punta en Colab o local; las celdas que
+│                                         necesitan internet real (NASA POWER, CDS) están marcadas
 ├── datos_clima/
 │   ├── *.epw                          ← EPWs de estación real (aeropuerto Juan Santamaría)
 │   ├── gwa_juan_santamaria/           ← export real del Global Wind Atlas
