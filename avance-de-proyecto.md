@@ -1,7 +1,7 @@
 # ECO | Wind — Avance de Proyecto
 
 **Documento de referencia (alcance):** [`plan-tecnico-eco-wind.md`](./plan-tecnico-eco-wind.md)
-**Última actualización:** 31 de agosto, 2026 (Hallazgo 19 v3 — consolidado en UN SOLO flujo de búsqueda de clima, igual que DDP-lite/Skyplus: sin selector de modos, estación real siempre, aproximación como fallback automático sólo cuando hace falta; Hallazgo 20 — corrección real en el perfil de viento por altura, z0 de referencia distinto de z0 destino)
+**Última actualización:** 31 de agosto, 2026 (Hallazgo 19 v3 — consolidado en UN SOLO flujo de búsqueda de clima, igual que DDP-lite/Skyplus: sin selector de modos, estación real siempre, aproximación como fallback automático sólo cuando hace falta; Hallazgo 20 — corrección real en el perfil de viento por altura, z0 de referencia distinto de z0 destino; Hallazgo 21 — vecino más cercano validado por leave-one-out, con un artefacto real de `generar_clima_gwa()` encontrado en el camino; quantile mapping probado (mecánica) y acceso a ERA5/CDS investigado)
 **Propósito:** comparar el alcance planeado contra el avance real, y dejar constancia de los
 hallazgos que no estaban previstos en el plan original. Se actualiza en cada avance
 significativo — no es una foto única.
@@ -1247,12 +1247,158 @@ Probado de punta a punta: `streamlit run` arranca sin errores (HTTP 200).
 
 ---
 
+### Hallazgo 21 — Vecino más cercano validado por leave-one-out: la idea de fondo funciona, pero un artefacto real de `generar_clima_gwa()` la tapa hoy; quantile mapping probado (mecánica) y acceso a ERA5/CDS investigado
+
+Pablo pidió tres cosas en paralelo: (1) probar "Alternativa 4" (prestar la forma del vecino real
+más cercano entre los 4 sitios conocidos, en vez de tener a San José fijo) con una validación
+leave-one-out, sin necesitar el ráster todavía; (2) investigar qué hace falta para acceder a ERA5
+vía Copernicus CDS; (3) probar la MECÁNICA de quantile mapping hoy mismo, sin esperar a (2).
+Explícito: nada de esto se conecta a `app.py` hasta tener los números.
+
+**Parte 1 — Vecino más cercano + leave-one-out (`engine/formas_regionales.py`, nuevo)**
+
+`excedencia_json_desde_epw()` construye una curva de excedencia desde un EPW real en el MISMO
+formato que el `windSpeed.json` real de GWA (verificado directo contra el archivo real: 50 puntos,
+`perc`=2,4,...,100, convención de excedencia confirmada: `val(perc)` = percentil estándar
+`100-perc`) — necesario porque Nicoya/Liberia/Finca Favorita sólo tienen EPW, no export de GWA.
+`vecino_mas_cercano()` usa Haversine (la misma función de `epw_real.py`) sobre los 4 sitios
+conocidos, con soporte de exclusión para la prueba leave-one-out. `validar_leave_one_out()` tapa
+la forma real de cada sitio por turno, predice con su propia media real + la forma prestada del
+vecino más cercano de los OTROS 3, y compara contra su producción real conocida — recalculando
+también, con el mismo pipeline de hoy (post-Hallazgo 20), el escenario "siempre San José" para
+comparar en igualdad de condiciones (los números de Hallazgo 18 son de antes de esa corrección).
+
+**Números reales (medium_tulip×3, buje 3.0m):**
+
+| Sitio evaluado | Media real (m/s) | kWh real | Vecino más cercano (de los otros 3) | Distancia | kWh con vecino | Error nuevo | kWh con San José | Error viejo |
+|---|---|---|---|---|---|---|---|---|
+| San José | 3.67 | 156.4 | Nicoya | 137.5 km | 595.9 | **+280.9%** | — | — |
+| Nicoya | 2.09 | 52.4 | Liberia | 50.3 km | 122.7 | **+134.2%** | 30.7 | -41.5% |
+| Liberia | 3.63 | 291.5 | Nicoya | 50.3 km | 625.7 | **+114.7%** | 164.3 | -43.7% |
+| Finca Favorita | 1.41 | 7.4 | San José (única opción real) | 178.6 km | 8.9 | +19.2% | 8.9 | +19.2% |
+
+El escenario "siempre San José" recalculado reproduce casi exacto lo ya documentado en Hallazgo 18
+(-41.5% vs -41.0%, -43.7% vs -43.6%, +19.2% vs +18.4% — la pequeña diferencia es consistente con
+la corrección de Hallazgo 20), buena señal de que el pipeline está bien invocado. Pero el
+resultado pedido — **reportar el número real, no asumirlo** — es que el vecino más cercano da
+error MUCHO PEOR que siempre-San-José para los 3 sitios donde hay una alternativa real, no mejor
+como se esperaba para Nicoya↔Liberia (misma zona, Guanacaste). Para Finca Favorita, tal como Pablo
+anticipó, no hay una segunda opción real en su zona (Caribe) — el vecino más cercano de los otros
+3 es San José (178.6 km) y no Guanacaste (338.7 km, verificado con Haversine exacto), así que el
+resultado es idéntico al viejo por construcción. Esto no se esconde: es el único de los 4 casos
+sin una alternativa real que probar.
+
+**No se quedó en ese número — se investigó la causa, y NO es que la idea de fondo esté mal.**
+Con self-reconstrucción (reconstruir la forma de un sitio a partir de SU PROPIA curva+heatmap
+derivados de EPW, sin pedir prestado a nadie) se aisló el problema: `generar_clima_gwa()` dibuja
+un percentil aleatorio independiente por hora desde la curva de excedencia MARGINAL (que ya
+contiene todo el desvío del año, incluida la variación diurna/estacional) y lo multiplica por un
+índice de heatmap mes×hora APARTE — reinyectando esa misma variación diurna/estacional una segunda
+vez. Esto infla la varianza (y sobre todo `E[v³]/media³`, la cifra que de verdad pesa en una ley
+de potencia cúbica) muy por encima de la real:
+
+| Sitio (self-reconstrucción, sin vecinos) | E[v³]/media³ real (serie horaria cruda) | E[v³]/media³ reconstruido de su propia forma EPW-derivada |
+|---|---|---|
+| Nicoya | 3.25 | 6.71 (+106%) |
+| Liberia | 3.41 | 6.99 (+105%) |
+| San José | 2.26 | 3.41 (+51%) |
+| Finca Favorita | 1.62 | 1.85 (+14%) |
+
+Para San José se pudo comparar además contra su forma NATIVA de GWA (la del panel, no derivada de
+EPW): esa reconstrucción da `E[v³]/media³`=1.89 — **subestima** ligeramente lo real (2.26), al
+revés que la forma EPW-derivada. Esto confirma que el artefacto es específico de combinar una
+curva de excedencia Y un heatmap derivados AMBOS de la misma serie horaria cruda (probablemente
+porque el export nativo de GWA viene de un modelo/climatología ya suavizados, no de una serie
+horaria observada) — no es un bug en `excedencia_json_desde_epw()` en sí (su aproximación de la
+media, verificada aparte, sólo se desvía 2-4% de la media real de 8760h) ni un problema del
+concepto de "vecino más cercano".
+
+Separado de la mecánica rota, se probó el CONCEPTO puro: `E[v³]/media³` real (de la serie horaria
+cruda, sin reconstrucción sintética de por medio) de Nicoya y Liberia difiere sólo 4.7% entre sí,
+contra 43.6%/50.7% de diferencia contra San José — confirma fuerte que sitios de la misma zona
+climática SÍ tienen forma real parecida. Finca Favorita, además, tiene su forma real más parecida
+a San José (28.6% de diferencia) que a Liberia (52.6%) — coincide con que Haversine también elige
+San José como su vecino más cercano real. Dos señales independientes (distancia geográfica y forma
+real) apuntan en la misma dirección para Finca Favorita.
+
+**Conclusión honesta de la Parte 1:** la idea de "prestar del vecino real más cercano" está bien
+fundada en los datos reales — el problema es que `generar_clima_gwa()`, tal como reconstruye una
+serie horaria desde una curva+heatmap derivados de EPW, no puede aprovecharla todavía. No se
+resolvió esa parte con este pedido (era cuantificar el error, no arreglar el motor de reconstrucción) — pero
+antes de decidir si Alternativa 4 reemplaza la aproximación actual hace falta resolver esto.
+Direcciones posibles, NO implementadas, para que Pablo decida: (a) construir la curva de excedencia
+de RESIDUOS (después de restar el patrón mes×hora), no de la serie cruda completa, para no repetir
+la misma variación dos veces; (b) amortiguar el heatmap EPW-derivado antes de combinarlo; (c)
+remuestrear bloques reales de horas (bootstrap por bloques) en vez de percentil+heatmap
+independientes, que por construcción no puede duplicar varianza. `formas_regionales.py` sigue sin
+conectarse a `app.py`, como se pidió.
+
+**Parte 2 — Acceso a ERA5 vía Copernicus CDS (investigado, no implementado)**
+
+`cds.climate.copernicus.eu` sigue bloqueado en este sandbox (confirmado de nuevo con curl:
+`CONNECT tunnel failed`, error 403 del proxy — mismo host ya listado en Hallazgo 2). Investigado
+qué hace falta (no asumido): registro gratuito (nombre, email, país, sector — sin mención de nivel
+pago para el acceso estándar), después un "Personal Access Token" en la página de perfil de la
+cuenta, que se guarda en `$HOME/.cdsapirc` (`url: https://cds.climate.copernicus.eu/api` /
+`key: <TOKEN>`); acceso programático vía el paquete oficial `cdsapi` (pip); hay que aceptar los
+Términos y Condiciones de cada dataset (ERA5 incluido) antes de poder descargarlo, un paso aparte
+del registro general. Nada de esto pide tarjeta ni facturación según lo encontrado. Como ERA5
+(~31km) es más fino que NASA POWER (~50-60km) pero usa el MISMO método de corrección (quantile
+mapping, ver Parte 3) que ya se probó y funciona, perseguir el registro tiene sentido cuando haya
+un sitio concreto que lo necesite — no es bloqueante para seguir probando el método con NASA POWER,
+que ya es accesible en producción (sólo bloqueado en este sandbox).
+
+Fuentes: [CDSAPI setup - Climate Data Store](https://cds.climate.copernicus.eu/how-to-api),
+[ecmwf/cdsapi (GitHub)](https://github.com/ecmwf/cdsapi).
+
+**Parte 3 — Quantile mapping: mecánica probada y funciona (`engine/quantile_mapping.py`, nuevo)**
+
+Limitación real confirmada antes de probar nada: la corrida real de NASA POWER de Hallazgo 1 (San
+José, 1.30 m/s vs 4.03 m/s del EPW real — re-verificado en la celda de resumen de
+`notebooks/pista_a_motor_empirico.ipynb`, no de memoria) se hizo en Colab y su serie horaria cruda
+nunca se guardó en el repo — sólo sobrevive la media y el kWh derivado. No se puede probar la
+corrección contra NASA POWER real todavía; se probó la MECÁNICA del método con un sesgo sintético
+controlado sobre el EPW real de San José: magnitud reducida por el factor real (1.30/4.03=0.3226,
+Hallazgo 1) + forma comprimida hacia la media (imita que NASA POWER promedia una celda de
+~50-60km — esta parte SÍ es una construcción sintética, marcada como tal en el código, no medida).
+
+Diseño anti-tautológico: la tabla de mapeo se ajusta SÓLO con enero-junio; la comparación se hace
+en julio-diciembre, que el ajuste nunca vio.
+
+| Versión (semestre de prueba, jul-dic) | Media (m/s) | CV | E[v³]/media³ | kWh del semestre | Error vs. verdad |
+|---|---|---|---|---|---|
+| VERDAD (EPW real) | 3.432 | 0.624 | 2.356 | 79.11 | — |
+| Sesgada cruda (sin corregir) | 1.204 | 0.287 | 1.265 | 1.05 | **-98.7%** |
+| Corregida naive (sólo razón de medias) | 3.996 | 0.287 | 1.265 | 67.15 | **-15.1%** |
+| Corregida quantile mapping (percentil a percentil) | 3.432 | 0.624 | 2.356 | 79.11 | **-0.003%** |
+
+Quantile mapping recupera la media, el CV, `E[v³]/media³` y el kWh casi exactos, FUERA de muestra
+(nunca vio julio-diciembre durante el ajuste). La corrección naive (equivalente a lo que ya hace
+`media_objetivo` en `generar_clima_gwa()`) sólo arregla la media — como el sesgo sintético también
+achata la forma, se queda en -15.1% de error. Esto demuestra que el método está bien implementado y
+generaliza fuera de muestra bajo un sesgo sintético ESTACIONARIO (mismo factor todo el año) — no
+todavía que el sesgo real de NASA POWER se comporte así de limpio (podría ser más ruidoso o variar
+por estación). Confirmar eso necesita datos reales pareados (NASA POWER crudo real de Pablo, o
+correr esto de nuevo en Colab, o los datos de ERA5 de la Parte 2).
+
+**Qué sigue, sin decidir todavía:** con la mecánica de quantile mapping ya validada y el acceso a
+CDS ya mapeado, el siguiente paso natural es conseguir una serie horaria real (NASA POWER de una
+corrida en Colab, o ERA5 vía CDS) para validar el método contra un sesgo real, no sintético. Para
+Alternativa 4, el siguiente paso es decidir si vale la pena arreglar el artefacto de
+`generar_clima_gwa()` encontrado en la Parte 1 antes de reintentar la validación leave-one-out.
+Ninguna de las dos cosas se implementó en este hallazgo — quedan como decisión de Pablo.
+
+---
+
 ## 6. Pendientes activos / bloqueos
 
 - [x] ~~Conseguir A/k reales del Global Wind Atlas~~ — resuelto, y con datos más ricos de lo
       esperado (curva empírica completa + estacionalidad real + wind rose). Ver Hallazgo 3.
-- [ ] Decidir si se implementa la Pista C (ERA5 + quantile mapping) ahora o se pospone —
-      menor prioridad ahora que GWA y EPW ya concuerdan razonablemente entre sí (~9%).
+- [x] ~~Decidir si se implementa la Pista C (ERA5 + quantile mapping) ahora o se pospone~~ —
+      investigado (Hallazgo 21): acceso a CDS/ERA5 mapeado (registro gratuito + token, sin pago),
+      y la MECÁNICA de quantile mapping ya se probó y funciona (fuera de muestra, sesgo sintético)
+      contra el EPW real de San José. Sigue pendiente conseguir una serie horaria real (NASA POWER
+      o ERA5) para validar el método contra un sesgo real, no sintético — ver Hallazgo 21.
 - [ ] Confirmar si el sesgo de NASA POWER (~3x) y la brecha GWA-vs-EPW (~9%) se sostienen en
       otros puntos del Valle Central, o fueron específicos de esta coordenada.
 - [ ] Entender mejor la discrepancia entre el `.lib` de WAsP (5.37 m/s) y el panel web del
@@ -1409,12 +1555,25 @@ Probado de punta a punta: `streamlit run` arranca sin errores (HTTP 200).
       un segundo sitio con export propio~~ — resuelto contra 3 sitios reales (Nicoya, Liberia,
       Finca Favorita): error de -41% a -44% en Guanacaste, +18% en Limón. La aproximación NO es
       confiable fuera del Valle Central — ver Hallazgo 18.
-- [ ] **Nuevo, de Hallazgo 18:** con el error de la forma prestada ya cuantificado y grande
-      (hasta 44%), evaluar si conviene tener más de una "forma de referencia" regional (p.ej.
-      Pacífico seco/Guanacaste vs. Caribe/Limón vs. Valle Central) en vez de prestar siempre la
-      de San José — ya hay 2 formas reales adicionales (Liberia, Finca Favorita) disponibles en
-      `engine/epw_real.py` para esto. No implementado todavía, es una decisión de producto
-      (¿vale la pena la complejidad extra vs. simplemente pedir el EPW real cuando se pueda?).
+- [x] ~~Nuevo, de Hallazgo 18: con el error de la forma prestada ya cuantificado y grande (hasta
+      44%), evaluar si conviene tener más de una "forma de referencia" regional~~ — probado con
+      leave-one-out (Hallazgo 21): el concepto SÍ está bien fundado (la forma real de Nicoya y
+      Liberia difiere sólo 4.7% entre sí, vs. 44-51% contra San José), pero la validación como tal
+      salió peor que prestar siempre San José (+114% a +281% de error) por un artefacto real de
+      `generar_clima_gwa()` — no por el concepto en sí. Ver el siguiente pendiente.
+- [ ] **Nuevo, de Hallazgo 21:** `generar_clima_gwa()` infla `E[v³]/media³` (~2x en Nicoya/Liberia)
+      cuando reconstruye desde una curva de excedencia Y un heatmap derivados AMBOS de la misma
+      serie horaria de EPW (dibuja un percentil aleatorio independiente de la curva marginal Y
+      aparte multiplica por el heatmap mes×hora — reinyecta la variación diurna/estacional dos
+      veces). No pasa con la forma NATIVA de GWA (panel web), sólo con formas EPW-derivadas. Hace
+      falta resolver esto (ver 3 direcciones propuestas en Hallazgo 21, ninguna implementada)
+      antes de poder decidir si Alternativa 4 (vecino más cercano) reemplaza la aproximación
+      actual — la validación leave-one-out de Hallazgo 21 no es todavía un veredicto confiable.
+- [ ] **Nuevo, de Hallazgo 21:** conseguir una serie horaria real de NASA POWER (de una corrida en
+      Colab con internet, o que Pablo la provea) o acceso a ERA5 (registro CDS, gratuito, ver
+      Hallazgo 21) para validar quantile mapping contra un sesgo real — hoy sólo está probada la
+      mecánica del método contra un sesgo sintético (aunque la magnitud del sesgo sí es real,
+      Hallazgo 1).
 - [ ] Cuando exista el ráster real, decidir si vale la pena pedir también capacity-factor
       (`/api/gis/country/CRI/capacity-factor_IEC{1,2,3}`) del mismo endpoint oficial, como
       dato adicional (Hallazgo 17).
@@ -1457,6 +1616,10 @@ ECO-Wind/
 │   │                                     Favorita, Hallazgo 18) + búsqueda/geocodificación/
 │   │                                     descarga de estaciones, 20 países, homologado con
 │   │                                     DDP-lite/Skyplus (Hallazgo 19)
+│   ├── formas_regionales.py          ← investigación, NO conectado a app.py: vecino más cercano +
+│   │                                     leave-one-out entre los 4 sitios reales (Hallazgo 21)
+│   ├── quantile_mapping.py           ← investigación, NO conectado a app.py: quantile mapping
+│   │                                     genérico + prueba de mecánica contra EPW real (Hallazgo 21)
 │   ├── dmst_model.py, rotor_combinado.py, polar_hibrido.py, naca0018_polar.py  ← Pista B aerodinámica
 │   ├── estructural_asce7.py          ← Pista B estructural, ASCE 7 (Hallazgos 9-10, 13-14)
 │   └── actuator_cylinder.py          ← Pista B efecto clúster, Cilindro Actuador (Hallazgo 15)
