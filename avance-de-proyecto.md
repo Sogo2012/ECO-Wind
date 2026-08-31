@@ -1,7 +1,7 @@
 # ECO | Wind — Avance de Proyecto
 
 **Documento de referencia (alcance):** [`plan-tecnico-eco-wind.md`](./plan-tecnico-eco-wind.md)
-**Última actualización:** 31 de agosto, 2026 (Hallazgo 19 v3 — consolidado en UN SOLO flujo de búsqueda de clima, igual que DDP-lite/Skyplus: sin selector de modos, estación real siempre, aproximación como fallback automático sólo cuando hace falta; Hallazgo 20 — corrección real en el perfil de viento por altura, z0 de referencia distinto de z0 destino; Hallazgo 21 — vecino más cercano validado por leave-one-out, con un artefacto real de `generar_clima_gwa()` encontrado en el camino; quantile mapping probado (mecánica) y acceso a ERA5/CDS investigado; Hallazgo 22 — mitigación parcial de ese artefacto vía curva de excedencia por residuos: Liberia ya muestra una mejora clara y real con el vecino más cercano)
+**Última actualización:** 31 de agosto, 2026 (Hallazgo 19 v3 — consolidado en UN SOLO flujo de búsqueda de clima, igual que DDP-lite/Skyplus: sin selector de modos, estación real siempre, aproximación como fallback automático sólo cuando hace falta; Hallazgo 20 — corrección real en el perfil de viento por altura, z0 de referencia distinto de z0 destino; Hallazgo 21 — vecino más cercano validado por leave-one-out, con un artefacto real de `generar_clima_gwa()` encontrado en el camino; quantile mapping probado (mecánica) y acceso a ERA5/CDS investigado; Hallazgo 22 — mitigación parcial de ese artefacto vía curva de excedencia por residuos: Liberia ya muestra una mejora clara y real con el vecino más cercano; Hallazgo 23 — validación REAL (Colab, no sintética) de quantile mapping contra NASA POWER: mejora real pero más modesta que la prueba sintética)
 **Propósito:** comparar el alcance planeado contra el avance real, y dejar constancia de los
 hallazgos que no estaban previstos en el plan original. Se actualiza en cada avance
 significativo — no es una foto única.
@@ -1449,6 +1449,56 @@ Nicoya-Liberia. `usar_residuo=True` queda disponible en el código para seguir i
 
 ---
 
+### Hallazgo 23 — Validación REAL (no sintética) de quantile mapping contra NASA POWER: corrido en Colab, mejora real pero más modesta que la prueba sintética
+
+Pablo corrió `notebooks/pista_c_forma_regional_y_quantile_mapping.ipynb` completo en Colab (con
+internet real) el 31 de agosto de 2026. Dos resultados que en el sandbox de desarrollo sólo podían
+quedar como "pendiente de internet real" (Hallazgo 21/22) ya están confirmados con datos reales.
+
+**CDS/ERA5 (Parte 2):** `cds.climate.copernicus.eu/how-to-api` respondió **200 OK** desde Colab —
+no está bloqueado ahí, sólo en el sandbox de desarrollo (Hallazgo 2). No hay impedimento técnico
+para que Pablo registre la cuenta cuando haga falta un sitio concreto que lo justifique.
+
+**NASA POWER real (Parte 3):** se descargaron las 8760 horas reales de 2023 en la coordenada exacta
+del EPW de San José. Media real: 1.301 m/s — coincide con el 1.30 m/s ya citado en Hallazgo 1 — 
+contra 4.034 m/s del EPW real (coincide con el 4.03 m/s citado); razón 0.322, casi idéntica al
+factor 0.3226 que se había usado para la magnitud del sesgo sintético. Mismo diseño anti-tautológico
+(ajuste ene-jun, evaluación jul-dic, nunca vista por el ajuste):
+
+| Versión (jul-dic, real) | Media (m/s) | E[v³]/media³ | kWh del semestre | Error vs. verdad |
+|---|---|---|---|---|
+| VERDAD (EPW real) | 3.432 | 2.356 | 79.107 | — |
+| NASA POWER cruda (sin corregir) | 1.140 | 1.875 | 1.786 | **-97.7%** |
+| Corregida naive (razón de medias) | 3.615 | 1.875 | 73.606 | **-6.95%** |
+| Corregida quantile mapping | 3.473 | 2.212 | 77.031 | **-2.62%** |
+
+**Comparación honesta con la prueba sintética de Hallazgo 21 (no forzarla a coincidir):** la mejora
+de quantile mapping sobre la corrección naive es real y va en la misma dirección que predijo la
+prueba sintética, pero **más modesta en magnitud**. El sesgo real de NASA POWER resultó menos
+"achatado" en forma de lo que se había construido sintéticamente: `E[v³]/media³` crudo real es
+1.875, sólo 20% debajo de la verdad (2.356) — contra 46% debajo en la construcción sintética
+(`factor_compresion=0.5`, elegido a propósito para mostrar el mecanismo con claridad, marcado como
+tal en `engine/quantile_mapping.py`, nunca medido). No es que la prueba sintética estuviera mal —
+el parámetro fue una ilustración explícita, y ahora que hay dato real se sabe que fue más
+pesimista que la realidad en San José 2023. Con datos reales, quantile mapping sigue siendo mejor
+que naive (error absoluto ~2.65x más chico: -2.62% vs -6.95%), pero la ganancia (4.3 puntos
+porcentuales) es bastante más chica que la que sugería lo sintético (15 puntos).
+
+**Vale la pena que Pablo pese esto, no es una recomendación cerrada:** la corrección naive sola (lo
+que ya hace `media_objetivo` en `generar_clima_gwa()`, sin código nuevo) ya deja un error manejable
+(-7%) para NASA POWER en San José. Si ese nivel ya es aceptable frente a otras incertidumbres del
+pipeline (la inflación residual de 7-30% de Hallazgo 22, o la incertidumbre propia del modelo de
+clúster/Bouquet), quantile mapping capaz no justifica todavía la complejidad extra de mantener una
+distribución de referencia por sitio. Si se necesita exprimir cada punto porcentual, sí ayuda y no
+cuesta datos adicionales (usa la misma fuente NASA POWER + el mismo EPW real que ya hay).
+
+**Limitación honesta:** n=1 — un sitio, un año (San José, 2023). No se sabe todavía si esta
+magnitud de mejora se sostiene en Nicoya/Liberia/Finca Favorita, donde el sesgo real de NASA POWER
+podría comportarse distinto (terreno costero, elevación). Probarlo ahí, ahora que se confirmó que
+la descarga real funciona en Colab, es el siguiente paso natural — no implementado en este hallazgo.
+
+---
+
 ## 6. Pendientes activos / bloqueos
 
 - [x] ~~Conseguir A/k reales del Global Wind Atlas~~ — resuelto, y con datos más ricos de lo
@@ -1626,11 +1676,16 @@ Nicoya-Liberia. `usar_residuo=True` queda disponible en el código para seguir i
       vs -43.7% viejo). Sigue pendiente: cerrar el 7-30% de inflación residual, y conseguir más de
       4 sitios reales antes de que la validación leave-one-out sea un veredicto sólido para
       Alternativa 4 — sigue sin conectarse a `app.py`.
-- [ ] **Nuevo, de Hallazgo 21:** conseguir una serie horaria real de NASA POWER (de una corrida en
-      Colab con internet, o que Pablo la provea) o acceso a ERA5 (registro CDS, gratuito, ver
-      Hallazgo 21) para validar quantile mapping contra un sesgo real — hoy sólo está probada la
-      mecánica del método contra un sesgo sintético (aunque la magnitud del sesgo sí es real,
-      Hallazgo 1).
+- [x] ~~Nuevo, de Hallazgo 21: conseguir una serie horaria real de NASA POWER... para validar
+      quantile mapping contra un sesgo real~~ — resuelto para San José (Hallazgo 23, corrido en
+      Colab): quantile mapping sí mejora sobre la corrección naive con datos reales (-2.6% vs
+      -6.95% de error), pero menos que lo que sugería la prueba sintética. Sigue pendiente probarlo
+      en Nicoya/Liberia/Finca Favorita, y decidir si la mejora justifica la complejidad extra
+      frente a la corrección naive que ya existe.
+- [ ] **Nuevo, de Hallazgo 23:** probar la validación real de quantile mapping (NASA POWER vs. EPW)
+      en Nicoya, Liberia y Finca Favorita — hoy sólo está confirmado con datos reales para San José
+      (2023). El sesgo de NASA POWER podría comportarse distinto en sitios costeros/de otra
+      elevación.
 - [ ] Cuando exista el ráster real, decidir si vale la pena pedir también capacity-factor
       (`/api/gis/country/CRI/capacity-factor_IEC{1,2,3}`) del mismo endpoint oficial, como
       dato adicional (Hallazgo 17).
