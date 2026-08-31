@@ -1,7 +1,7 @@
 # ECO | Wind — Avance de Proyecto
 
 **Documento de referencia (alcance):** [`plan-tecnico-eco-wind.md`](./plan-tecnico-eco-wind.md)
-**Última actualización:** 31 de agosto, 2026 (Hallazgo 19 v3 — consolidado en UN SOLO flujo de búsqueda de clima, igual que DDP-lite/Skyplus: sin selector de modos, estación real siempre, aproximación como fallback automático sólo cuando hace falta; Hallazgo 20 — corrección real en el perfil de viento por altura, z0 de referencia distinto de z0 destino; Hallazgo 21 — vecino más cercano validado por leave-one-out, con un artefacto real de `generar_clima_gwa()` encontrado en el camino; quantile mapping probado (mecánica) y acceso a ERA5/CDS investigado; Hallazgo 22 — mitigación parcial de ese artefacto vía curva de excedencia por residuos: Liberia ya muestra una mejora clara y real con el vecino más cercano; Hallazgo 23 — validación REAL (Colab, no sintética) de quantile mapping contra NASA POWER: mejora real pero más modesta que la prueba sintética; Hallazgo 24 — corrección de rumbo: app internacional, sin anclar a San José, catálogo global de 5,276 estaciones/20 países probado y auto-pivotable en 6 países reales)
+**Última actualización:** 31 de agosto, 2026 (Hallazgo 19 v3 — consolidado en UN SOLO flujo de búsqueda de clima, igual que DDP-lite/Skyplus: sin selector de modos, estación real siempre, aproximación como fallback automático sólo cuando hace falta; Hallazgo 20 — corrección real en el perfil de viento por altura, z0 de referencia distinto de z0 destino; Hallazgo 21 — vecino más cercano validado por leave-one-out, con un artefacto real de `generar_clima_gwa()` encontrado en el camino; quantile mapping probado (mecánica) y acceso a ERA5/CDS investigado; Hallazgo 22 — mitigación parcial de ese artefacto vía curva de excedencia por residuos: Liberia ya muestra una mejora clara y real con el vecino más cercano; Hallazgo 23 — validación REAL (Colab, no sintética) de quantile mapping contra NASA POWER: mejora real pero más modesta que la prueba sintética; Hallazgo 24 — corrección de rumbo: app internacional, sin anclar a San José, catálogo global de 5,276 estaciones/20 países probado y auto-pivotable en 6 países reales; Hallazgo 25 — NASA POWER descartado como ajuste espacial (falla al revés en terreno accidentado, confirmado con datos reales); GWA generalizado a cualquier país como reemplazo candidato)
 **Propósito:** comparar el alcance planeado contra el avance real, y dejar constancia de los
 hallazgos que no estaban previstos en el plan original. Se actualiza en cada avance
 significativo — no es una foto única.
@@ -1552,6 +1552,60 @@ pocos puntos donde de verdad no hay ninguna estación real cerca.
 
 ---
 
+### Hallazgo 25 — NASA POWER descartado como ajuste espacial (falla al revés en terreno accidentado); GWA generalizado a cualquier país como reemplazo
+
+Continuación de la Parte 3 del plan de "sensibilizar el punto exacto" (ver mensaje de Pablo en el
+chat, y `notebooks/sensibilizar_punto_exacto.ipynb`): usar una fuente de cobertura continua para
+ajustar la magnitud de la forma real de la estación donante al punto exacto del cliente, sin anclar
+nada a San José. Pablo corrió la validación en Colab con NASA POWER — el resultado es un hallazgo
+real y negativo, no un bug.
+
+**Números reales (leave-one-out, sin usar la media real ya conocida del sitio como atajo):**
+
+| Sitio | Donante | Factor de ajuste NASA POWER | kWh ajustado | Error vs. verdad |
+|---|---|---|---|---|
+| San José | Nicoya | 0.365 | 2.3 | **-98.5%** |
+| Nicoya | Liberia | 0.963 | 363.3 | **+593.4%** |
+| Liberia | Nicoya | 1.038 | 71.8 | **-75.4%** |
+| Finca Favorita | San José | 1.880 | 1,137.0 | **+15,184.0%** (153x la producción real) |
+
+**Diagnóstico verificado con cálculo, no es un error de fórmula:** el mecanismo asume que la razón
+entre dos puntos cercanos de la misma fuente cancela su sesgo sistemático — pero NASA POWER da la
+razón San José/Finca Favorita **literalmente al revés** (dice que Finca Favorita es 1.88x más
+ventosa; la realidad es que tiene sólo 38.5% del viento de San José), y ni siquiera distingue Nicoya
+de Liberia (50km, terreno similar, diferencia real de 1.74x que NASA POWER no ve, factor 0.96-1.04).
+Su sesgo depende del terreno (Hallazgo 1: subestima ~3x específicamente en el valle complejo de San
+José) — la razón no cancela nada cuando el sesgo mismo varía según qué tan complejo es el terreno de
+cada punto. **Conclusión: NASA POWER queda descartado como corrector espacial para este terreno —
+no es cuestión de afinar el método, hace falta otra fuente.**
+
+**GWA generalizado como reemplazo candidato.** Pablo confirmó con una captura de pantalla de la
+página real "GIS files & API access" de globalwindatlas.info: **no existe una API de consulta por
+punto separada** — "the provided URL can also be used as an API service" se refiere a la MISMA URL
+de descarga de ráster por país (confirmada desde Hallazgo 17 leyendo el código fuente del paquete
+de R `energyRt/globalwindatlas`, y ahora re-confirmada con la página real), con la advertencia
+explícita "not to be used for bulk downloads of all countries or datasets" — bajar un país está
+bien, scriptear los 20 en bulk no. `engine/gwa_raster.py::descargar_raster_pais(pais_iso3, altura)`
+generaliza `descargar_raster_costa_rica()` a cualquiera de los 20 países del catálogo, y
+`factor_ajuste_gwa()` replica el mismo mecanismo de ajuste espacial que
+`factor_ajuste_nasa_power()`, pero leyendo 2 píxeles del ráster de 250m (con `rasterio`, ya
+validado con un GeoTIFF sintético) en vez de 2 llamadas a NASA POWER — mucho más fino, debería poder
+resolver la diferencia real de microclima que NASA POWER no puede.
+
+**Estado:** `factor_ajuste_gwa()` construido y probado con datos sintéticos (calcula la razón
+correcta entre 2 píxeles conocidos); la Parte 3 del notebook está lista y validada lógicamente (0
+errores no capturados con `jupyter execute`), pero el ráster real de Costa Rica todavía no se
+descargó en ningún entorno (sigue bloqueado en este sandbox) — pendiente que Pablo lo corra en
+Colab para tener el número real de GWA y compararlo contra esta tabla.
+
+**Nota de proceso, para no repetir el error:** durante este hallazgo, correr el notebook (su celda
+de bootstrap hace `git reset --hard origin/main`) borró las funciones nuevas de
+`engine/gwa_raster.py` porque todavía no estaban commiteadas — tuvieron que rehacerse. Lección: de
+ahora en adelante, commitear cualquier cambio a `engine/` ANTES de ejecutar un notebook que
+sincroniza el repo, no después.
+
+---
+
 ## 6. Pendientes activos / bloqueos
 
 - [x] ~~Conseguir A/k reales del Global Wind Atlas~~ — resuelto, y con datos más ricos de lo
@@ -1758,6 +1812,12 @@ pocos puntos donde de verdad no hay ninguna estación real cerca.
       aeropuerto), pero no está validado contra producción real de una turbina instalada. Si en
       algún momento hay datos de producción real de un proyecto, es el punto más directo para
       validar (o ajustar) tanto `z0_met` como la elección entre ley logarítmica y de potencia.
+- [ ] **Nuevo, de Hallazgo 25:** correr `descargar_raster_pais("CRI")` en Colab y repetir la
+      validación leave-one-out con `factor_ajuste_gwa()` (Parte 3 de
+      `notebooks/sensibilizar_punto_exacto.ipynb`) — construido y probado con datos sintéticos, pero
+      todavía sin el número real. Si GWA tampoco resuelve el ajuste espacial bien, reconsiderar el
+      mecanismo (¿ERA5 a nivel local? ¿confiar en la estación real más cercana sin ajuste cuando ya
+      está razonablemente cerca?) — no forzar GWA como solución si el número real no lo sostiene.
 
 ## 7. Cómo navegar el repositorio en este punto
 
@@ -1776,7 +1836,9 @@ ECO-Wind/
 │   ├── simulador_pista_a.py          ← simular()/wind_at_height()/GWA/wind rose/Jensen/ley de
 │   │                                     potencia EnergyPlus (Hallazgos 16-17, 20)
 │   ├── atmosfera_estandar.py         ← densidad ISA por elevación (Hallazgo 17)
-│   ├── gwa_raster.py                 ← clima para cualquier coordenada de CR, ráster+forma prestada (Hallazgo 17)
+│   ├── gwa_raster.py                 ← clima para cualquier coordenada de CR, ráster+forma prestada
+│   │                                     (Hallazgo 17) + descargar_raster_pais()/factor_ajuste_gwa(),
+│   │                                     generalizado a cualquier país (Hallazgo 25)
 │   ├── epw_real.py                   ← parser EPW propio + 3 sitios reales (Nicoya/Liberia/Finca
 │   │                                     Favorita, Hallazgo 18) + búsqueda/geocodificación/
 │   │                                     descarga de estaciones, 20 países, homologado con
@@ -1799,9 +1861,12 @@ ECO-Wind/
 │   ├── descargar_estaciones_cr.ipynb  ← descarga automatizada de las 8 estaciones de Costa Rica
 │   │                                     que faltaban en el catálogo local (Hallazgo 21-22, ver
 │   │                                     nota de Hallazgo 24 sobre por qué esto ya no es prioridad)
-│   └── prueba_internacional_estacion_mas_cercana.ipynb  ← auto-pivota a la estación real más
-│                                         cercana en cualquiera de los 20 países del catálogo, sin
-│                                         anclar nada a San José -- probado en 6 países (Hallazgo 24)
+│   ├── prueba_internacional_estacion_mas_cercana.ipynb  ← auto-pivota a la estación real más
+│   │                                     cercana en cualquiera de los 20 países del catálogo, sin
+│   │                                     anclar nada a San José -- probado en 6 países (Hallazgo 24)
+│   └── sensibilizar_punto_exacto.ipynb  ← ajuste espacial de la estación donante al punto exacto:
+│                                         NASA POWER descartado (falla al revés en terreno
+│                                         accidentado), GWA como reemplazo candidato (Hallazgo 25)
 ├── datos_clima/
 │   ├── *.epw                          ← EPWs de estación real (aeropuerto Juan Santamaría)
 │   ├── gwa_juan_santamaria/           ← export real del Global Wind Atlas
