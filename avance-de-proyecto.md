@@ -1,7 +1,7 @@
 # ECO | Wind — Avance de Proyecto
 
 **Documento de referencia (alcance):** [`plan-tecnico-eco-wind.md`](./plan-tecnico-eco-wind.md)
-**Última actualización:** 31 de agosto, 2026 (Hallazgo 14 — capacidad de anclaje vs demanda implementada; discrepancia de norma de acero A193 B7/Grado 8.8 detectada antes de aceptar los datos)
+**Última actualización:** 31 de agosto, 2026 (Hallazgo 15 — Cilindro Actuador implementado y validado contra la fuente original; no reproduce el Efecto Bouquet real, resultado honesto)
 **Propósito:** comparar el alcance planeado contra el avance real, y dejar constancia de los
 hallazgos que no estaban previstos en el plan original. Se actualiza en cada avance
 significativo — no es una foto única.
@@ -13,7 +13,7 @@ significativo — no es una foto única.
 | Fase / Pista | Estado |
 |---|---|
 | **Fase 1 — Pista A** (motor empírico) | 🟢 Sólida — mecánica y fuentes de datos climáticos (EPW + GWA) validadas con datos reales; z0/afinación fina quedó pendiente para más adelante (decisión del Director del Proyecto) |
-| **Fase 1 — Pista B** (motor físico DMST + CFD) | 🟡 Aerodinámica congelada (vía agotada, sobre-predicción sigue abierta, Hallazgo 8); curvas de potencia re-verificadas contra el calculador oficial, sin dudas reales (Hallazgo 12) — módulo estructural ASCE 7 con demanda de anclaje para 5 modelos (Large/Medium/3-M Tulip/AL13) y primera aproximación conservadora a carga de clúster (Hallazgos 9-10, 13) |
+| **Fase 1 — Pista B** (motor físico DMST + CFD) | 🟡 Aerodinámica congelada (vía agotada, sobre-predicción sigue abierta, Hallazgo 8); curvas de potencia re-verificadas contra el calculador oficial, sin dudas reales (Hallazgo 12) — módulo estructural ASCE 7 con demanda de anclaje para 5 modelos y carga de clúster conservadora (Hallazgos 9-10, 13); Cilindro Actuador implementado y validado, pero no reproduce el Efecto Bouquet real todavía (Hallazgo 15) |
 | **Fase 2** (productización: Streamlit + Cloud Run) | ⚪ No iniciada |
 
 ---
@@ -130,7 +130,7 @@ combinado — útil más adelante para orientación de bouquets).
 |---|---|---|
 | 1 | DMST turbina aislada (patentes CA2800765C/US9255567B2, ES2970155T3/AU2019380766B2) | 🟡 Sustentación (NACA 0018) y arrastre (Savonius) construidos y validados por separado; combinados con la arquitectura real de dos niveles de pala (`engine/rotor_combinado.py`) y verificados (Betz + 4 modelos) — combinar bien no resuelve la sobre-predicción, ver Hallazgo 6 |
 | 2 | Pérdida dinámica a TSR bajo (Leishman-Beddoes) | ⚪ No iniciado |
-| 3 | Efecto clúster (Cilindro Actuador, OpenFOAM offline) | ⚪ No iniciado |
+| 3 | Efecto clúster (Cilindro Actuador, OpenFOAM offline) | 🟡 Implementado y validado el puerto (`engine/actuator_cylinder.py`, código fuente real de Ning) — pero NO reproduce el Efecto Bouquet real en N=2 (resultado honesto, no forzado). Ver Hallazgo 15 |
 | 4 | Estructural (ASCE 7) | 🟡 Módulo construido y validado (`engine/estructural_asce7.py`) — presión dinámica, corte basal, momento de vuelco, frecuencia de vórtices. Demanda de anclaje con patrones reales para 4 modelos + carga de viento (sin anclaje) para Small Tulip; primera aproximación conservadora a carga de clúster. Ver Hallazgos 9, 10 y 13 |
 
 **Lo construido:** `engine/dmst_model.py` (solver DMST de doble tubo de corriente —
@@ -789,6 +789,62 @@ seguridad 4.40x. La función NO calcula capacidad de arranque del concreto (cone
 solo advierte que falta, consistente con el resto del módulo (demanda de acero, no capacidad
 final de concreto, que sigue siendo responsabilidad del ingeniero civil).
 
+### Hallazgo 15 — Pista B Paso 3 arranca: Cilindro Actuador implementado y validado, pero NO reproduce el Efecto Bouquet real (resultado honesto, no forzado)
+
+Pablo pidió continuar con el efecto clúster (Cilindro Actuador), el hueco más grande que quedaba
+en Pista B. El plan técnico aclara que su función es **calibrar el efecto clúster para layouts
+2D/espaciamientos no estándar** — el M(N) empírico ya está resuelto para "bouquet estándar"
+(Hallazgo 12). OpenFOAM no está instalado en este entorno (confirmado antes de empezar,
+consistente con que el plan ya lo esperaba "offline/batch", fuera de este sandbox).
+
+**Metodología:** en vez de improvisar la formulación matemática del Cilindro Actuador de
+memoria, se buscó y clonó el código fuente **original y publicado** de Andrew Ning (autor del
+método, NREL/BYU): [`github.com/byuflowlab/vawt-ac`](https://github.com/byuflowlab/vawt-ac) —
+branch `python` (turbina aislada, Fortran+Python) y branch `master` (`src/acmultiple.jl`,
+extensión a múltiples turbinas, el paper "Actuator Cylinder Theory for Multiple Vertical Axis
+Wind Turbines," Wind Energy Science 2016). Se leyó el código real (no un resumen de terceros —
+el PDF del paper en wes.copernicus.org estaba bloqueado por el proxy de red del entorno) y se
+portó línea por línea a `engine/actuator_cylinder.py`, con especial cuidado en la aritmética de
+índices (Julia 1-indexado → Python 0-indexado, verificada cruzando contra la versión Fortran
+independiente del branch `python`, que coincidió).
+
+**Validación del puerto** (antes de aplicar nada a Flower Turbines): se reprodujo el caso de
+prueba que el propio código de Ning trae embebido (turbina D=6m, 3 palas, NACA0021, comparado
+contra datos de CACTUS y CFD que el autor usó para validar su propio código). Usando NACA0018
+(el polar ya disponible en este repo, no exactamente el mismo perfil), la forma de la curva
+Cp-vs-TSR coincide bien — sube, pica alrededor de TSR 3-4, se vuelve negativa — y el punto de
+cola en TSR=7 casi exacto (−0.058 calculado vs −0.059 de CACTUS). Esto da confianza en que el
+puerto en sí está bien hecho, independiente de si aplica bien a Flower Turbines.
+
+**Aplicación a Flower Turbines — resultado honesto:** con geometría real de Medium Tulip
+(D=1.18m, TSR=1.0, B=2, perfil NACA0018 puro por sustentación — deliberado, no una omisión: el
+propósito de este módulo es aislar la interacción de estelas, no re-derivar la potencia
+absoluta de una turbina, eso ya lo hace mejor el M(N) empírico), se probaron **4
+configuraciones** de 2 turbinas con el espaciamiento ideal real (1.25×D, `Guidance on Spacing
+Flower Turbines.pdf`, Hallazgo 11): lado a lado (0°) y al ángulo real de la guía (15° respecto
+a la perpendicular al viento), cada una con mismo sentido de giro y contra-rotando. Las 4 dieron
+razones de potencia entre **0.90x y 1.09x** (promedio de las dos turbinas) — **ninguna cerca
+del 1.235x real** que da M(2), ya validado con R²≥0.999996 contra el calculador oficial. El
+modelo de Cilindro Actuador, con un perfil de sustentación pura, **no reproduce ni siquiera el
+caso más simple (N=2)** que el M(N) empírico ya cubre perfectamente.
+
+**No se fuerza una explicación — hipótesis sin confirmar, en orden de plausibilidad:**
+1. El mecanismo real del Efecto Bouquet podría depender específicamente de la arquitectura
+   patentada de dos niveles (sustentación + arrastre tipo Savonius, Hallazgo 6) — un perfil
+   simétrico de sustentación pura no tiene la geometría cóncava que produciría un efecto de
+   canalización/bloqueo entre turbinas vecinas.
+2. Efectos 3D/turbulentos reales que un modelo 2D estacionario (RANS-like, sin turbulencia) no
+   representa.
+3. El propio M(N) medido por Flower Turbines podría incluir algo más allá de interacción
+   aerodinámica pura entre rotores.
+
+**Conclusión práctica:** este modelo, tal como está, **no está listo todavía** para calibrar
+configuraciones nuevas (arreglos 2D, espaciamientos no estándar) con confianza — antes debería
+poder reproducir el caso YA conocido (bouquet estándar), y no lo hace. Es un resultado negativo
+real, del mismo tipo que Hallazgo 7-8 (varios intentos de refinamiento aerodinámico que tampoco
+cerraron la brecha de sobre-predicción) — se documenta completo, no se descarta silenciosamente
+ni se sigue iterando buscando una configuración que "sí calce" sin justificación física real.
+
 ---
 
 ## 6. Pendientes activos / bloqueos
@@ -908,6 +964,12 @@ final de concreto, que sigue siendo responsabilidad del ingeniero civil).
       anclaje, un tipo de carga distinto (Hallazgo 13).
 - [ ] Confirmar el ancho real del AL13 (1.6m vs 1.7m, discrepancia entre páginas del mismo
       manual, Hallazgo 11) antes de tomar como definitivo el caso de prueba de Hallazgo 13.
+- [ ] Extender el modelo de Cilindro Actuador con la arquitectura real de dos niveles (perfil
+      híbrido sustentación+arrastre, `polar_hibrido.py`) en vez de NACA0018 puro, para probar la
+      hipótesis 1 de Hallazgo 15 (el mecanismo del Efecto Bouquet podría depender de la
+      geometría cóncava del componente Savonius) — actualmente sin confirmar.
+- [ ] Probar más configuraciones del Cilindro Actuador (otros TSR/velocidades de viento, N=3+,
+      efecto 3D con altura de pala) antes de descartar el enfoque por completo (Hallazgo 15).
 - [ ] Cuando se construya el modelo CFD de efecto clúster (Cilindro Actuador/OpenFOAM), decidir
       si `cargas_viento_cluster_asce7()` debe incorporar crédito de apantallamiento aerodinámico
       en vez de la suma simple conservadora actual (Hallazgo 13).
