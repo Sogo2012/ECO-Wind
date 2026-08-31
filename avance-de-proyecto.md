@@ -1,7 +1,7 @@
 # ECO | Wind — Avance de Proyecto
 
 **Documento de referencia (alcance):** [`plan-tecnico-eco-wind.md`](./plan-tecnico-eco-wind.md)
-**Última actualización:** 31 de agosto, 2026 (Hallazgo 10 — base de turbinas pequeñas + discrepancia real sin resolver entre documentos internos)
+**Última actualización:** 31 de agosto, 2026 (Hallazgo 11 — revisión de 9 manuales: corrección real en curvas AL13, contaminación de plantilla explicada, discrepancias abiertas)
 **Propósito:** comparar el alcance planeado contra el avance real, y dejar constancia de los
 hallazgos que no estaban previstos en el plan original. Se actualiza en cada avance
 significativo — no es una foto única.
@@ -13,7 +13,7 @@ significativo — no es una foto única.
 | Fase / Pista | Estado |
 |---|---|
 | **Fase 1 — Pista A** (motor empírico) | 🟢 Sólida — mecánica y fuentes de datos climáticos (EPW + GWA) validadas con datos reales; z0/afinación fina quedó pendiente para más adelante (decisión del Director del Proyecto) |
-| **Fase 1 — Pista B** (motor físico DMST + CFD) | 🟡 Aerodinámica congelada (vía agotada, sobre-predicción sigue abierta, Hallazgo 8) — primer módulo estructural ASCE 7 construido y validado contra cargas reales de Flower Turbines, con demanda de anclaje para 4 modelos incluyendo la base de las turbinas pequeñas (Hallazgos 9 y 10) |
+| **Fase 1 — Pista B** (motor físico DMST + CFD) | 🟡 Aerodinámica congelada (vía agotada, sobre-predicción sigue abierta, Hallazgo 8) — módulo estructural ASCE 7 validado con demanda de anclaje para 4 modelos (Hallazgos 9-10); curvas de potencia del AL13 corregidas con tabla oficial (antes lectura aproximada) y revisión completa de 9 manuales del fabricante (Hallazgo 11) |
 | **Fase 2** (productización: Streamlit + Cloud Run) | ⚪ No iniciada |
 
 ---
@@ -542,6 +542,126 @@ Load Calculations`. Es una discrepancia real entre dos documentos internos de Fl
 Turbines, documentada honestamente — **no se usó este valor de T en el módulo**, queda como
 hallazgo abierto en vez de forzarse a encajar.
 
+### Hallazgo 11 — Revisión completa de 9 manuales de Flower Turbines: una corrección real en las curvas del AL13, contaminación de plantilla explicada, y varias discrepancias reales sin forzar
+
+Pablo compartió los manuales completos ("Quick Start Guide 2025") de los 5 modelos (Medium
+Tulip, AL13 Power Tower, Small Tulip, Large Tulip, 3-M Tulip — 18 a 23 páginas cada uno) y
+pidió revisar qué más se podía extraer. Se procesaron en paralelo con 5 agentes (uno por
+documento, lectura completa página por página), y luego, en un segundo envío, 4 documentos
+más: dos hojas "Specs_2025" de una sola página (Medium y 3-M Tulip — fichas técnicas limpias,
+distintas de los Quick Start Guides), `Guidance on Spacing Flower Turbines.pdf` (5 páginas) y
+`Installation Manual for the ZW-Pole.pdf` (1 página). Dos hallazgos de los agentes se
+verificaron a mano releyendo las páginas originales antes de actuar sobre ellos (ver abajo).
+
+**Corrección real, verificada, aplicada al código — coeficientes del AL13 (`engine/flower_turbines_curves.py`).**
+El manual del AL13 sí trae una tabla numérica oficial (Tabla 2, pág. 5, "Power Output of A
+Single Turbine by Wind Speed", 31 puntos de 0 a 15 m/s, columnas 2m/4m/6m/8m de altura de
+montaje) — antes solo se tenía una lectura aproximada de una gráfica (confianza MEDIA). Al
+releer la tabla directamente se encontró que **dos de sus columnas están corruptas por un
+error de generación/copiado en el PDF fuente**: la columna "Wind Speed (mph)" resultó ser una
+copia exacta de la columna "8m (height)" de esa misma tabla (no una conversión real de
+unidades — a 8.5 m/s dice "483.4 mph", imposible), y la columna "Power Output (Watts)" es una
+copia exacta de la columna "2m (height)". Como consecuencia colateral, la columna "8m
+(height)" en esta tabla específica queda con valores **físicamente imposibles** (más bajos que
+"6m" al mismo viento — la potencia no puede bajar al subir la altura de montaje), así que
+tampoco es utilizable. Las columnas "2m", "4m" y "6m", en cambio, son limpias y ajustan
+EXACTO a P=k·v³ en los 31 puntos (verificado en varios puntos independientes, no solo el
+extremo). Con eso se corrigieron `al13_2m` (k: 0.881790→1.612800), `al13_4m` (k: 1.806870→
+2.476800) y `al13_6m` (k: 3.095980→3.456000) — un cambio grande, ~1.8x más potencia que antes
+para 2m/4m. `al13_8m` se dejó SIN TOCAR (sigue con la lectura aproximada anterior, confianza
+MEDIA) porque su única fuente limpia disponible resultó corrupta — sigue pendiente conseguir
+un dato confiable para esa altura. Validado corriendo el módulo (`python3
+engine/flower_turbines_curves.py`): las 6 comparaciones nuevas (2m/4m/6m a 8.5 y 15 m/s)
+calzan exactas contra la tabla oficial.
+
+**Hallazgo transversal que explica varias "contradicciones" como una sola causa raíz:** los 5
+Quick Start Guides comparten una plantilla, y varios párrafos NO se personalizaron por modelo
+— texto genérico copiado sin actualizar. Ejemplos concretos encontrados por los agentes: el
+manual de Medium Tulip describe el generador como "100W nominal, 200W pico" (p.11) — el mismo
+texto EXACTO aparece en los manuales de Small Tulip Y Large Tulip, pese a que sus curvas de
+potencia reales llegan a ~121W, ~2,770W y ~10,125W respectivamente a 15 m/s (una diferencia de
+83x entre Small y Large que un mismo generador de 100W no podría explicar). Las nuevas hojas
+"Specs_2025" (más confiables, de una sola página, sin relleno de plantilla) confirman esto:
+Medium Tulip = **500W nominal** (no 100W), 3-M Tulip = **1000W nominal**. Mismo patrón en
+otros lugares: la tabla de grasas del manual del AL13 está titulada "Medium Tulip Turbines"
+(p.16); la lista de hardware del AL13 menciona "Large Tulip Turbine" (p.13); el manual de
+Large Tulip titula sus propias tablas de potencia "single Small Tulip turbine" en un punto
+(p.5); la tabla de grasas de Small Tulip dice "3m Tulip Turbines" (p.14); y el foundation
+Table 4 de Medium Tulip se titula "Large Flower Turbine" en el texto pero "Medium Tulip
+Turbines" en la tabla misma. Conclusión práctica: cuando un dato de un Quick Start Guide
+parece un outlier o contradice el sentido común del modelo, conviene sospechar primero de
+contaminación de plantilla antes que de un error de medición real — y preferir, cuando exista,
+la hoja "Specs_2025" de una sola página sobre el Quick Start Guide para ese mismo dato.
+
+**Validaciones cruzadas positivas (sin cambios necesarios, solo más confianza):** las hojas
+Specs_2025 confirman de forma independiente varios números ya usados en el código — diámetro
+de Medium Tulip 1.18m (igual al usado en `rotor_combinado.py`/notebook), diámetro de 3-M Tulip
+1.8m y altura total 4.07m y peso 400kg (iguales a los usados en Hallazgo 10), y el patrón de
+anclaje 12×M14×2 del 3-M Tulip (plano de apéndice del propio Quick Start Guide, coincide con
+`Small Pedestal Concrete Base ASSY` ya incorporado). El plano de apéndice del Large Tulip
+(12×M18×2.5, patrón 874.4×874.4mm) también confirma exactamente `Big Pedestal Concrete Base
+ASSY` ya incorporado. La tabla completa de 31 puntos del 3-M Tulip (recién extraída) ajusta
+exacta al coeficiente que ya estaba en el código (antes anclado a un solo punto oficial, ahora
+con tabla completa — confianza sube de MEDIA a ALTA, sin cambiar el valor de k).
+
+**Datos nuevos de valor, no incorporados aún al código (para cuando se retomen esas líneas):**
+- `Guidance on Spacing Flower Turbines.pdf`: llena directamente el pendiente del "efecto
+  clúster". Regla de espaciamiento ideal: diámetro×1.25 (centro de eje a centro de eje),
+  aceptable 1.1–1.3×; ángulo ideal respecto al viento predominante 15° (funciona de 0° a 30-45°
+  según la página del propio documento — hay una inconsistencia menor entre páginas ahí
+  mismo); separación entre filas ideal 5×diámetro, mínimo 3×diámetro; dos filas adyacentes solo
+  recomendadas con viento ≥5 m/s (o ≥5.5 m/s en una config. de 4 filas — también inconsistente
+  entre páginas del propio documento). Un ejemplo del documento da una regla de espaciado
+  mínimo dentro de una fila como "diámetro×0.1", pero el ejemplo numérico que sigue (10
+  turbinas de 1m diámetro con 0.9m de espacio entre ellas) implica en realidad 0.9×diámetro, no
+  0.1× — otra inconsistencia aritmética real dentro del propio documento del fabricante,
+  reportada tal cual, sin intentar adivinar cuál de las dos es la correcta.
+- Especificación eléctrica de salida grid-tie confirmada en las hojas Specs_2025: **240VAC
+  /1PH/60Hz o 230VAC/1PH/50Hz** — dato nuevo, relevante para cuando se retome la investigación
+  de pérdidas electromecánicas (pendiente abierto).
+- Velocidad de corte operacional del 3-M Tulip: "el charge controller frena alrededor de 12
+  m/s" (Specs_2025) — dato nuevo, el modelo actual no modela ningún cut-out, solo cut-in.
+- `Installation Manual for the ZW-Pole.pdf`: describe un producto distinto — un poste híbrido
+  solar+eólico (fundación 450×450×1060mm, 8×M16, con brazos para paneles solares y una turbina
+  pequeña en la punta). No es una de las bases estructurales de los 5 modelos principales;
+  queda documentado por separado como un producto relacionado, no mezclado con el análisis de
+  anclaje de Hallazgo 9/10.
+
+**Discrepancias reales, verificadas, no forzadas a encajar:**
+- **Velocidad de supervivencia inconsistente entre tipos de documento**: las hojas Specs_2025
+  dicen 45 m/s ("when reinforced") para Medium y 3-M Tulip; los Quick Start Guide de esos
+  mismos modelos dicen 54 m/s. Es una diferencia sistemática (no ruido de un solo dato) entre
+  los dos tipos de documento — no está claro cuál es la vigente, ni si "reinforced" se refiere
+  a una opción distinta. No resuelto.
+- **Curva de potencia del Large Tulip, dos fuentes oficiales distintas no coinciden en ~4%**:
+  el coeficiente ya en el código (`k=3.120040`) viene del calculador en línea oficial,
+  validado en su momento con capturas independientes. La tabla propia del Quick Start Guide
+  (recién extraída, 31 puntos) da sistemáticamente ~4% menos en todo el rango (p.ej. 5,184.0 W
+  vs 5,391.4 W a 12 m/s). Ambas fuentes son oficiales de Flower Turbines; no se sabe cuál
+  refleja el diseño vigente. Se deja el coeficiente actual sin cambiar (fuente más rigurosamente
+  validada en su momento) y se documenta la diferencia como abierta.
+- **Pesos internamente inconsistentes dentro del propio Quick Start Guide**: Large Tulip da
+  798.5 kg junto a la imagen de la turbina montada (p.2) y 1000 kg en el FAQ (p.18) para lo que
+  debería ser la misma cosa. AL13 da 588 kg (Tabla 1) vs 557 kg (FAQ) para un stack de 6
+  módulos — y ni siquiera el FAQ es internamente consistente (336/462 kg para 2/4 módulos
+  implican un incremento lineal de 63 kg/módulo que predice 588 kg para 6, no los 557 kg que el
+  mismo FAQ afirma). No se elige un valor sobre otro — se documentan ambos.
+- **Plano de apéndice ambiguo, compartido entre dos manuales distintos**: tanto el manual del
+  AL13 como el del 3-M Tulip incluyen, como apéndice, un dibujo técnico que parece ser el
+  MISMO documento genérico (mismo gabinete de acero con puerta y ventilación circular en la
+  tapa, mismo patrón de agujeros, mismo bloque de título con "S235, 8mm" y un texto en verde
+  poco legible que podría decir "Base Pivot") — no una placa de anclaje de hormigón como los
+  planos "Concrete Base ASSY" ya incorporados. Es decir, es probablemente un componente
+  genérico (¿un gabinete eléctrico? ¿un pivote?), no la cimentación real de ninguno de los dos
+  modelos. Se verificó visualmente (releyendo ambas páginas directamente) antes de decidir
+  **no** incorporar sus varillas M16 a `PATRONES_ANCLAJE` — hacerlo hubiera sido usar un dato
+  de un componente que no se sabe con certeza qué es, para reemplazar planos ya confirmados
+  (`Big/Small Pedestal Concrete Base ASSY`). Queda como pregunta abierta para Pablo: si sabe
+  qué es este componente, podría aclarar si aplica a algo del análisis estructural.
+
+Pablo indicó que enviará más fichas "Specs_2025" de los modelos restantes (Small Tulip, Large
+Tulip, AL13) en un mensaje posterior — este hallazgo se extenderá cuando lleguen.
+
 ---
 
 ## 6. Pendientes activos / bloqueos
@@ -637,6 +757,25 @@ hallazgo abierto en vez de forzarse a encajar.
       de cuerpo libre de ese documento (Hallazgo 10).
 - [ ] Decidir registro de leads para la Fase 2 (Sheets vs. Airtable — abierto en el plan,
       sección 7).
+- [ ] Conseguir dato limpio para `al13_8m` — la única fuente disponible (columna "8m" de la
+      Tabla 2 del manual AL13) resultó corrupta; sigue con la lectura aproximada anterior
+      (confianza MEDIA) (Hallazgo 11).
+- [ ] Reconciliar la velocidad de supervivencia 45 m/s (hojas Specs_2025) vs. 54 m/s (Quick
+      Start Guides) para Medium y 3-M Tulip — diferencia sistemática entre tipos de documento,
+      no ruido de un solo dato (Hallazgo 11).
+- [ ] Reconciliar la curva de potencia del Large Tulip: calculador oficial (k=3.120040) vs.
+      tabla propia del Quick Start Guide, ~4% más baja en todo el rango — ambas fuentes son
+      oficiales (Hallazgo 11).
+- [ ] Preguntarle a Pablo qué es el componente del plano de apéndice compartido entre los
+      manuales de AL13 y 3-M Tulip (gabinete de acero, posible "Base Pivot") — no se incorporó
+      a `PATRONES_ANCLAJE` por no saberse con certeza qué representa (Hallazgo 11).
+- [ ] Incorporar la guía de espaciamiento de clúster (`Guidance on Spacing Flower Turbines.pdf`)
+      cuando se retome el efecto clúster (CFD/Cilindro Actuador) — reglas ya documentadas en
+      Hallazgo 11, todavía no llevadas a código.
+- [ ] Modelar el cut-out operacional (~12 m/s para 3-M Tulip, vía charge controller) — el
+      modelo actual solo tiene cut-in, no cut-out (Hallazgo 11).
+- [ ] Procesar las fichas "Specs_2025" restantes (Small Tulip, Large Tulip, AL13) cuando Pablo
+      las comparta — ya se procesaron las de Medium y 3-M Tulip (Hallazgo 11).
 
 ## 7. Cómo navegar el repositorio en este punto
 

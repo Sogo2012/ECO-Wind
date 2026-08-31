@@ -13,9 +13,24 @@ FUENTES Y NIVEL DE CONFIANZA
    Ajuste: P(v) = k * v^3  ->  R^2 = 1.00000 en los TRES modelos.
    Confianza: ALTA.
 
-2) AL13 Power Tower -> leido aproximadamente de curvas suaves de un PDF
-   (no hay tabla numerica publicada para este modelo).
-   Confianza: MEDIA (lectura visual, no una tabla).
+2) AL13 Power Tower -> ACTUALIZADO: el manual "AL13 Power Tower Quick Start
+   Guide 2025" SI trae una tabla numerica publicada (Tabla 2, pagina 5,
+   "Power Output of A Single Turbine by Wind Speed"), con columnas 2m/4m/
+   6m/8m de altura de montaje. Verificado a mano contra la tabla original:
+   las columnas "2m/4m/6m (height)" son limpias y ajustan EXACTO a
+   P=k*v^3 en los 31 puntos (0-15 m/s) -- pero las columnas "Wind Speed
+   (mph)" y "Power Output (Watts)" de esa misma tabla estan corruptas
+   (duplican por error otras columnas: "mph" resulto ser una copia de la
+   columna "8m" de esa tabla, y "Power Output" una copia de la columna
+   "2m" -- error de generacion/copy-paste en el PDF fuente, no de
+   lectura). La columna "8m (height)" en ESTA tabla tambien esta
+   corrupta -- da valores mas bajos que "6m" a igual viento, fisicamente
+   imposible si de verdad fuera potencia a mayor altura -- asi que
+   al13_8m se deja con su coeficiente anterior (lectura aproximada,
+   confianza MEDIA, sin verificar todavia contra una fuente limpia).
+   al13_2m/4m/6m -> confianza ALTA (tabla oficial verificada, 31 puntos
+   cada uno, R^2=1.00000 con v^3 puro). al13_8m -> confianza MEDIA
+   (sin cambios, columna fuente corrupta).
 
 3) Multiplicador de Efecto Bouquet -> calculado directamente del
    calculador oficial de Flower Turbines, con la tabla COMPLETA de
@@ -70,12 +85,12 @@ CURVE_COEFFICIENTS = {
     # modelo:        k (W / (m/s)^3),  v_cutin (m/s),  fuente
     "small_tulip":   dict(k=0.035963, v_cutin=0.7, fuente="tabla exacta (31 pts)"),
     "medium_tulip":  dict(k=0.360048, v_cutin=0.7, fuente="tabla exacta (31 pts)"),
-    "three_m_tulip": dict(k=0.810200, v_cutin=0.7, fuente="1 punto oficial (12 m/s -> 1400 W)"),
+    "three_m_tulip": dict(k=0.810200, v_cutin=0.7, fuente="tabla exacta (31 pts, Quick Start Guide 2025)"),
     "large_tulip":   dict(k=3.120040, v_cutin=0.7, fuente="tabla exacta (31 pts)"),
-    "al13_2m":       dict(k=0.881790, v_cutin=0.7, fuente="lectura aproximada de grafica PDF"),
-    "al13_4m":       dict(k=1.806870, v_cutin=0.7, fuente="lectura aproximada de grafica PDF"),
-    "al13_6m":       dict(k=3.095980, v_cutin=0.7, fuente="lectura aproximada de grafica PDF"),
-    "al13_8m":       dict(k=4.037030, v_cutin=0.7, fuente="lectura aproximada de grafica PDF"),
+    "al13_2m":       dict(k=1.612800, v_cutin=0.7, fuente="tabla exacta (31 pts, Tabla 2 pag.5 Quick Start Guide 2025)"),
+    "al13_4m":       dict(k=2.476800, v_cutin=0.7, fuente="tabla exacta (31 pts, Tabla 2 pag.5 Quick Start Guide 2025)"),
+    "al13_6m":       dict(k=3.456000, v_cutin=0.7, fuente="tabla exacta (31 pts, Tabla 2 pag.5 Quick Start Guide 2025)"),
+    "al13_8m":       dict(k=4.037030, v_cutin=0.7, fuente="lectura aproximada de grafica PDF -- columna 8m de la tabla oficial esta corrupta, sin verificar todavia"),
 }
 
 
@@ -161,6 +176,18 @@ if __name__ == "__main__":
                               ("three_m_tulip", 1400.0), ("large_tulip", 5391.4)]:
         calc = float(power_isolated(12, modelo))
         print(f"  {modelo:15s}  oficial={oficial:9.1f} W   calculado={calc:9.1f} W")
+
+    print("\nValidación AL13 -- columnas 2m/4m/6m de la Tabla 2 (pag.5, Quick Start")
+    print("Guide 2025), leidas a mano, contra el ajuste v^3 nuevo (la columna 8m de")
+    print("esa tabla quedo corrupta -- ver docstring -- asi que al13_8m NO se toco):")
+    al13_oficial = {
+        ("al13_2m", 8.5): 990.5, ("al13_2m", 15.0): 5443.2,
+        ("al13_4m", 8.5): 1521.1, ("al13_4m", 15.0): 8359.2,
+        ("al13_6m", 8.5): 2122.4, ("al13_6m", 15.0): 11664.0,
+    }
+    for (modelo, v), oficial in al13_oficial.items():
+        calc = float(power_isolated(v, modelo))
+        print(f"  {modelo:10s} v={v:5.1f}  oficial={oficial:9.1f} W   calculado={calc:9.1f} W")
 
     print("\nMultiplicador de bouquet real (exponencial) vs. lineal de marketing:")
     for n in range(1, 11):
