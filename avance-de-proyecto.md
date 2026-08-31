@@ -1,7 +1,7 @@
 # ECO | Wind — Avance de Proyecto
 
 **Documento de referencia (alcance):** [`plan-tecnico-eco-wind.md`](./plan-tecnico-eco-wind.md)
-**Última actualización:** 31 de agosto, 2026 (Hallazgo 11 — revisión de 9 manuales: corrección real en curvas AL13, contaminación de plantilla explicada, discrepancias abiertas)
+**Última actualización:** 31 de agosto, 2026 (Hallazgo 11 — revisión de 10 manuales: corrección real en curvas AL13, contaminación de plantilla explicada, EcoRoof Energy Hub sin perforación, discrepancias abiertas)
 **Propósito:** comparar el alcance planeado contra el avance real, y dejar constancia de los
 hallazgos que no estaban previstos en el plan original. Se actualiza en cada avance
 significativo — no es una foto única.
@@ -659,8 +659,38 @@ con tabla completa — confianza sube de MEDIA a ALTA, sin cambiar el valor de k
   (`Big/Small Pedestal Concrete Base ASSY`). Queda como pregunta abierta para Pablo: si sabe
   qué es este componente, podría aclarar si aplica a algo del análisis estructural.
 
-Pablo indicó que enviará más fichas "Specs_2025" de los modelos restantes (Small Tulip, Large
-Tulip, AL13) en un mensaje posterior — este hallazgo se extenderá cuando lleguen.
+**Adenda — segundo envío ("revisa estos otros manuales"):** de 5 documentos compartidos, 4
+(Large Tulip, Medium Tulip, AL13, Small Tulip) resultaron ser el MISMO archivo, byte a byte
+(checksum idéntico), a los Quick Start Guide ya procesados arriba — no se reprocesaron. Solo
+`EcoRoof Energy Hub For Slanted Roof Tops.pdf` (19 páginas) era nuevo, y se leyó completo:
+
+- Es un producto de montaje distinto a todo lo visto hasta ahora: turbinas Small Tulip (1m) en
+  módulos de 3, sobre una plataforma **sin perforar el techo** — se sostiene por peso, balance
+  y puntos de fricción alta de hule, no por pernos de anclaje a concreto. Los brazos que se
+  extienden a los lados sostienen paneles solares y, en la versión de techo plano, cajas de
+  lastre (300×315×150mm, ya conocidas de Hallazgo 11). Es decir, es un sistema de carga
+  distribuida sobre el techo, no un problema de tensión de pernos — un tipo de análisis
+  estructural distinto al ya cubierto en `estructural_asce7.py` (que asume anclaje con
+  pernos). No se tocó el código; queda como contexto nuevo para si se decide modelar este caso.
+- **Cargas distribuidas reales sobre el techo (dato nuevo, útil para cuando se evalúe este tipo
+  de instalación):** versión plana de 3 turbinas = 196.5 kg/m²; de 5 turbinas = 185.3 kg/m²; de
+  2 turbinas de 2m de pala = 207 kg/m²; versión de techo inclinado (con 2 filas de paneles
+  solares por lado) = 207 kg/m².
+- **Ángulo máximo de techo: 3°** — pese al nombre "for Slanted Rooftops", este modelo específico
+  solo tolera techos casi planos (3° de inclinación máxima).
+- Confirma con más precisión el hallazgo de contaminación de plantilla de arriba: aquí el
+  "generador de 100W, 200W pico" SÍ es coherente (la propia tabla de este documento para Small
+  Tulip da máximo ~213-395W incluso en bouquets de 9, dentro de rango de ese generador) — es
+  decir, el texto del generador de 100W es CORRECTO quizás solo para Small Tulip, y fue el
+  copy-paste hacia Medium/Large Tulip (con curvas 10-80x más grandes) lo que generó la
+  contradicción, no un error en el texto del 100W en sí.
+- **Inconsistencia nueva, menor:** el rango de temperatura de este documento dice "-4°F to
+  122°F (20°C to 50°C)" (p.17) — pero -4°F equivale a -20°C, no +20°C como dice el paréntesis
+  (y ni -20°C ni +20°C coinciden con el "-15°C a 50°C" que repiten todos los demás documentos
+  de Flower Turbines ya revisados). Reportado tal cual, sin asumir cuál cifra es la errónea.
+
+Pablo indicó antes que enviaría más fichas "Specs_2025" de los modelos restantes (Small Tulip,
+Large Tulip, AL13) — todavía no han llegado; este hallazgo se extenderá cuando lleguen.
 
 ---
 
