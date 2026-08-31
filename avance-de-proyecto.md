@@ -1,7 +1,7 @@
 # ECO | Wind — Avance de Proyecto
 
 **Documento de referencia (alcance):** [`plan-tecnico-eco-wind.md`](./plan-tecnico-eco-wind.md)
-**Última actualización:** 31 de agosto, 2026 (Hallazgo 19 v3 — consolidado en UN SOLO flujo de búsqueda de clima, igual que DDP-lite/Skyplus: sin selector de modos, estación real siempre, aproximación como fallback automático sólo cuando hace falta; Hallazgo 20 — corrección real en el perfil de viento por altura, z0 de referencia distinto de z0 destino; Hallazgo 21 — vecino más cercano validado por leave-one-out, con un artefacto real de `generar_clima_gwa()` encontrado en el camino; quantile mapping probado (mecánica) y acceso a ERA5/CDS investigado; Hallazgo 22 — mitigación parcial de ese artefacto vía curva de excedencia por residuos: Liberia ya muestra una mejora clara y real con el vecino más cercano; Hallazgo 23 — validación REAL (Colab, no sintética) de quantile mapping contra NASA POWER: mejora real pero más modesta que la prueba sintética)
+**Última actualización:** 31 de agosto, 2026 (Hallazgo 19 v3 — consolidado en UN SOLO flujo de búsqueda de clima, igual que DDP-lite/Skyplus: sin selector de modos, estación real siempre, aproximación como fallback automático sólo cuando hace falta; Hallazgo 20 — corrección real en el perfil de viento por altura, z0 de referencia distinto de z0 destino; Hallazgo 21 — vecino más cercano validado por leave-one-out, con un artefacto real de `generar_clima_gwa()` encontrado en el camino; quantile mapping probado (mecánica) y acceso a ERA5/CDS investigado; Hallazgo 22 — mitigación parcial de ese artefacto vía curva de excedencia por residuos: Liberia ya muestra una mejora clara y real con el vecino más cercano; Hallazgo 23 — validación REAL (Colab, no sintética) de quantile mapping contra NASA POWER: mejora real pero más modesta que la prueba sintética; Hallazgo 24 — corrección de rumbo: app internacional, sin anclar a San José, catálogo global de 5,276 estaciones/20 países probado y auto-pivotable en 6 países reales)
 **Propósito:** comparar el alcance planeado contra el avance real, y dejar constancia de los
 hallazgos que no estaban previstos en el plan original. Se actualiza en cada avance
 significativo — no es una foto única.
@@ -1499,6 +1499,59 @@ la descarga real funciona en Colab, es el siguiente paso natural — no implemen
 
 ---
 
+### Hallazgo 24 — Corrección de rumbo de Pablo: la app es internacional, no debe anclarse a San José; el catálogo global ya resuelve la mayoría de los puntos con una estación real cercana
+
+Pablo corrigió el enfoque de Hallazgo 21-22 directamente: ECO | Wind es una app internacional, no
+debería estar comparando ni prestando forma climática de San José para resolver un sitio nuevo — la
+"muestra de 4" (San José, Nicoya, Liberia, Finca Favorita) es pobre, y el pedido fue "olvidémonos de
+los archivos base" y probar que el algoritmo se puede "auto-pivotar" a cualquier punto dentro del
+alcance del catálogo global, igual que Skyplus.
+
+**El catálogo global (`datos_clima/epw_catalog_global.json`, ya en el repo desde Hallazgo 19) es
+mucho más grande de lo que este hallazgo venía tratando:** 5,276 estaciones reales en 20 países —
+USA 2,969, Canadá 914, Brasil 667, México 173, Argentina 116, Chile 69, Colombia 46, Ecuador 45,
+Perú 39, Bolivia 39, Venezuela 37, Paraguay 29, Panamá 28, Uruguay 21, Rep. Dominicana 19,
+Honduras 18, Guatemala 17, **Costa Rica 12 (0.2% del total)**, Nicaragua 11, El Salvador 7. Todo el
+trabajo de Hallazgo 21-22 (vecino más cercano ENTRE 4 sitios conocidos, prestando forma) estaba
+resolviendo un problema mucho más chico del que hace falta: con un catálogo de este tamaño, para
+casi cualquier punto de interés hay una estación real cerca — no hace falta prestar nada.
+
+**Construido y probado: `notebooks/prueba_internacional_estacion_mas_cercana.ipynb`.** Reutiliza el
+mismo mecanismo que ya usa el camino principal de la app (`obtener_estaciones_cercanas()` +
+`descargar_y_extraer_epw()`, Hallazgo 19, mismo patrón que Skyplus/DDP-lite) sobre 6 puntos reales
+en 6 países distintos — sin ninguna referencia a San José en la lógica. Corrido en este sandbox
+(la búsqueda de estación no necesita red — usa el catálogo local + un fallback sin red para inferir
+el país; sólo la descarga del EPW en sí necesita internet real, Colab):
+
+| Punto consultado | Estación real encontrada | País | Distancia |
+|---|---|---|---|
+| San José, Costa Rica | San Jose La Sabana | CRI | 2.1 km |
+| Bogotá, Colombia | Las Gaviotas | COL | 84.6 km |
+| Ciudad de México, México | Fes Cuautitlán | MEX | 29.6 km |
+| Buenos Aires, Argentina | El Palomar A.P. | ARG | 19.7 km |
+| São Paulo, Brasil | Sao Paulo | BRA | 0.02 km |
+| Ciudad de Panamá, Panamá | Ft Sherman Rocob | PAN | 23.3 km |
+
+Cada punto se resolvió solo, con su propia estación real más cercana — el algoritmo se auto-pivota
+de verdad, confirmado con datos reales en 6 países, no sólo en teoría. La descarga real de cada EPW
+(el paso siguiente) falló con el mismo bloqueo de red ya documentado (Hallazgo 2) — funciona en
+Colab, no en este sandbox, mismo patrón que todo lo demás.
+
+**Esto no invalida el hallazgo técnico de Hallazgo 21-22** (el artefacto real de doble conteo de
+varianza en `generar_clima_gwa()` sigue siendo cierto si algún día hace falta prestar forma) — pero
+sí cambia su importancia: si la mayoría de los puntos reales tienen una estación real cerca, el caso
+en el que hace falta prestar forma (sin estación real a menos de `UMBRAL_APROXIMACION_KM`) debería
+ser la EXCEPCIÓN, no lo que se estaba probando como caso principal.
+
+**Pendiente, decisión de Pablo, no tomada acá:** correr el notebook en Colab para confirmar que las
+8 descargas reales funcionan (mismo paso pendiente que ya existía); y reconsiderar si vale la pena
+seguir invirtiendo en arreglar el artefacto de Hallazgo 22 para la aproximación de respaldo
+(`cargar_aproximacion()`, `engine/gwa_raster.py`) ahora que debería ser un caso mucho más raro, o si
+alcanza con dejarla como está (ya declarada como aproximación, con su error ya conocido) para los
+pocos puntos donde de verdad no hay ninguna estación real cerca.
+
+---
+
 ## 6. Pendientes activos / bloqueos
 
 - [x] ~~Conseguir A/k reales del Global Wind Atlas~~ — resuelto, y con datos más ricos de lo
@@ -1742,7 +1795,13 @@ ECO-Wind/
 │   └── pista_c_forma_regional_y_quantile_mapping.ipynb  ← vecino más cercano + leave-one-out +
 │                                         acceso a ERA5/CDS + quantile mapping (Hallazgo 21-22),
 │                                         corre de punta a punta en Colab o local; las celdas que
-│                                         necesitan internet real (NASA POWER, CDS) están marcadas
+│   │                                     necesitan internet real (NASA POWER, CDS) están marcadas
+│   ├── descargar_estaciones_cr.ipynb  ← descarga automatizada de las 8 estaciones de Costa Rica
+│   │                                     que faltaban en el catálogo local (Hallazgo 21-22, ver
+│   │                                     nota de Hallazgo 24 sobre por qué esto ya no es prioridad)
+│   └── prueba_internacional_estacion_mas_cercana.ipynb  ← auto-pivota a la estación real más
+│                                         cercana en cualquiera de los 20 países del catálogo, sin
+│                                         anclar nada a San José -- probado en 6 países (Hallazgo 24)
 ├── datos_clima/
 │   ├── *.epw                          ← EPWs de estación real (aeropuerto Juan Santamaría)
 │   ├── gwa_juan_santamaria/           ← export real del Global Wind Atlas
