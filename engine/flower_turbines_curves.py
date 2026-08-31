@@ -47,6 +47,21 @@ FUENTES Y NIVEL DE CONFIANZA
    desviación estándar < 0.03 en el peor caso, puro redondeo del
    calculador a 1 decimal, sin tendencia con la velocidad).
 
+   RE-VERIFICADO 31/ago/2026 con 5 capturas de pantalla independientes
+   nuevas del calculador (N=1, 7, 8, 9, 10 -- antes solo N=10 tenia
+   captura propia): las 31x3 = 93 celdas de cada tabla (v=0 a 15 m/s,
+   Small/Medium/Large) se compararon punto por punto contra
+   power_isolated()/power_in_bouquet() con el codigo ya existente, sin
+   cambiar ningun coeficiente. R^2 >= 0.999996 en los 15 pares
+   (modelo, N), error maximo <1% en todo el rango una vez filtrado el
+   ruido irrelevante cerca del cero (Large Tulip muestra 0.4-2.6W ya en
+   v=0.5 m/s, bajo el cut-in nominal de 0.7 m/s, en las 5 capturas --
+   consistente en si mismo pero no modelado, y sin importancia en
+   magnitud absoluta). Conclusion: no se encontro ninguna duda real
+   sobre las curvas de potencia base ni el multiplicador de bouquet --
+   el ajuste ya construido reproduce datos frescos del calculador con
+   los que no fue entrenado.
+
    Esto reemplaza el intento anterior (un multiplicador distinto por
    modelo, anclado a un solo punto de cada ficha técnica en PDF): ese
    anclaje resultó tener una errata real — la ficha del Medium Tulip

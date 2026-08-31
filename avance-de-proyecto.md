@@ -1,7 +1,7 @@
 # ECO | Wind — Avance de Proyecto
 
 **Documento de referencia (alcance):** [`plan-tecnico-eco-wind.md`](./plan-tecnico-eco-wind.md)
-**Última actualización:** 31 de agosto, 2026 (Hallazgo 11 — revisión de 10 manuales: corrección real en curvas AL13, contaminación de plantilla explicada, EcoRoof Energy Hub sin perforación, discrepancias abiertas)
+**Última actualización:** 31 de agosto, 2026 (Hallazgo 12 — curvas de potencia re-verificadas contra el calculador oficial, R²≥0.999996, sin dudas reales pendientes)
 **Propósito:** comparar el alcance planeado contra el avance real, y dejar constancia de los
 hallazgos que no estaban previstos en el plan original. Se actualiza en cada avance
 significativo — no es una foto única.
@@ -691,6 +691,27 @@ con tabla completa — confianza sube de MEDIA a ALTA, sin cambiar el valor de k
 
 Pablo indicó antes que enviaría más fichas "Specs_2025" de los modelos restantes (Small Tulip,
 Large Tulip, AL13) — todavía no han llegado; este hallazgo se extenderá cuando lleguen.
+
+### Hallazgo 12 — Curvas de potencia re-verificadas contra 5 capturas nuevas del calculador oficial: sin dudas reales pendientes
+
+Pablo expresó preocupación de que aún hubiera dudas sin resolver sobre las curvas de
+desempeño, y compartió 5 capturas de pantalla nuevas del "Bouquet Effect Calculator" oficial de
+Flower Turbines (N=1, 7, 8, 9 y 10 turbinas — antes solo se tenía una captura propia de N=10).
+Se comparó cada celda de cada tabla (31 puntos de viento × 3 modelos × 5 valores de N = 465
+puntos) contra `power_isolated()`/`power_in_bouquet()` tal como ya estaban en el código, sin
+tocar ningún coeficiente antes de medir el ajuste. Resultado: **R²≥0.999996 en los 15 pares
+(modelo, N)**, error máximo por debajo de 1% en todo el rango 0–15 m/s. La única señal que en un
+primer chequeo automático marcó "100% de error" resultó ser ruido irrelevante muy cerca del
+cero: en las 5 capturas, Large Tulip muestra un valor pequeño no-nulo (0.4 a 2.6 W) ya en
+v=0.5 m/s — por debajo del cut-in nominal de 0.7 m/s que sí tienen Small y Medium (0.0 en esa
+misma fila, en las 5 capturas) — y el modelo actual, con un cut-in duro en 0.7 m/s, da 0 ahí.
+Es un patrón consistente en las 5 fuentes (no ruido de una sola captura), pero de una magnitud
+tan pequeña que no cambia ninguna conclusión ni justifica modificar el modelo. Conclusión
+honesta: no se encontró ninguna duda real sobre las curvas base ni sobre el multiplicador de
+Efecto Bouquet — el ajuste ya construido predice datos frescos del calculador, incluyendo las
+"proyecciones" (N=6 a 10, que el propio calculador distingue de la "medición de campo" de N=2 a
+5), con los que no fue entrenado. No se modificó ningún coeficiente en `flower_turbines_curves.py`
+— solo se documentó la verificación adicional en el docstring del módulo.
 
 ---
 
