@@ -32,9 +32,16 @@ import pandas as pd
 try:
     from engine.flower_turbines_curves import power_in_bouquet, CURVE_COEFFICIENTS
     from engine.atmosfera_estandar import factor_correccion_densidad
+    from engine.terrain_classification import query_worldcover_z0
 except ImportError:
     from flower_turbines_curves import power_in_bouquet, CURVE_COEFFICIENTS
     from atmosfera_estandar import factor_correccion_densidad
+    try:
+        from terrain_classification import query_worldcover_z0
+    except ImportError:
+        # Fallback si terrain_classification no está disponible aún
+        def query_worldcover_z0(lat, lon, raster_path=None):
+            return 0.3, None, "fallback"
 
 Z0_DEFAULT = 0.3      # rugosidad del sitio DESTINO (donde va la turbina) -- ver wind_at_height()
 Z0_MET_DEFAULT = 0.1  # rugosidad del sitio de REFERENCIA meteorologica (aeropuerto/GWA/EPW) --
@@ -113,6 +120,56 @@ def wind_at_height_potencia(v_ref, h_ref, h_target, terreno="suburban", terreno_
     v_ref = np.asarray(v_ref, dtype=float)
     factor_met = (d_met / h_ref) ** a_met
     return ((h_target / d_dst) ** a_dst) * (v_ref * factor_met)
+
+
+def wind_at_height_dynamic(v_ref, h_ref, h_target, lat, lon, z0_met=Z0_MET_DEFAULT):
+    """
+    PHASE B - Perfil logarítmico de viento con z0 DINÁMICO desde ESA WorldCover.
+
+    Reemplaza el valor hardcoded Z0_DEFAULT=0.3m (que asumía suburbano en TODOS
+    los sitios) con valores reales de Davenport-Wieringa calibrados automáticamente
+    por tipo de cobertura terrestre.
+
+    Parámetros:
+    -----------
+    v_ref : float o array
+        Velocidad de referencia (m/s) a altura h_ref
+    h_ref : float
+        Altura de referencia (típicamente 10m para GWA/EPW)
+    h_target : float
+        Altura del buje de la turbina (típicamente 1-6m para Flower Turbines)
+    lat, lon : float
+        Coordenadas WGS84 del sitio DESTINO (donde va la turbina)
+    z0_met : float, optional
+        Rugosidad del sitio meteorológico de referencia (default 0.1m = "country")
+
+    Devuelve:
+    ---------
+    v_target : float o array
+        Velocidad corregida a altura h_target, con z0 dinámico
+
+    Nota: Si h_target <= z0, devuelve 0 (subcapa de rugosidad, perfil no confiable).
+    """
+    z0_dynamic, _, _ = query_worldcover_z0(lat, lon)
+    return wind_at_height(v_ref, h_ref, h_target, z0=z0_dynamic, z0_met=z0_met)
+
+
+def simular_dynamic(df_clima, lat, lon, altura_buje, modelo, N, elevacion_m=0.0,
+                   h_ref=10, z0_met=Z0_MET_DEFAULT, metodo_bouquet="real"):
+    """
+    PHASE B - Wrapper de simular() que usa z0 dinámico desde ESA WorldCover.
+
+    Reemplaza el parámetro 'z0' hardcoded por consultas dinámicas a terrain_classification.py.
+
+    Parámetros: igual que simular(), excepto:
+    - Remueve parámetro 'z0' (se obtiene automáticamente)
+    - Agrega 'lat', 'lon' para consultar z0 dinámico
+
+    Devuelve: mismo formato que simular()
+    """
+    z0_dynamic, _, _ = query_worldcover_z0(lat, lon)
+    return simular(df_clima, altura_buje, modelo, N, elevacion_m=elevacion_m,
+                  h_ref=h_ref, z0=z0_dynamic, z0_met=z0_met, metodo_bouquet=metodo_bouquet)
 
 
 def cargar_gwa_json(carpeta):

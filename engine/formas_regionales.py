@@ -44,6 +44,9 @@ try:
     )
     from engine.flower_turbines_curves import CURVE_COEFFICIENTS
     from engine.gwa_raster import factor_ajuste_gwa, RUTA_RASTER_CR_DEFAULT
+    from engine.terrain_classification import (
+        gower_distance, query_koppen_classification, query_worldcover_z0, seleccionar_estacion_gower
+    )
 except ImportError:
     from simulador_pista_a import (
         SITIOS_DISPONIBLES, cargar_gwa_json, generar_clima_gwa, cargar_wind_rose_lib,
@@ -54,6 +57,9 @@ except ImportError:
     )
     from flower_turbines_curves import CURVE_COEFFICIENTS
     from gwa_raster import factor_ajuste_gwa, RUTA_RASTER_CR_DEFAULT
+    from terrain_classification import (
+        gower_distance, query_koppen_classification, query_worldcover_z0, seleccionar_estacion_gower
+    )
 
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -149,6 +155,89 @@ def vecino_mas_cercano(lat, lon, formas=None, excluir=None):
         return None, None
     candidatas.sort(key=lambda x: x[1])
     return candidatas[0]
+
+
+def vecino_gower(lat, lon, formas=None, excluir=None, pesos=None):
+    """
+    PHASE B - Selección mejorada de estación donante usando Gower distance
+    (métrica que combina clima Köppen + elevación + distancia geográfica).
+
+    Reemplaza `vecino_mas_cercano()` que usaba SOLO distancia Haversine.
+    Gower distance prioriza:
+    - Köppen climate match (40%): garantiza clima análogo
+    - Elevation match (25%): similar altitud ~ similar clima local
+    - Distance (10%): como desempate final
+
+    Parámetros:
+    -----------
+    lat, lon : float
+        Coordenadas del punto a evaluar
+    formas : dict, optional
+        Formas precargadas (default: cargar_formas_conocidas())
+    excluir : str, optional
+        Clave de estación a excluir (para leave-one-out)
+    pesos : dict, optional
+        Pesos para Gower {latitude, longitude, elevation, koppen, tpi}
+        Default: 40% Köppen, 25% elevación, 25% TPI, 10% distancia
+
+    Devuelve:
+    ---------
+    clave : str
+        Clave de la estación seleccionada
+    distancia_gower : float
+        Distancia Gower normalizada (0-1)
+    """
+    formas = formas or cargar_formas_conocidas()
+
+    # Enriquecer formas con metadatos de clima
+    estaciones_list = []
+    for clave, forma in formas.items():
+        if clave == excluir:
+            continue
+        koppen, _, _ = query_koppen_classification(forma["lat"], forma["lon"])
+        estaciones_list.append({
+            "key": clave,
+            "lat": forma["lat"],
+            "lon": forma["lon"],
+            "elevation_m": forma["elevacion_m"],
+            "koppen": koppen,
+            "tpi": 0.0,  # TODO: calcular desde DEM real en el futuro
+        })
+
+    # Punto del usuario
+    koppen_user, _, _ = query_koppen_classification(lat, lon)
+    punto_usuario = {
+        "lat": lat,
+        "lon": lon,
+        "elevation_m": 1000.0,  # TODO: obtener desde DEM real
+        "koppen": koppen_user,
+        "tpi": 0.0,
+    }
+
+    # Calcular Gower distance para todas las estaciones
+    distances = gower_distance(punto_usuario, estaciones_list, pesos)
+
+    # Seleccionar la de menor distancia
+    best_idx = np.argmin(distances)
+    best_clave = estaciones_list[best_idx]["key"]
+
+    return best_clave, float(distances[best_idx])
+
+
+def vecino_hibrido(lat, lon, formas=None, excluir=None, modo="gower"):
+    """
+    Alias versátil que permite cambiar entre métodos de selección:
+    - "gower": Usa Gower distance (Phase B mejorado)
+    - "haversine": Usa distancia Haversine pura (V1 actual)
+
+    Devuelve (clave, distancia_o_gower).
+    """
+    if modo == "gower":
+        return vecino_gower(lat, lon, formas, excluir)
+    elif modo == "haversine":
+        return vecino_mas_cercano(lat, lon, formas, excluir)
+    else:
+        raise ValueError(f"Modo desconocido: {modo}. Debe ser 'gower' o 'haversine'")
 
 
 def generar_clima_prestado(lat, lon, media_objetivo, año=2023, seed=42, formas=None, excluir=None):
