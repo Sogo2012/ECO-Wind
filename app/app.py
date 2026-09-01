@@ -323,6 +323,45 @@ def graficar_perfil_viento(velocidad_10m, z0_ref=0.1, altura_max=10):
     return fig
 
 
+def crear_mapa_estaciones(lat_sitio, lon_sitio, df_estaciones=None):
+    """Crea un mapa interactivo Folium con el sitio y estaciones disponibles."""
+    m = folium.Map(
+        location=[lat_sitio, lon_sitio],
+        zoom_start=6,
+        tiles="OpenStreetMap"
+    )
+
+    # Marcador del sitio en rojo
+    folium.CircleMarker(
+        location=[lat_sitio, lon_sitio],
+        radius=8,
+        popup=f"Tu sitio: {lat_sitio:.4f}, {lon_sitio:.4f}",
+        color=VERDE,
+        fill=True,
+        fillColor=VERDE,
+        fillOpacity=0.8,
+        weight=2,
+        opacity=1.0
+    ).add_to(m)
+
+    # Estaciones como marcadores verdes
+    if df_estaciones is not None and not df_estaciones.empty:
+        for idx, row in df_estaciones.iterrows():
+            folium.CircleMarker(
+                location=[row["lat"], row["lon"]],
+                radius=6,
+                popup=f"<b>{row['name']}</b><br>{row.get('state', 'N/A')}<br>Distancia: {row['distancia_km']:.1f} km",
+                color="#888888",
+                fill=True,
+                fillColor="#CCCCCC",
+                fillOpacity=0.6,
+                weight=1,
+                opacity=0.8
+            ).add_to(m)
+
+    return m
+
+
 # --- Menú lateral: header de marca + resumen de proyecto (patrón Skyplus) ---
 # Clona la estructura real de Skyplus: sidebar es SOLO para marca + resumen de "elegido
 # hasta ahora", navegación principal va en TABS en la parte superior. Las 4 secciones
@@ -413,6 +452,14 @@ with tab_clima:
     # Mostrar sitio activo si existe
     if st.session_state.sitio_activo:
         st.success(f"✅ Sitio activo: **{st.session_state.sitio_nombre_activo}**")
+
+    st.divider()
+
+    # Mapa interactivo del sitio y estaciones
+    if st.session_state.sitio_cercanas is not None and not st.session_state.sitio_cercanas.empty:
+        st.subheader("📍 Mapa interactivo")
+        mapa = crear_mapa_estaciones(st.session_state.sitio_lat, st.session_state.sitio_lon, st.session_state.sitio_cercanas)
+        st_folium(mapa, width=1200, height=400)
 
     st.divider()
 
