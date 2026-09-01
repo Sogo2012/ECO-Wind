@@ -7,6 +7,17 @@
 # automaticamente, tipicamente 8080) -- no es una funcionalidad nueva sin
 # pedir, es la ruta que el propio plan-tecnico-eco-wind.md senala
 # (Docker + Cloud Build, mismo patron de Skyplus/DDP-Lite).
+#
+# COPY . . (no una lista de carpetas a mano) -- mismo patron que
+# Skyplus/DDP-Lite. La version anterior copiaba engine/+app/+SOLO
+# datos_clima/gwa_juan_santamaria/, una lista que quedo desactualizada
+# apenas se agrego el catalogo global y los EPW reales (Hallazgo 18/19):
+# epw_catalog_global.json y datos_clima/epw_real/ nunca se copiaban,
+# causando un FileNotFoundError real en produccion al buscar cualquier
+# sitio (ej. Heredia) que no fuera uno de los 4 ya precacheados. Confiar
+# en .dockerignore (una sola lista de exclusiones, no dos listas
+# separadas para incluir/excluir que se pueden desincronizar) evita que
+# vuelva a pasar con el proximo archivo de datos que se agregue.
 
 FROM python:3.11-slim
 
@@ -16,12 +27,7 @@ WORKDIR /app
 COPY app/requirements.txt ./app/requirements.txt
 RUN pip install --no-cache-dir -r app/requirements.txt
 
-# Codigo y datos que la app REALMENTE necesita en tiempo de ejecucion --
-# no todo el repo (ver .dockerignore para lo excluido explicitamente:
-# documentos_tecnicos/, notebooks/, .git/, EPWs sin usar todavia, etc.)
-COPY engine/ ./engine/
-COPY app/ ./app/
-COPY datos_clima/gwa_juan_santamaria/ ./datos_clima/gwa_juan_santamaria/
+COPY . .
 
 ENV PYTHONUNBUFFERED=1
 EXPOSE 8501

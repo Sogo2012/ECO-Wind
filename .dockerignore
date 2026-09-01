@@ -12,9 +12,12 @@ plan-tecnico-eco-wind.md
 avance-de-proyecto.md
 README.md
 
-# Datos climaticos que la app todavia no usa (solo lee datos_clima/gwa_juan_santamaria/,
-# copiado explicitamente aparte en el Dockerfile)
-datos_clima/*.epw
+# Rasters/zips descargados en tiempo de ejecucion (GWA, Koppen) -- se
+# re-descargan bajo demanda, no hace falta que esten en la imagen (y no
+# suelen existir en este repo de todos modos, ver .gitignore)
+*.tif
+*.zip
+datos_clima/koppen/
 
 # Python
 __pycache__/
