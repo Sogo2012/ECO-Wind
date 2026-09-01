@@ -170,9 +170,18 @@ def generar_clima_prestado(lat, lon, media_objetivo, año=2023, seed=42, formas=
 
 def _media_real_donante(clave, donante):
     """San José: su media real sale del propio windSpeed.json (no tiene df_real horario,
-    es la curva de excedencia real de GWA). Los demás (EPW real): media de su serie horaria."""
-    return (float(np.mean([r["val"] for r in donante["ws_json"]])) if clave == "san_jose"
-            else float(donante["df_real"]["WS10M"].mean()))
+    es la curva de excedencia real de GWA). Los demás (EPW real): media de su serie horaria.
+
+    BUG CRÍTICO ARREGLADO (Hallazgo X): antes, San José calculaba mean([percentiles])
+    lo que sobreestimaba ~40-50% porque los percentiles altos pesaban igual que los bajos.
+    Ahora se reconstruye la serie horaria con generar_clima_gwa() sin media_objetivo
+    para obtener la media REAL de la serie (8760 horas integradas, no solo percentiles)."""
+    if clave == "san_jose":
+        # Reconstruir serie horaria SIN escalar (media_objetivo=None) para obtener media real
+        df_horaria, media_real = generar_clima_gwa(donante["ws_json"], donante["hm_json"])
+        return float(media_real)
+    else:
+        return float(donante["df_real"]["WS10M"].mean())
 
 
 def _rosa_freq_donante(clave, donante):
