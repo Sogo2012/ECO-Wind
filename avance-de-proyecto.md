@@ -1,7 +1,7 @@
 # ECO | Wind — Avance de Proyecto
 
 **Documento de referencia (alcance):** [`plan-tecnico-eco-wind.md`](./plan-tecnico-eco-wind.md)
-**Última actualización:** 31 de agosto, 2026 (Hallazgo 19 v3 — consolidado en UN SOLO flujo de búsqueda de clima, igual que DDP-lite/Skyplus: sin selector de modos, estación real siempre, aproximación como fallback automático sólo cuando hace falta; Hallazgo 20 — corrección real en el perfil de viento por altura, z0 de referencia distinto de z0 destino; Hallazgo 21 — vecino más cercano validado por leave-one-out, con un artefacto real de `generar_clima_gwa()` encontrado en el camino; quantile mapping probado (mecánica) y acceso a ERA5/CDS investigado; Hallazgo 22 — mitigación parcial de ese artefacto vía curva de excedencia por residuos: Liberia ya muestra una mejora clara y real con el vecino más cercano; Hallazgo 23 — validación REAL (Colab, no sintética) de quantile mapping contra NASA POWER: mejora real pero más modesta que la prueba sintética; Hallazgo 24 — corrección de rumbo: app internacional, sin anclar a San José, catálogo global de 5,276 estaciones/20 países probado y auto-pivotable en 6 países reales; Hallazgo 25 — NASA POWER descartado como ajuste espacial (falla al revés en terreno accidentado, confirmado con datos reales); GWA generalizado a cualquier país como reemplazo candidato; Hallazgo 26 — validación real de GWA: mucho mejor que NASA POWER pero mixto, el problema está en el ráster crudo de GWA en San José/Finca Favorita, no en el mecanismo de razón; credencial CDS movida a Colab Secrets tras compartirse un token real en el chat; Hallazgo 27 — Köppen-Geiger encuadrado como filtro de selección de donante, no como cuarto candidato al mecanismo de razón de ajuste de magnitud)
+**Última actualización:** 31 de agosto, 2026 (Hallazgo 19 v3 — consolidado en UN SOLO flujo de búsqueda de clima, igual que DDP-lite/Skyplus: sin selector de modos, estación real siempre, aproximación como fallback automático sólo cuando hace falta; Hallazgo 20 — corrección real en el perfil de viento por altura, z0 de referencia distinto de z0 destino; Hallazgo 21 — vecino más cercano validado por leave-one-out, con un artefacto real de `generar_clima_gwa()` encontrado en el camino; quantile mapping probado (mecánica) y acceso a ERA5/CDS investigado; Hallazgo 22 — mitigación parcial de ese artefacto vía curva de excedencia por residuos: Liberia ya muestra una mejora clara y real con el vecino más cercano; Hallazgo 23 — validación REAL (Colab, no sintética) de quantile mapping contra NASA POWER: mejora real pero más modesta que la prueba sintética; Hallazgo 24 — corrección de rumbo: app internacional, sin anclar a San José, catálogo global de 5,276 estaciones/20 países probado y auto-pivotable en 6 países reales; Hallazgo 25 — NASA POWER descartado como ajuste espacial (falla al revés en terreno accidentado, confirmado con datos reales); GWA generalizado a cualquier país como reemplazo candidato; Hallazgo 26 — validación real de GWA: mucho mejor que NASA POWER pero mixto, el problema está en el ráster crudo de GWA en San José/Finca Favorita, no en el mecanismo de razón; credencial CDS movida a Colab Secrets tras compartirse un token real en el chat; Hallazgo 27 — Köppen-Geiger encuadrado como filtro de selección de donante, no como cuarto candidato al mecanismo de razón de ajuste de magnitud; Hallazgo 28 — validación real de ERA5/CDS: mejor que NASA POWER pero no le gana a GWA en ningún sitio, ~1 hora de cola por congestión real de CDS; Open-Meteo/ERA5-Land agregado como quinta vía sin fricción de acceso)
 **Propósito:** comparar el alcance planeado contra el avance real, y dejar constancia de los
 hallazgos que no estaban previstos en el plan original. Se actualiza en cada avance
 significativo — no es una foto única.
@@ -1726,6 +1726,82 @@ distancia — coinciden por las dos razones a la vez, no porque el filtro haya c
 solo 4 sitios, el filtro por zona estructuralmente no puede demostrar si ayuda o no — hace falta
 correrlo contra el catálogo completo (5,276 estaciones), donde sí hay margen real para que la
 selección por zona difiera de la selección por distancia pura. Eso queda pendiente.
+
+---
+
+### Hallazgo 28 — ERA5/CDS real: mejor que NASA POWER, pero no le gana a GWA en ningún sitio; Open-Meteo agregado como quinta vía sin la fricción de CDS
+
+Pablo corrió la Parte 4 completa en Colab. Entre el primer pedido (23:36) y el último resultado
+(00:28) pasó casi una hora — cada consulta individual tardó entre ~30 segundos y ~12 minutos en la
+cola de CDS, sin patrón previsible. Confirmado con el dashboard en vivo de CDS
+(`cds.climate.copernicus.eu/live`) que era congestión real del servicio en ese momento (~4,361
+pedidos en cola contra ~435 corriendo, `reanalysis-era5-single-levels` siendo el 2º dataset más
+pedido de todo CDS) — no un problema de esta cuenta ni de nuestro código.
+
+**Validación leave-one-out real con `factor_ajuste_era5()`:**
+
+| Sitio | Donante | Factor ERA5 | kWh ajustado | Error |
+|---|---|---|---|---|
+| San José | Nicoya | 0.673 | 17.4 | **-88.9%** |
+| Nicoya | Liberia | 0.876 | 273.5 | **+422.0%** |
+| Liberia | Nicoya | 1.141 | 95.6 | **-67.2%** |
+| Finca Favorita | San José | 0.762 | 75.3 | **+912.5%** |
+
+**Comparación completa contra todo lo ya documentado:**
+
+| Sitio | Siempre SJ (H21) | Vecino+residuo (H22) | NASA POWER (H25) | GWA (H26) | ERA5 (este hallazgo) |
+|---|---|---|---|---|---|
+| San José | — | — | -98.5% | **-70.0%** | -88.9% |
+| Nicoya | -41.5% | +47.6% | +593.4% | **+126.7%** | +422.0% |
+| Liberia | -43.7% | +15.9% | -75.4% | **-24.4%** | -67.2% |
+| Finca Favorita | +19.2% | +19.2% | +15,184.0% | **-100.0%** | +912.5% |
+
+**Veredicto honesto, no el que se esperaba:** ERA5 gana claramente contra NASA POWER (grilla más
+fina, ~31km vs ~50-60km, menos sesgo por terreno) pero **no le gana a GWA en ningún sitio de los
+4** — GWA sigue siendo el mejor ajuste de magnitud real que tenemos, pese a que ERA5 tiene mejor
+base termodinámica. La fricción de CDS (cuenta, token, licencia, ~1 hora de cola) no compró mejor
+precisión que GWA, que responde casi al instante.
+
+**Por qué, verificado con cálculo, no solo reportado:** se comparó la razón que ERA5 implica entre
+cada par de sitios contra la razón real (medias ya conocidas de Hallazgo 26):
+
+| Sitio | Donante | Razón real | Razón ERA5 | ¿Dirección correcta? |
+|---|---|---|---|---|
+| San José | Nicoya | 1.755 | 0.673 | **Invertida** (como NASA POWER, Hallazgo 25) |
+| Nicoya | Liberia | 0.576 | 0.876 | Correcta, magnitud aplastada hacia 1.0 |
+| Liberia | Nicoya | 1.736 | 1.141 | Correcta, magnitud aplastada hacia 1.0 |
+| Finca Favorita | San José | 0.385 | 0.762 | Correcta, magnitud aplastada a la mitad |
+
+Solo 1 de 4 casos es una inversión real de dirección — los otros 3 sí aciertan el sentido del
+gradiente, pero lo aplastan sistemáticamente hacia 1.0 (relaciones reales de 1.7-0.4 se vuelven
+1.1-0.9 en ERA5). Consistente con seguir promediando terreno complejo incluso a 31km. Aplicando
+pura escala v³ a la media ajustada resultante se recupera el orden de magnitud del error real
+observado en los 4 casos (ej. San José: -94.4% solo por v³ vs -88.9% real) — confirma que el
+mecanismo de razón en sí funciona correctamente; el problema es que el valor de ERA5 en estos 4
+puntos de Costa Rica no preserva bien la variabilidad espacial real.
+
+**Dato que cruza los tres métodos:** Finca Favorita falla catastróficamente con los TRES ajustes de
+magnitud probados — NASA POWER (+15,184%), GWA (-100%), ERA5 (+912.5%) — en direcciones opuestas
+entre sí. Ninguna fuente continua, sin importar su resolución, da un resultado usable ahí. Apunta a
+que el problema puede ser el DONANTE (San José, a 178.6km, el único disponible hoy) más que la
+fuente de ajuste — trabajo de Hallazgo 27 (selección por zona Köppen), no de este mecanismo.
+
+**Quinta vía agregada mientras CDS seguía en cola:** Pablo trajo un informe de investigación
+externo evaluando alternativas de cero fricción. La más directamente aplicable: **Open-Meteo**
+(`archive-api.open-meteo.com`) sirve ERA5-Land (~9km/0.1°, más fino que el ERA5 estándar de CDS a
+~31km/0.25°) sin API key, sin registro, sin cola — confirmado por WebSearch contra la documentación
+oficial, no adivinado. `engine/open_meteo_client.py` (mismo mecanismo de razón, probado con una
+respuesta JSON sintética) y la Parte 5 del notebook quedaron listos — sin verificar en vivo todavía
+(bloqueado en este sandbox). El mismo informe también propone mejorar la selección de donante
+combinando Köppen + elevación + distancia con una distancia de Gower (extiende Hallazgo 27, no
+arrancado) y un downscaling topográfico más grande (TPI, índice de Winstral, factor de orografía
+EN 1991-1-4, rugosidad vía ESA WorldCover) — real y creíble pero un desarrollo de semanas, no
+arrancado, pendiente de que Pablo decida si vale la pena.
+
+**Pendiente, decisión de Pablo:** correr la Parte 5 (Open-Meteo) para saber si de verdad hay una
+fuente que le gane a GWA, o si la conclusión práctica es dejar de buscar una cuarta/quinta fuente
+continua y volver al pendiente de Hallazgo 26 (por qué el ráster crudo de GWA falla en San
+José/Finca Favorita).
 
 ---
 
