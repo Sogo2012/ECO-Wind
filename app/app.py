@@ -21,13 +21,18 @@ ALCANCE HONESTO:
   real de la lista" (ver engine/epw_real.py::sitio_precacheado_cercano()).
 - Si la estación real más cercana a tu punto queda a más de
   UMBRAL_APROXIMACION_KM, la app ofrece AL LADO (mismo flujo, no una
-  pantalla aparte) una aproximación: velocidad media real del ráster de
-  GWA para ese punto exacto + forma (estacionalidad, ciclo diurno)
-  prestada de San José -- declarada como aproximación, con el error ya
-  cuantificado en Hallazgo 18 (-41% a -44% en Guanacaste, +18% en Limón)
-  mostrado ahí mismo. El ráster no se pudo descargar en este entorno de
-  desarrollo (globalwindatlas.info bloqueado, Hallazgo 2) -- si no existe
-  el archivo, la opción simplemente no aparece, en vez de fallar oscuro.
+  pantalla aparte) una sensibilización del punto exacto (Hallazgo 21-30,
+  engine/formas_regionales.py::generar_clima_sensibilizado()): forma
+  (estacionalidad, ciclo diurno) del vecino real más cercano entre los
+  sitios conocidos (no siempre San José) + magnitud ajustada con la razón
+  entre dos lecturas del ráster de GWA en ese punto y en la ubicación del
+  donante -- GWA es la fuente de ajuste validada como mejor contra NASA
+  POWER y ERA5/CDS en los 4 sitios reales de Costa Rica (Hallazgo 25/26/28).
+  La dirección del viento (rosa) sigue siendo la del donante sin ajuste --
+  no existe un mecanismo de razón para dirección, sólo para magnitud. El
+  ráster no se pudo descargar en este entorno de desarrollo
+  (globalwindatlas.info bloqueado, Hallazgo 2) -- si no existe el archivo,
+  la opción simplemente no aparece, en vez de fallar oscuro.
 - ¿Tenés el EPW real de tu sitio? Subilo directo -- opción secundaria
   discreta (mismo patrón que DDP-lite/Skyplus), no compite con la
   búsqueda de arriba.
@@ -56,14 +61,15 @@ from engine.simulador_pista_a import (
     simular, comparar_metodo_ingenuo_vs_horario, wind_at_height_potencia,
 )
 from engine.flower_turbines_curves import CURVE_COEFFICIENTS
-from engine.gwa_raster import generar_clima_sitio_nuevo, RUTA_RASTER_CR_DEFAULT
+from engine.gwa_raster import RUTA_RASTER_CR_DEFAULT
+from engine.formas_regionales import generar_clima_sensibilizado
 from engine.epw_real import (
     SITIOS_EPW_REAL, cargar_epw_real, heatmap_json_desde_epw, rosa_frecuencia_desde_epw,
     obtener_estaciones_cercanas, geocode_name, descargar_y_extraer_epw, sitio_precacheado_cercano,
 )
 
 # Hallazgo 19 (v3): a partir de qué distancia a la estación real más cercana la app ofrece
-# la aproximación (ráster GWA + forma de San José) como alternativa. Es una decisión de
+# la sensibilización del punto exacto (Hallazgo 21-30) como alternativa. Es una decisión de
 # producto, no un valor medido -- Costa Rica es topográficamente compartimentada (cordilleras
 # separan microclimas a distancias cortas), así que 40 km ya es generoso, no conservador.
 # Documentado explícitamente para que Pablo lo ajuste si no es el número correcto.
@@ -185,12 +191,17 @@ def cargar_epw_subido(ruta):
 
 def cargar_aproximacion(lat, lon, elevacion_m):
     """
-    Ráster GWA + forma prestada de San José (Requisito 1, Hallazgo 17) -- desde Hallazgo
-    19 (v3) YA NO es un modo que el usuario elige de entrada: la app la ofrece sola,
-    dentro del mismo flujo de búsqueda, sólo cuando la estación real más cercana queda a
-    más de UMBRAL_APROXIMACION_KM (ver arriba). Error ya cuantificado en Hallazgo 18:
-    -41% a -44% en Guanacaste, +18% en Limón según el sitio -- advertencia mostrada en el
-    mismo lugar donde aparece la opción, no en una pantalla aparte.
+    Sensibilización real del punto exacto (Hallazgo 21-30, engine/formas_regionales.py::
+    generar_clima_sensibilizado()) -- desde Hallazgo 19 (v3) YA NO es un modo que el
+    usuario elige de entrada: la app la ofrece sola, dentro del mismo flujo de búsqueda,
+    sólo cuando la estación real más cercana queda a más de UMBRAL_APROXIMACION_KM (ver
+    arriba). Reemplaza el mecanismo viejo (generar_clima_sitio_nuevo(), siempre forma de
+    San José + valor crudo del ráster) por el validado con datos reales: vecino más
+    cercano real para la FORMA (no siempre San José) + razón GWA(punto exacto)/GWA(donante)
+    para la MAGNITUD -- GWA le ganó a NASA POWER y a ERA5/CDS en los 4 sitios reales de
+    Costa Rica (Hallazgo 25/26/28). La rosa de vientos (dirección) sigue siendo la del
+    donante sin ajuste -- no existe un mecanismo de razón para dirección, sólo para
+    magnitud (límite honesto, ver docstring de generar_clima_sensibilizado()).
     """
     if not os.path.exists(RUTA_RASTER_CR_DEFAULT):
         return dict(error=(
@@ -199,12 +210,11 @@ def cargar_aproximacion(lat, lon, elevacion_m):
             "ver engine/gwa_raster.py, descargar_raster_costa_rica()."
         ))
     try:
-        df_clima, media = generar_clima_sitio_nuevo(lat, lon)
+        resultado = generar_clima_sensibilizado(lat, lon)
     except (FileNotFoundError, ValueError, KeyError) as e:
         return dict(error=str(e))
-    _, hm_json, rosa_freq = _rosa_y_heatmap_san_jose()
-    return dict(df_clima=df_clima, media=media, hm_json=hm_json, rosa_freq=rosa_freq,
-                es_aproximacion=True, elevacion_m=elevacion_m, error=None)
+    resultado["elevacion_m"] = elevacion_m
+    return resultado
 
 
 # --- Helpers de gráficos ---
@@ -401,10 +411,13 @@ with tab_clima:
                         f"cercana está a {_dist_min:.0f} km."
                     )
                     st.caption(
-                        "Media real del ráster de GWA para esta coordenada + forma (estacionalidad, "
-                        "ciclo diurno) prestada de San José -- no son datos propios de este sitio. "
-                        "Error ya medido (Hallazgo 18): -41% a -44% en Guanacaste, +18% en Limón "
-                        "según el sitio real comparado."
+                        "Sensibilización del punto exacto (Hallazgo 21-30): se toma prestada la forma "
+                        "(estacionalidad, ciclo diurno) de la estación real más cercana entre las "
+                        "conocidas, y la magnitud se ajusta con la razón entre dos lecturas del ráster "
+                        "de GWA en vez de confiar en su valor crudo -- no son datos propios de este "
+                        "sitio exacto. La estación donante concreta se muestra después de calcular. "
+                        "GWA es la fuente de ajuste validada como mejor contra NASA POWER y ERA5/CDS "
+                        "en los 4 sitios reales de Costa Rica (Hallazgo 25/26/28)."
                     )
                     _elev_aprox = st.number_input(
                         "Elevación (m sobre el nivel del mar)", value=800.0, min_value=0.0,
@@ -420,7 +433,8 @@ with tab_clima:
                         else:
                             st.session_state.sitio_activo = _res_aprox
                             st.session_state.sitio_nombre_activo = (
-                                "Aproximación -- ráster GWA + forma de San José")
+                                f"Aproximación -- forma de {_res_aprox['donante_nombre']} "
+                                f"({_res_aprox['distancia_km']:.0f} km), ajustada con GWA")
                             st.rerun()
         else:
             st.caption("Buscá tu sitio arriba, o clickeá en el mapa, para ver las estaciones cercanas.")
@@ -448,10 +462,22 @@ with tab_contexto:
                        f"lat={_meta['lat']:.4f}, lon={_meta['lon']:.4f}, elevación={_meta['elevacion_m']:.0f}m. "
                        f"Media anual real (10m): {media_confirmada:.2f} m/s.", icon="✅")
         if es_aproximacion:
-            st.info(f"Velocidad media real (ráster GWA, coordenada "
-                    f"{st.session_state.sitio_lat:.4f},{st.session_state.sitio_lon:.4f}): "
-                    f"{media_confirmada:.2f} m/s -- forma prestada de San José.", icon="ℹ️")
-            st.caption("Rosa de vientos y patrón diurno: prestados de San José (forma), no del sitio nuevo.")
+            _donante = resultado_clima.get("donante_nombre", "estación desconocida")
+            _dist = resultado_clima.get("distancia_km")
+            _factor = resultado_clima.get("factor_ajuste")
+            st.info(
+                f"Media sensibilizada para este punto exacto "
+                f"({st.session_state.sitio_lat:.4f},{st.session_state.sitio_lon:.4f}): "
+                f"**{media_confirmada:.2f} m/s** -- media real de {_donante}"
+                + (f" ({_dist:.0f} km)" if _dist is not None else "")
+                + (f" × factor de ajuste GWA {_factor:.3f}" if _factor is not None else ""),
+                icon="ℹ️",
+            )
+            st.caption(
+                f"Forma (estacionalidad, ciclo diurno) y rosa de vientos: prestadas de {_donante} "
+                "-- la magnitud sí se ajustó al punto exacto (Hallazgo 25/26/28), la dirección no "
+                "tiene todavía un mecanismo de ajuste, sigue siendo la del donante tal cual."
+            )
 
         st.divider()
         col_g1, col_g2 = st.columns(2)
@@ -616,6 +642,6 @@ with tab_resultados:
 st.divider()
 st.caption(
     "ECO Consultor — Simulador en desarrollo (Fase 2). "
-    "Pendiente: mapa de ubicación, DEM automático para elevación, PDF de cotización, "
-    "registro de leads, despliegue a Cloud Run."
+    "Pendiente: cálculo financiero (CAPEX, tarifa, payback), DEM automático para elevación, "
+    "PDF de cotización, registro de leads, despliegue a Cloud Run."
 )

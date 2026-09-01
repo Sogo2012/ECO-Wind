@@ -36,18 +36,24 @@ import pandas as pd
 
 try:
     from engine.simulador_pista_a import (
-        SITIOS_DISPONIBLES, cargar_gwa_json, generar_clima_gwa, simular, Z0_DEFAULT, Z0_MET_DEFAULT,
+        SITIOS_DISPONIBLES, cargar_gwa_json, generar_clima_gwa, cargar_wind_rose_lib,
+        simular, Z0_DEFAULT, Z0_MET_DEFAULT,
     )
     from engine.epw_real import (
-        SITIOS_EPW_REAL, cargar_epw_real, heatmap_json_desde_epw, _haversine_km,
+        SITIOS_EPW_REAL, cargar_epw_real, heatmap_json_desde_epw, rosa_frecuencia_desde_epw, _haversine_km,
     )
     from engine.flower_turbines_curves import CURVE_COEFFICIENTS
+    from engine.gwa_raster import factor_ajuste_gwa, RUTA_RASTER_CR_DEFAULT
 except ImportError:
     from simulador_pista_a import (
-        SITIOS_DISPONIBLES, cargar_gwa_json, generar_clima_gwa, simular, Z0_DEFAULT, Z0_MET_DEFAULT,
+        SITIOS_DISPONIBLES, cargar_gwa_json, generar_clima_gwa, cargar_wind_rose_lib,
+        simular, Z0_DEFAULT, Z0_MET_DEFAULT,
     )
-    from epw_real import SITIOS_EPW_REAL, cargar_epw_real, heatmap_json_desde_epw, _haversine_km
+    from epw_real import (
+        SITIOS_EPW_REAL, cargar_epw_real, heatmap_json_desde_epw, rosa_frecuencia_desde_epw, _haversine_km,
+    )
     from flower_turbines_curves import CURVE_COEFFICIENTS
+    from gwa_raster import factor_ajuste_gwa, RUTA_RASTER_CR_DEFAULT
 
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -160,6 +166,76 @@ def generar_clima_prestado(lat, lon, media_objetivo, año=2023, seed=42, formas=
     df_clima, _ = generar_clima_gwa(donante["ws_json"], donante["hm_json"],
                                      year=año, seed=seed, media_objetivo=media_objetivo)
     return df_clima, clave_donante, dist_km
+
+
+def _media_real_donante(clave, donante):
+    """San José: su media real sale del propio windSpeed.json (no tiene df_real horario,
+    es la curva de excedencia real de GWA). Los demás (EPW real): media de su serie horaria."""
+    return (float(np.mean([r["val"] for r in donante["ws_json"]])) if clave == "san_jose"
+            else float(donante["df_real"]["WS10M"].mean()))
+
+
+def _rosa_freq_donante(clave, donante):
+    """Misma lógica que _media_real_donante() pero para la rosa de vientos -- San José
+    tiene su propio export real del panel de GWA (.lib, Hallazgo 3); los demás la sacan de
+    su EPW real. En los dos casos es la rosa REAL del donante, nunca la del punto exacto
+    (eso no se puede sensibilizar con nada de lo que tenemos hoy -- ver docstring de
+    generar_clima_sensibilizado())."""
+    if clave == "san_jose":
+        sitio = SITIOS_DISPONIBLES["san_jose_juan_santamaria"]
+        ruta_lib = os.path.join(_BASE, sitio["carpeta_gwa"], "gwc_point_1_10m.lib")
+        return cargar_wind_rose_lib(ruta_lib)["freq"]
+    return rosa_frecuencia_desde_epw(donante["df_real"])
+
+
+def generar_clima_sensibilizado(lat, lon, ruta_raster=RUTA_RASTER_CR_DEFAULT, formas=None,
+                                 año=2023, seed=42):
+    """
+    Sensibilización real del punto exacto (Hallazgo 21-30): reemplaza a
+    generar_clima_sitio_nuevo() de gwa_raster.py (que siempre prestaba la
+    forma de San José y confiaba en el valor crudo del ráster) por el
+    mecanismo validado con datos reales -- GWA es la fuente de ajuste que
+    le ganó a NASA POWER y a ERA5/CDS en los 4 sitios reales de Costa Rica
+    (Hallazgo 25/26/28), y el vecino más cercano real (no siempre San José)
+    para la FORMA es mejor que anclar a un solo sitio (Hallazgo 21/22).
+
+    Dos piezas, cada una resuelta por separado:
+    1. FORMA (curva de excedencia + patrón mes×hora): del vecino real más
+       cercano entre los sitios conocidos (vecino_mas_cercano()) -- no
+       necesariamente San José.
+    2. MAGNITUD: media real del donante × factor_ajuste_gwa(punto exacto,
+       ubicación del donante) -- la razón entre dos lecturas del ráster de
+       GWA, que cancela su sesgo sistemático mejor que confiar en su valor
+       absoluto en el punto exacto (Hallazgo 25).
+
+    LÍMITE HONESTO, no resuelto por este mecanismo ni por ningún otro
+    probado hasta ahora: la ROSA DE VIENTOS (dirección) es siempre la del
+    donante, sin ningún ajuste -- no existe (todavía) un mecanismo de
+    razón para dirección como el que sí existe para magnitud. Es una
+    aproximación declarada, igual que la forma.
+
+    Devuelve un dict con el mismo formato que usa app.py para las otras 3
+    rutas (estación precacheada / EPW recién descargado / EPW subido):
+    df_clima, media, hm_json, rosa_freq, es_aproximacion=True,
+    donante_nombre, distancia_km, factor_ajuste -- estos dos últimos para
+    que la app pueda mostrar de qué estación real y con qué factor salió
+    el número, en vez de ocultarlo.
+    """
+    formas = formas or cargar_formas_conocidas(usar_residuo=True)
+    clave_donante, dist_km = vecino_mas_cercano(lat, lon, formas)
+    donante = formas[clave_donante]
+
+    factor, _, _ = factor_ajuste_gwa(lat, lon, donante["lat"], donante["lon"], ruta_raster=ruta_raster)
+    media_donante_real = _media_real_donante(clave_donante, donante)
+    media_ajustada = media_donante_real * factor
+
+    df_clima, _ = generar_clima_gwa(donante["ws_json"], donante["hm_json"],
+                                     year=año, seed=seed, media_objetivo=media_ajustada)
+    rosa_freq = _rosa_freq_donante(clave_donante, donante)
+
+    return dict(df_clima=df_clima, media=media_ajustada, hm_json=donante["hm_json"], rosa_freq=rosa_freq,
+                es_aproximacion=True, error=None, donante_nombre=donante["nombre"],
+                distancia_km=dist_km, factor_ajuste=factor)
 
 
 def validar_leave_one_out(modelo="medium_tulip", N=3, altura_buje=3.0, usar_residuo=False):
