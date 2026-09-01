@@ -1705,6 +1705,28 @@ validación leave-one-out todavía.
 **Estado:** en investigación, no validado. Complementario al trabajo de ajuste de magnitud, no un
 sustituto — atacan preguntas distintas del mismo problema más grande.
 
+**Adenda — acceso real confirmado y primer sanity check (mismo día):** Pablo corrió la Parte 1 en
+Colab. La API de Figshare respondió con el archivo real (`Beck_KG_V1.zip`, 71.0 MB); adentro hay 14
+archivos (presente/futuro × 3 resoluciones × clasificación/confianza) — el que corresponde es
+`Beck_KG_V1_present_0p0083.tif` (presente, 1km, clasificación). Sanity check contra los 4 sitios
+conocidos:
+
+| Sitio | Zona Köppen | ¿Tiene sentido? |
+|---|---|---|
+| San José | `Am` (tropical monzónico) | Sí — confirmado por fuera (temp. media anual ~19.5°C, nunca baja de 18°C incluso en el mes más frío); mi supuesto de "templado por la elevación" en el comentario del notebook era simplemente incorrecto, no reveló un bug. |
+| Nicoya | `Aw` (tropical sabana) | Sí, tropical seco como se esperaba de Guanacaste. |
+| Liberia | `Aw` (tropical sabana) | Sí, ídem. |
+| Finca Favorita | `Af` (tropical lluvioso) | Sí, tropical húmedo como se esperaba del Caribe. |
+
+**El hallazgo que de verdad importa:** se calculó si un filtro por zona habría cambiado alguno de
+los 4 donantes ya elegidos por distancia pura (Hallazgo 25/26) — **no cambia ninguno**. San José y
+Finca Favorita no comparten zona con ningún otro de los 4 sitios conocidos, así que el filtro cae
+de nuevo a distancia pura. Nicoya y Liberia ya comparten zona (`Aw`) Y ya eran vecinos por
+distancia — coinciden por las dos razones a la vez, no porque el filtro haya cambiado algo. Con
+solo 4 sitios, el filtro por zona estructuralmente no puede demostrar si ayuda o no — hace falta
+correrlo contra el catálogo completo (5,276 estaciones), donde sí hay margen real para que la
+selección por zona difiera de la selección por distancia pura. Eso queda pendiente.
+
 ---
 
 ## 6. Pendientes activos / bloqueos
