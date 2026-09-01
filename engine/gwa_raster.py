@@ -71,7 +71,7 @@ def descargar_raster_costa_rica(destino=RUTA_RASTER_CR_DEFAULT, altura=10):
     return descargar_raster_pais("CRI", altura=altura, destino=destino)
 
 
-def descargar_raster_pais(pais_iso3, altura=10, destino=None, capa="wind-speed"):
+def descargar_raster_pais(pais_iso3, altura=10, destino=None, capa="wind-speed", forzar=False):
     """
     Version general de descargar_raster_costa_rica() -- mismo endpoint ya
     confirmado arriba (codigo fuente de energyRt/globalwindatlas Y la
@@ -91,12 +91,21 @@ def descargar_raster_pais(pais_iso3, altura=10, destino=None, capa="wind-speed")
 
     NO EJECUTAR EN ESTE SANDBOX -- globalwindatlas.info esta bloqueado
     (Hallazgo 2). Correr esto en Google Colab, un pais a la vez.
+
+    forzar=False (default): si `destino` ya existe en disco, lo devuelve
+    directo sin tocar la red -- pensado para notebooks donde una celda
+    puede perder la variable de una corrida anterior (reinicio de
+    runtime, celdas corridas fuera de orden) sin tener que re-bajar un
+    archivo de cientos de MB cada vez. forzar=True salta este atajo y
+    vuelve a descargar siempre.
     """
     import requests
     destino = destino or os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "datos_clima", f"gwa_{pais_iso3.lower()}_{altura}m.tif",
     )
+    if not forzar and os.path.exists(destino):
+        return destino
     url = f"https://globalwindatlas.info/api/gis/country/{pais_iso3}/{capa}/{altura}"
     r = requests.get(url, stream=True, timeout=120)
     r.raise_for_status()
