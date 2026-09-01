@@ -1,33 +1,13 @@
-# ECO | Wind -- excluye del build de Docker todo lo que la app de Fase 2
-# (app/app.py) no necesita en tiempo de ejecucion. Ver Dockerfile.
-
-.git/
-.gitignore
-
-# Investigacion/desarrollo, no runtime de la app
-notebooks/
-documentos_tecnicos/
-Simulación VAWT y Efecto Cluster*.docx
-plan-tecnico-eco-wind.md
-avance-de-proyecto.md
-README.md
-
-# Rasters/zips descargados en tiempo de ejecucion (GWA, Koppen) -- se
-# re-descargan bajo demanda, no hace falta que esten en la imagen (y no
-# suelen existir en este repo de todos modos, ver .gitignore)
-*.tif
-*.zip
-datos_clima/koppen/
-
-# Python
-__pycache__/
+__pycache__
 *.pyc
-*.pyo
-*.egg-info/
-.pytest_cache/
-.venv/
+.git
+.gitignore
+.env
+.venv
 venv/
-
-# Artefactos locales
-.ipynb_checkpoints/
-*.log
+.DS_Store
+*.egg-info
+dist/
+build/
+.pytest_cache/
+*.pyo
