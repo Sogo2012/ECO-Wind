@@ -396,7 +396,7 @@ with tab_clima:
         )
     with col2:
         st.write("")  # Espaciador
-        if st.button("🔍 Buscar", use_column_width=True):
+        if st.button("🔍 Buscar"):
             if _coords_input:
                 try:
                     partes = [p.strip() for p in _coords_input.split(",")]
@@ -425,7 +425,7 @@ with tab_clima:
             with col1:
                 st.write(f"**{_row['name']}** — {_row.get('state', '')} ({_row['distancia_km']:.0f} km)")
             with col2:
-                if st.button("Usar", key=f"btn_est_{_i}", use_column_width=True):
+                if st.button("Usar", key=f"btn_est_{_i}"):
                     _res_est = cargar_estacion_elegida(_row)
                     if _res_est.get("error"):
                         st.error(_res_est["error"])
@@ -458,7 +458,7 @@ with tab_clima:
                     key="sitio_elev_aprox"
                 )
             with col2:
-                if st.button("Usar aprox.", use_column_width=True):
+                if st.button("Usar aprox."):
                     _res_aprox = cargar_aproximacion(
                         st.session_state.sitio_lat, st.session_state.sitio_lon, _elev_aprox,
                         usar_gower=st.session_state.usar_gower)
@@ -616,7 +616,7 @@ with tab_config:
     if not st.session_state.get("sitio_activo"):
         st.warning("Elegí un sitio en la pestaña \"📍 Selección de clima\" antes de calcular.", icon="⚠️")
 
-    if st.button("Calcular producción del proyecto", type="primary", use_column_width=True):
+    if st.button("Calcular producción del proyecto", type="primary"):
         st.session_state.calculo_listo = True
         st.session_state.seccion_activa = "resultados"
         st.rerun()
