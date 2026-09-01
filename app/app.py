@@ -300,6 +300,23 @@ def graficar_curva_duracion(serie_w):
     return fig
 
 
+def graficar_perfil_viento(velocidad_10m, z0_ref=0.1, altura_max=10):
+    """Perfil logarítmico de viento sensibilizado (como LB Wind Profile)."""
+    alturas = np.linspace(0.1, altura_max, 100)
+    velocidades = wind_at_height_potencia(
+        velocidad_10m, 10, alturas, terreno="country", terreno_met="country"
+    )
+    fig, ax = plt.subplots(figsize=(6, 5))
+    ax.plot(velocidades, alturas, color=VERDE, linewidth=2)
+    ax.fill_betweenx(alturas, 0, velocidades, color=VERDE, alpha=0.2)
+    ax.set_xlabel("Velocidad del viento (m/s)")
+    ax.set_ylabel("Altura sobre el terreno (m)")
+    ax.set_title("Perfil logarítmico de viento sensibilizado", color=AZUL)
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    return fig
+
+
 # --- Menú lateral: header de marca + resumen de proyecto (patrón Skyplus) ---
 # Clona la estructura real de Skyplus: sidebar es SOLO para marca + resumen de "elegido
 # hasta ahora", navegación principal va en TABS en la parte superior. Las 4 secciones
@@ -353,11 +370,7 @@ tab_clima, tab_contexto, tab_config, tab_resultados = st.tabs([
 ])
 
 with tab_clima:
-    st.caption(
-        "Un solo flujo, igual que Skyplus (Hallazgo 19): buscá dónde está tu "
-        "proyecto -- por nombre, por coordenada, o clic en el mapa -- y elegí la estación "
-        "climática real más cercana. Nada de \"modos\" para decidir de antemano."
-    )
+    st.caption("Pega las coordenadas de tu sitio (ej: 9.999665, -84.123064). El sistema busca automáticamente la estación climática más cercana y sensibiliza los datos.")
 
     def _buscar_y_guardar(_lat, _lon):
         with st.spinner("Buscando estaciones cercanas..."):
@@ -367,145 +380,77 @@ with tab_clima:
             if df is None or df.empty:
                 st.error("No se encontraron estaciones para esta ubicación.")
 
-    col_busq_nombre, col_busq_epw = st.columns(2)
-    with col_busq_nombre:
-        with st.expander("Buscar por nombre o coordenada",
-                          expanded=(st.session_state.sitio_activo is None)):
-            _nombre_busqueda = st.text_input(
-                "Ciudad o país", placeholder="Ej: Alajuela, Costa Rica",
-                label_visibility="collapsed", key="sitio_busqueda_nombre",
-            )
-            if st.button("Buscar por nombre", use_container_width=True, key="btn_sitio_buscar_nombre"):
-                if _nombre_busqueda:
-                    _lat_g, _lon_g = geocode_name(_nombre_busqueda)
-                    if _lat_g is not None:
-                        _buscar_y_guardar(_lat_g, _lon_g)
-                        st.rerun()
+    # Input minimalista: solo pegar coordenadas
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        _coords_input = st.text_input(
+            "Coordenadas (latitud, longitud)",
+            placeholder="Ej: 9.999665, -84.123064",
+            key="coords_input"
+        )
+    with col2:
+        st.write("")  # Espaciador
+        if st.button("🔍 Buscar", use_container_width=True):
+            if _coords_input:
+                try:
+                    partes = [p.strip() for p in _coords_input.split(",")]
+                    if len(partes) != 2:
+                        st.error("Formato: latitud, longitud (ej: 9.999, -84.123)")
                     else:
-                        st.error(
-                            "No se pudo geocodificar ese nombre -- necesita internet real "
-                            "(Nominatim/Photon están bloqueados en este sandbox, Hallazgo 2)."
-                        )
-            st.divider()
-            _lat_manual = st.number_input("Latitud", value=st.session_state.sitio_lat, format="%.4f",
-                                           key="sitio_lat_input")
-            _lon_manual = st.number_input("Longitud", value=st.session_state.sitio_lon, format="%.4f",
-                                           key="sitio_lon_input")
-            if st.button("Buscar por coordenada", use_container_width=True, key="btn_sitio_buscar_coord"):
-                _buscar_y_guardar(_lat_manual, _lon_manual)
-                st.rerun()
+                        _lat = float(partes[0])
+                        _lon = float(partes[1])
+                        _buscar_y_guardar(_lat, _lon)
+                        st.rerun()
+                except ValueError:
+                    st.error("Coordenadas inválidas. Usa números separados por coma.")
 
-    with col_busq_epw:
-        with st.expander("¿Tenés el EPW real de tu sitio? Subilo directo"):
-            st.caption(
-                "Opción secundaria (mismo patrón que DDP-lite/Skyplus) -- no compite con la "
-                "búsqueda de al lado, sólo se usa si subís un archivo."
-            )
-            _archivo = st.file_uploader("Cargar archivo .epw", type=["epw"], key="archivo_epw_custom")
-            if _archivo is not None and st.session_state.get("_ultimo_epw_subido") != _archivo.name:
-                _ruta_subida = os.path.join(tempfile.gettempdir(), f"eco_wind_custom_{_archivo.name}")
-                with open(_ruta_subida, "wb") as _f:
-                    _f.write(_archivo.getbuffer())
-                _res_subida = cargar_epw_subido(_ruta_subida)
-                st.session_state["_ultimo_epw_subido"] = _archivo.name
-                if _res_subida.get("error"):
-                    st.error(_res_subida["error"])
-                else:
-                    st.session_state.sitio_activo = _res_subida
-                    st.session_state.sitio_nombre_activo = f"{_res_subida['meta']['estacion']} (EPW propio)"
-                    st.rerun()
+    # Mostrar sitio activo si existe
+    if st.session_state.sitio_activo:
+        st.success(f"✅ Sitio activo: **{st.session_state.sitio_nombre_activo}**")
 
     st.divider()
 
-    col_mapa, col_estaciones = st.columns([2, 1])
+    # Mostrar estaciones disponibles
+    _df_cerc = st.session_state.sitio_cercanas
+    if _df_cerc is not None and not _df_cerc.empty:
+        st.caption("**Estaciones climáticas más cercanas:**")
+        for _i, _row in _df_cerc.iterrows():
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.write(f"**{_row['name']}** — {_row.get('state', '')} ({_row['distancia_km']:.0f} km)")
+            with col2:
+                if st.button("Usar", key=f"btn_est_{_i}", use_container_width=True):
+                    _res_est = cargar_estacion_elegida(_row)
+                    if _res_est.get("error"):
+                        st.error(_res_est["error"])
+                    else:
+                        st.session_state.sitio_activo = _res_est
+                        st.session_state.sitio_nombre_activo = _row["name"]
+                        st.rerun()
 
-    with col_mapa:
-        st.subheader("Mapa interactivo")
-        _m = folium.Map(location=[st.session_state.sitio_lat, st.session_state.sitio_lon],
-                         zoom_start=8, tiles="CartoDB positron")
-        folium.Marker(
-            [st.session_state.sitio_lat, st.session_state.sitio_lon], tooltip="Ubicación del proyecto",
-            icon=folium.Icon(color="red", icon="crosshairs"),
-        ).add_to(_m)
-        _df_cerc = st.session_state.sitio_cercanas
-        if _df_cerc is not None and not _df_cerc.empty:
-            for _, _row in _df_cerc.iterrows():
-                if pd.notna(_row.get("lat")) and pd.notna(_row.get("lon")):
-                    folium.Marker(
-                        [_row["lat"], _row["lon"]], tooltip=f"{_row['name']} ({_row['distancia_km']} km)",
-                        icon=folium.Icon(color="blue", icon="cloud"),
-                    ).add_to(_m)
-        _salida_mapa = st_folium(_m, height=480, use_container_width=True, key="mapa_sitio")
-
-        if _salida_mapa and _salida_mapa.get("last_clicked"):
-            _c_lat, _c_lon = _salida_mapa["last_clicked"]["lat"], _salida_mapa["last_clicked"]["lng"]
-            if (round(_c_lat, 4), round(_c_lon, 4)) != (
-                    round(st.session_state.sitio_lat, 4), round(st.session_state.sitio_lon, 4)):
-                _buscar_y_guardar(_c_lat, _c_lon)
-                st.rerun()
-
-    with col_estaciones:
-        st.subheader("Estaciones disponibles")
-
-        if st.session_state.sitio_activo:
-            st.markdown(f"✅ **Sitio activo:** {st.session_state.sitio_nombre_activo}")
-            st.divider()
-
-        if _df_cerc is not None and not _df_cerc.empty:
-            st.caption("Estaciones reales más cercanas (clic en el mapa, o buscá arriba, para actualizar):")
-            for _i, _row in _df_cerc.iterrows():
-                with st.container(border=True):
-                    st.markdown(f"**{_row['name']}**")
-                    st.caption(f"{_row.get('state', '')} -- {_row['distancia_km']} km")
-                    if st.button("Usar esta estación", key=f"btn_sitio_est_{_i}", use_container_width=True):
-                        _res_est = cargar_estacion_elegida(_row)
-                        if _res_est.get("error"):
-                            st.error(_res_est["error"])
-                        else:
-                            st.session_state.sitio_activo = _res_est
-                            st.session_state.sitio_nombre_activo = _row["name"]
-                            st.rerun()
-
-            # Hallazgo 19 (v3): aproximación como fallback automático DENTRO del mismo flujo,
-            # sólo cuando la estación real más cercana ya no representa bien el sitio -- no es
-            # un modo aparte que el usuario elige de entrada.
-            _dist_min = float(_df_cerc["distancia_km"].min())
-            _dentro_de_cr = (8.0 <= st.session_state.sitio_lat <= 11.3
-                              and -86.0 <= st.session_state.sitio_lon <= -82.5)
-            if _dist_min > UMBRAL_APROXIMACION_KM and _dentro_de_cr and os.path.exists(RUTA_RASTER_CR_DEFAULT):
-                with st.container(border=True):
-                    st.markdown(
-                        f"⚠️ **Aproximación para este punto exacto** -- la estación real más "
-                        f"cercana está a {_dist_min:.0f} km."
-                    )
-                    st.caption(
-                        "Sensibilización del punto exacto (Hallazgo 21-30): se toma prestada la forma "
-                        "(estacionalidad, ciclo diurno) de la estación real más cercana entre las "
-                        "conocidas, y la magnitud se ajusta con la razón entre dos lecturas del ráster "
-                        "de GWA en vez de confiar en su valor crudo -- no son datos propios de este "
-                        "sitio exacto. La estación donante concreta se muestra después de calcular. "
-                        "GWA es la fuente de ajuste validada como mejor contra NASA POWER y ERA5/CDS "
-                        "en los 4 sitios reales de Costa Rica (Hallazgo 25/26/28)."
-                    )
-                    _elev_aprox = st.number_input(
-                        "Elevación (m sobre el nivel del mar)", value=800.0, min_value=0.0,
-                        max_value=3800.0, step=50.0, key="sitio_elev_aprox",
-                        help="El ráster no trae elevación -- búsqueda automática por DEM pendiente "
-                             "(Hallazgo 17), por ahora manual.",
-                    )
-                    if st.button("Usar esta aproximación", key="btn_usar_aproximacion", use_container_width=True):
-                        _res_aprox = cargar_aproximacion(
-                            st.session_state.sitio_lat, st.session_state.sitio_lon, _elev_aprox)
-                        if _res_aprox.get("error"):
-                            st.error(_res_aprox["error"])
-                        else:
-                            st.session_state.sitio_activo = _res_aprox
-                            st.session_state.sitio_nombre_activo = (
-                                f"Aproximación -- forma de {_res_aprox['donante_nombre']} "
-                                f"({_res_aprox['distancia_km']:.0f} km), ajustada con GWA")
-                            st.rerun()
-        else:
-            st.caption("Buscá tu sitio arriba, o clickeá en el mapa, para ver las estaciones cercanas.")
+        # Aproximación automática si estación está muy lejos
+        _dist_min = float(_df_cerc["distancia_km"].min())
+        _dentro_de_cr = (8.0 <= st.session_state.sitio_lat <= 11.3
+                          and -86.0 <= st.session_state.sitio_lon <= -82.5)
+        if _dist_min > UMBRAL_APROXIMACION_KM and _dentro_de_cr and os.path.exists(RUTA_RASTER_CR_DEFAULT):
+            st.warning(f"⚠️ La estación real más cercana está a {_dist_min:.0f} km. ¿Usar una aproximación sensibilizada para este punto exacto?")
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                _elev_aprox = st.number_input(
+                    "Elevación (m)", value=800.0, min_value=0.0, max_value=3800.0, step=50.0,
+                    key="sitio_elev_aprox"
+                )
+            with col2:
+                if st.button("Usar aprox.", use_container_width=True):
+                    _res_aprox = cargar_aproximacion(
+                        st.session_state.sitio_lat, st.session_state.sitio_lon, _elev_aprox)
+                    if _res_aprox.get("error"):
+                        st.error(_res_aprox["error"])
+                    else:
+                        st.session_state.sitio_activo = _res_aprox
+                        st.session_state.sitio_nombre_activo = (
+                            f"Aproximación -- {_res_aprox['donante_nombre']} ({_res_aprox['distancia_km']:.0f} km)")
+                        st.rerun()
 
 
 # --- Tab: Contexto climático -- rosa de vientos + heatmap, sin depender de "Calcular" ---
@@ -553,6 +498,11 @@ with tab_contexto:
             st.pyplot(graficar_rosa_vientos(rosa_freq))
         with col_g2:
             st.pyplot(graficar_heatmap_clima(hm_json))
+
+        st.divider()
+        st.subheader("Perfil de viento sensibilizado (0-10m)")
+        _altura_perfil = st.slider("Altura máxima a mostrar", 1.0, 15.0, 10.0, 0.5, key="altura_perfil_slider")
+        st.pyplot(graficar_perfil_viento(media_confirmada, altura_max=_altura_perfil))
 
 
 # --- Tab: Equipos y configuración -- turbinas, clústers, parámetros avanzados ---
