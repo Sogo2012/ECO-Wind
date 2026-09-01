@@ -52,7 +52,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import streamlit as st
-from streamlit_folium import st_folium
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -459,7 +458,8 @@ with tab_clima:
     if st.session_state.sitio_cercanas is not None and not st.session_state.sitio_cercanas.empty:
         st.subheader("📍 Mapa interactivo")
         mapa = crear_mapa_estaciones(st.session_state.sitio_lat, st.session_state.sitio_lon, st.session_state.sitio_cercanas)
-        st_folium(mapa, width=1200, height=400)
+        mapa_html = mapa._repr_html_()
+        st.components.v1.html(mapa_html, height=420)
 
     st.divider()
 
