@@ -720,7 +720,7 @@ with tab_resultados:
                 "V. medio buje (m/s)": round(r["v_hub_medio"], 2),
                 "% bajo cut-in": round(r["pct_horas_bajo_cutin"], 1),
             } for r in resultados])
-            st.dataframe(tabla, hide_index=True, use_column_width=True)
+            st.dataframe(tabla, hide_index=True)
 
             media_confirmada = resultado_clima["media"]
             with st.expander("Hallazgo 20 -- perfil de viento por altura: dos rugosidades, y un cross-check independiente"):
