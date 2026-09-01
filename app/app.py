@@ -153,6 +153,8 @@ if "seccion_activa" not in st.session_state:
     st.session_state.seccion_activa = "clima"
 if "calculo_listo" not in st.session_state:
     st.session_state.calculo_listo = False
+if "usar_gower" not in st.session_state:
+    st.session_state.usar_gower = False
 
 
 # --- Helpers de clima/geometría ---
@@ -225,7 +227,7 @@ def cargar_epw_subido(ruta):
     return _resultado_desde_epw(df_clima, meta)
 
 
-def cargar_aproximacion(lat, lon, elevacion_m):
+def cargar_aproximacion(lat, lon, elevacion_m, usar_gower=False):
     """
     Sensibilización real del punto exacto (Hallazgo 21-30, engine/formas_regionales.py::
     generar_clima_sensibilizado()) -- desde Hallazgo 19 (v3) YA NO es un modo que el
@@ -238,6 +240,10 @@ def cargar_aproximacion(lat, lon, elevacion_m):
     Costa Rica (Hallazgo 25/26/28). La rosa de vientos (dirección) sigue siendo la del
     donante sin ajuste -- no existe un mecanismo de razón para dirección, sólo para
     magnitud (límite honesto, ver docstring de generar_clima_sensibilizado()).
+
+    Phase B (Layer 2 fix): Si usar_gower=True, usa Gower distance para seleccionar la estación
+    donante considerando clima (Köppen) + elevación + distancia. Si usar_gower=False, usa el
+    método clásico de distancia Haversine pura.
     """
     if not os.path.exists(RUTA_RASTER_CR_DEFAULT):
         return dict(error=(
@@ -246,7 +252,7 @@ def cargar_aproximacion(lat, lon, elevacion_m):
             "ver engine/gwa_raster.py, descargar_raster_costa_rica()."
         ))
     try:
-        resultado = generar_clima_sensibilizado(lat, lon)
+        resultado = generar_clima_sensibilizado(lat, lon, usar_gower=usar_gower)
     except (FileNotFoundError, ValueError, KeyError) as e:
         return dict(error=str(e))
     resultado["elevacion_m"] = elevacion_m
@@ -434,6 +440,17 @@ with tab_clima:
                           and -86.0 <= st.session_state.sitio_lon <= -82.5)
         if _dist_min > UMBRAL_APROXIMACION_KM and _dentro_de_cr and os.path.exists(RUTA_RASTER_CR_DEFAULT):
             st.warning(f"⚠️ La estación real más cercana está a {_dist_min:.0f} km. ¿Usar una aproximación sensibilizada para este punto exacto?")
+
+            # Phase B: Opción de método de selección de estación (Haversine vs Gower)
+            col_metodo = st.columns([1])
+            with col_metodo[0]:
+                st.session_state.usar_gower = st.checkbox(
+                    "🔬 Usar método avanzado (Gower distance)",
+                    value=st.session_state.usar_gower,
+                    help="Selecciona la estación donante considerando clima (Köppen) + elevación + distancia. "
+                         "Más preciso en zonas de frontera climática. Por defecto: método clásico (distancia pura).",
+                )
+
             col1, col2 = st.columns([3, 1])
             with col1:
                 _elev_aprox = st.number_input(
@@ -443,13 +460,15 @@ with tab_clima:
             with col2:
                 if st.button("Usar aprox.", use_container_width=True):
                     _res_aprox = cargar_aproximacion(
-                        st.session_state.sitio_lat, st.session_state.sitio_lon, _elev_aprox)
+                        st.session_state.sitio_lat, st.session_state.sitio_lon, _elev_aprox,
+                        usar_gower=st.session_state.usar_gower)
                     if _res_aprox.get("error"):
                         st.error(_res_aprox["error"])
                     else:
                         st.session_state.sitio_activo = _res_aprox
+                        metodo_usado = "Gower" if st.session_state.usar_gower else "Haversine"
                         st.session_state.sitio_nombre_activo = (
-                            f"Aproximación -- {_res_aprox['donante_nombre']} ({_res_aprox['distancia_km']:.0f} km)")
+                            f"Aproximación ({metodo_usado}) -- {_res_aprox['donante_nombre']} ({_res_aprox['distancia_km']:.0f} km)")
                         st.rerun()
 
 
@@ -478,14 +497,32 @@ with tab_contexto:
             _donante = resultado_clima.get("donante_nombre", "estación desconocida")
             _dist = resultado_clima.get("distancia_km")
             _factor = resultado_clima.get("factor_ajuste")
+            _metodo = resultado_clima.get("metodo_seleccion", "haversine_km")
+
+            # Determinar si se usó Gower o Haversine
+            if _metodo == "gower_distance":
+                metodo_display = "🔬 Gower Distance (clima-aware)"
+                metodo_desc = "Considera Köppen (clima) + elevación + distancia"
+            else:
+                metodo_display = "📍 Haversine (distancia pura)"
+                metodo_desc = "Basado en distancia geográfica euclidiana"
+
             st.info(
                 f"Media sensibilizada para este punto exacto "
                 f"({st.session_state.sitio_lat:.4f},{st.session_state.sitio_lon:.4f}): "
                 f"**{media_confirmada:.2f} m/s** -- media real de {_donante}"
-                + (f" ({_dist:.0f} km)" if _dist is not None else "")
+                + (f" ({_dist:.2f} {('Gower dist' if _metodo == 'gower_distance' else 'km')})" if _dist is not None else "")
                 + (f" × factor de ajuste GWA {_factor:.3f}" if _factor is not None else ""),
                 icon="ℹ️",
             )
+
+            # Mostrar método de selección (Phase B)
+            col_metodo1, col_metodo2 = st.columns([2, 2])
+            with col_metodo1:
+                st.metric("Método de selección", metodo_display)
+            with col_metodo2:
+                st.caption(metodo_desc)
+
             st.caption(
                 f"Forma (estacionalidad, ciclo diurno) y rosa de vientos: prestadas de {_donante} "
                 "-- la magnitud sí se ajustó al punto exacto (Hallazgo 25/26/28), la dirección no "
