@@ -459,6 +459,10 @@ def sitio_precacheado_cercano(lat, lon, umbral_km=2.0):
 
 
 SITIOS_EPW_REAL = {
+    "san_jose": {
+        "nombre": "San Jose - Santamaría Intl. A.P. (San José, Meseta Central)",
+        "ruta_epw": os.path.join(_BASE, "datos_clima", "CRI_AL_San.Jose-Santamaria.Intl.AP.787620_TMYx.2007-2021.epw"),
+    },
     "nicoya": {
         "nombre": "Nicoya A.P. (Guanacaste, Pacífico seco)",
         "ruta_epw": os.path.join(CARPETA_EPW_REAL, "CRI_GU_Nicoya.AP.787550_TMYx.2007-2021.epw"),
