@@ -118,13 +118,22 @@ def descargar_raster_pais(pais_iso3, altura=10, destino=None, capa="wind-speed",
 
 def muestrear_velocidad_media(lat, lon, ruta_raster=RUTA_RASTER_CR_DEFAULT):
     """
-    Lee la velocidad media de viento (m/s) del raster de Costa Rica en la
-    coordenada dada. Reproyecta la coordenada al CRS del raster si hace
-    falta (GWA publica normalmente en EPSG:4326, pero no se asume sin
-    verificar -- se lee el CRS real del archivo).
+    Lee la velocidad media de viento (m/s) del raster en la coordenada
+    dada. Reproyecta la coordenada al CRS del raster si hace falta (GWA
+    publica normalmente en EPSG:4326, pero no se asume sin verificar --
+    se lee el CRS real del archivo).
+
+    Lee solo el pixel necesario (ventana 1x1 de rasterio), no el raster
+    completo -- con Costa Rica (raster chico) `src.read(1)` completo no
+    se notaba, pero con un raster del tamaño de EEUU (843 MB en disco,
+    bastante más en memoria ya descomprimido) cargar la banda entera para
+    sacar UN pixel agotaba la RAM del runtime de Colab y crasheaba el
+    kernel a mitad de la Parte 3 del notebook de calibración -- bug real,
+    encontrado con el log de crash del kernel, no solo sospechado.
     """
     import rasterio
     from rasterio.warp import transform as warp_transform
+    from rasterio.windows import Window
 
     if not os.path.exists(ruta_raster):
         raise FileNotFoundError(
@@ -142,7 +151,8 @@ def muestrear_velocidad_media(lat, lon, ruta_raster=RUTA_RASTER_CR_DEFAULT):
         fila, col = src.index(lon_r, lat_r)
         if not (0 <= fila < src.height and 0 <= col < src.width):
             raise ValueError(f"Coordenada ({lat}, {lon}) fuera de la cobertura del raster.")
-        valor = src.read(1)[fila, col]
+        ventana = Window(col_off=col, row_off=fila, width=1, height=1)
+        valor = src.read(1, window=ventana)[0, 0]
         if valor == src.nodata or np.isnan(valor):
             raise ValueError(f"Sin dato de viento en ({lat}, {lon}) -- probablemente fuera de Costa Rica.")
         return float(valor)
