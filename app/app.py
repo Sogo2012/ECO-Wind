@@ -547,7 +547,7 @@ with tab_contexto:
 with tab_config:
     st.subheader("Clústers del proyecto")
     for i, c in enumerate(st.session_state.clusters):
-        with st.container(border=True):
+        with st.container():
             cc1, cc2, cc3, cc4 = st.columns([2, 1, 1, 0.4])
             c["modelo"] = cc1.selectbox(
                 "Modelo", options=list(CURVE_COEFFICIENTS.keys()),
