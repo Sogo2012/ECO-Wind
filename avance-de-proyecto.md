@@ -1,7 +1,7 @@
 # ECO | Wind — Avance de Proyecto
 
 **Documento de referencia (alcance):** [`plan-tecnico-eco-wind.md`](./plan-tecnico-eco-wind.md)
-**Última actualización:** 31 de agosto, 2026 (Hallazgo 19 v3 — consolidado en UN SOLO flujo de búsqueda de clima, igual que DDP-lite/Skyplus: sin selector de modos, estación real siempre, aproximación como fallback automático sólo cuando hace falta; Hallazgo 20 — corrección real en el perfil de viento por altura, z0 de referencia distinto de z0 destino; Hallazgo 21 — vecino más cercano validado por leave-one-out, con un artefacto real de `generar_clima_gwa()` encontrado en el camino; quantile mapping probado (mecánica) y acceso a ERA5/CDS investigado; Hallazgo 22 — mitigación parcial de ese artefacto vía curva de excedencia por residuos: Liberia ya muestra una mejora clara y real con el vecino más cercano; Hallazgo 23 — validación REAL (Colab, no sintética) de quantile mapping contra NASA POWER: mejora real pero más modesta que la prueba sintética; Hallazgo 24 — corrección de rumbo: app internacional, sin anclar a San José, catálogo global de 5,276 estaciones/20 países probado y auto-pivotable en 6 países reales; Hallazgo 25 — NASA POWER descartado como ajuste espacial (falla al revés en terreno accidentado, confirmado con datos reales); GWA generalizado a cualquier país como reemplazo candidato; Hallazgo 26 — validación real de GWA: mucho mejor que NASA POWER pero mixto, el problema está en el ráster crudo de GWA en San José/Finca Favorita, no en el mecanismo de razón; credencial CDS movida a Colab Secrets tras compartirse un token real en el chat; Hallazgo 27 — Köppen-Geiger encuadrado como filtro de selección de donante, no como cuarto candidato al mecanismo de razón de ajuste de magnitud; Hallazgo 28 — validación real de ERA5/CDS: mejor que NASA POWER pero no le gana a GWA en ningún sitio, ~1 hora de cola por congestión real de CDS; Open-Meteo/ERA5-Land agregado como quinta vía sin fricción de acceso)
+**Última actualización:** 31 de agosto, 2026 (Hallazgo 19 v3 — consolidado en UN SOLO flujo de búsqueda de clima, igual que DDP-lite/Skyplus: sin selector de modos, estación real siempre, aproximación como fallback automático sólo cuando hace falta; Hallazgo 20 — corrección real en el perfil de viento por altura, z0 de referencia distinto de z0 destino; Hallazgo 21 — vecino más cercano validado por leave-one-out, con un artefacto real de `generar_clima_gwa()` encontrado en el camino; quantile mapping probado (mecánica) y acceso a ERA5/CDS investigado; Hallazgo 22 — mitigación parcial de ese artefacto vía curva de excedencia por residuos: Liberia ya muestra una mejora clara y real con el vecino más cercano; Hallazgo 23 — validación REAL (Colab, no sintética) de quantile mapping contra NASA POWER: mejora real pero más modesta que la prueba sintética; Hallazgo 24 — corrección de rumbo: app internacional, sin anclar a San José, catálogo global de 5,276 estaciones/20 países probado y auto-pivotable en 6 países reales; Hallazgo 25 — NASA POWER descartado como ajuste espacial (falla al revés en terreno accidentado, confirmado con datos reales); GWA generalizado a cualquier país como reemplazo candidato; Hallazgo 26 — validación real de GWA: mucho mejor que NASA POWER pero mixto, el problema está en el ráster crudo de GWA en San José/Finca Favorita, no en el mecanismo de razón; credencial CDS movida a Colab Secrets tras compartirse un token real en el chat; Hallazgo 27 — Köppen-Geiger encuadrado como filtro de selección de donante, no como cuarto candidato al mecanismo de razón de ajuste de magnitud; Hallazgo 28 — validación real de ERA5/CDS: mejor que NASA POWER pero no le gana a GWA en ningún sitio, ~1 hora de cola por congestión real de CDS; Open-Meteo/ERA5-Land agregado como quinta vía sin fricción de acceso; Hallazgo 29 — Limón, 2.8x más cerca de Finca Favorita que San José, resulta un donante PEOR por exposición local, no por distancia)
 **Propósito:** comparar el alcance planeado contra el avance real, y dejar constancia de los
 hallazgos que no estaban previstos en el plan original. Se actualiza en cada avance
 significativo — no es una foto única.
@@ -1805,6 +1805,69 @@ José/Finca Favorita).
 
 ---
 
+### Hallazgo 29 — Limón, geográficamente 2.8x más cerca de Finca Favorita, resulta un donante PEOR que San José: la exposición local pesa más que la distancia
+
+Pablo decidió ir con GWA (Hallazgo 25/26/28 — le gana a NASA POWER y ERA5 en los 4 sitios) y pidió
+arrancar por el pendiente de selección de donante para Finca Favorita, el caso que falla con las
+tres fuentes de ajuste probadas. Bajó las 8 estaciones de Costa Rica que faltaban en el catálogo
+local (`descargar_estaciones_cr.ipynb`, ya construido en Hallazgo 21-22) y compartió el resultado
+real — Limón es la más relevante, en el mismo Caribe que Finca Favorita.
+
+**Hipótesis antes de medir:** Limón, mucho más cerca (misma costa), debería ser mejor donante que
+San José (178.6km, otro lado de la cordillera). **Resultado real, verificado con cálculo, no el
+esperado:**
+
+| | Distancia a Finca Favorita | Error (vecino + verdad conocida, media real fija) |
+|---|---|---|
+| San José (donante actual) | 178.6 km | **+19.2%** |
+| Limón (candidato nuevo) | 63.8 km (2.8x más cerca) | **+72.8%** |
+
+Con Limón agregado al conjunto de sitios conocidos, `vecino_mas_cercano()` lo elegiría
+automáticamente por pura distancia — y sería un donante PEOR, no mejor. La prueba usa el mismo
+método de "verdad conocida" de Hallazgo 22 (forma real del donante, escalada a la media real YA
+CONOCIDA de Finca Favorita), así que la diferencia es puramente de FORMA, no de magnitud.
+
+**Por qué, verificado con E[v³]/media³ (EPF) y fracción de horas de calma:**
+
+| Sitio | Media real | EPF | % horas < 1.0 m/s |
+|---|---|---|---|
+| Finca Favorita | 1.413 m/s | 1.617 | 25.2% |
+| Limón | 2.152 m/s | 2.515 (+55.6%) | 15.7% |
+| San José (curva GWA, aprox.) | 3.669 m/s | 1.077 (-33.4%) | N/A (curva, no serie horaria) |
+
+Finca Favorita es un sitio bastante calmo/protegido (25.2% de horas casi sin viento) — consistente
+con la hipótesis ya documentada en Hallazgo 26 de terreno costero-boscoso. Limón es un aeropuerto
+abierto directo sobre la costa: más ventoso, más variable, menos horas de calma. San José, pese a
+estar en un régimen climático totalmente distinto y mucho más lejos, tiene una forma más
+"amortiguada" — más parecida, en ese sentido puntual, a la de un sitio protegido como Finca
+Favorita que la de un aeropuerto costero expuesto como Limón.
+
+**Conclusión honesta:** la cercanía geográfica — incluso compartir el mismo tramo de costa y
+probablemente la misma zona Köppen — no garantiza una forma parecida. La EXPOSICIÓN local (abierto
+vs. protegido/con cobertura vegetal) pesa más acá que la distancia. Esto es exactamente el tipo de
+señal que el downscaling topográfico del informe externo de Pablo (TPI, rugosidad vía WorldCover,
+Hallazgo 28) apunta a capturar — confirma que ese problema es real en al menos un caso conocido, no
+que ya esté resuelto con más estaciones cercanas o con Köppen solamente (Hallazgo 27 tampoco lo
+habría arreglado: Limón y Finca Favorita casi con certeza comparten zona Köppen, y aun así Limón
+resultó peor donante).
+
+San José sigue siendo el mejor donante real disponible para Finca Favorita entre los sitios
+conocidos hoy. El EPW real de Limón quedó guardado en `datos_clima/epw_real/` (fuera del catálogo
+`SITIOS_EPW_REAL` todavía — no se integró como sitio "conocido" oficial, dado que no resolvió el
+problema que se estaba probando). Las otras 7 estaciones descargadas por Pablo (Chacarita-
+Puntarenas, Palmar Sur, Parrita, Paso Canoas, Puntarenas, San José-Bolaños, San José-La Sabana)
+están pendientes de análisis — podrían servir para otros puntos, o marginalmente para Finca
+Favorita, pero no se probaron todavía.
+
+**Vale la pena notar:** Finca Favorita produce apenas 7.4 kWh/año real — recurso eólico muy pobre
+en términos absolutos (1.413 m/s de media). Cualquier recomendación real para un cliente ahí ya
+diría "recurso insuficiente" sin importar el error porcentual exacto del modelo — pendiente que
+Pablo decida si seguir afinando la precisión en este sitio específico es la mejor inversión de
+tiempo ahora, frente al pendiente de Hallazgo 26 (por qué el ráster crudo de GWA falla en San José,
+que sí tiene recurso real: 3.669 m/s, 156 kWh/año).
+
+---
+
 ## 6. Pendientes activos / bloqueos
 
 - [x] ~~Conseguir A/k reales del Global Wind Atlas~~ — resuelto, y con datos más ricos de lo
@@ -2077,8 +2140,9 @@ ECO-Wind/
 │                                         corre de punta a punta en Colab o local; las celdas que
 │   │                                     necesitan internet real (NASA POWER, CDS) están marcadas
 │   ├── descargar_estaciones_cr.ipynb  ← descarga automatizada de las 8 estaciones de Costa Rica
-│   │                                     que faltaban en el catálogo local (Hallazgo 21-22, ver
-│   │                                     nota de Hallazgo 24 sobre por qué esto ya no es prioridad)
+│   │                                     que faltaban en el catálogo local (Hallazgo 21-22) +
+│   │                                     análisis real de Limón como donante para Finca Favorita
+│   │                                     (Hallazgo 29: geográficamente más cerca, pero peor forma)
 │   ├── prueba_internacional_estacion_mas_cercana.ipynb  ← auto-pivota a la estación real más
 │   │                                     cercana en cualquiera de los 20 países del catálogo, sin
 │   │                                     anclar nada a San José -- probado en 6 países (Hallazgo 24)
