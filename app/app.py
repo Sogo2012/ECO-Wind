@@ -51,6 +51,8 @@ import folium
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -83,6 +85,9 @@ AZUL = "#003C52"
 VERDE = "#4A7C2F"
 GRIS = "#4A5568"
 FONDO = "#E8F0F3"
+
+# --- Paleta de clima (10 colores para heatmaps y visualizaciones) ---
+PALETA_CLIMA = ["#4b6ba9", "#5a7bc3", "#6b8dd4", "#7d9ee0", "#90aee8", "#a3beef", "#c9d8f0", "#f4e4a0", "#f5c455", "#ea2600"]
 
 NOMBRES_MODELO = {
     "small_tulip": "Small Tulip (1.15m pala)",
@@ -303,6 +308,64 @@ def graficar_curva_duracion(serie_w):
     ax.set_ylabel("Potencia (W, total del proyecto)")
     ax.set_title("Curva de duración -- resolución horaria completa", color=AZUL)
     fig.tight_layout()
+    return fig
+
+
+def crear_curva_duracion_plotly(serie_w):
+    """Curva de duración interactiva con Plotly."""
+    ordenado = np.sort(serie_w.values)[::-1]
+    pct_horas = np.arange(1, len(ordenado) + 1) / len(ordenado) * 100
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=pct_horas, y=ordenado,
+        fill='tozeroy',
+        fillcolor=f'rgba({int(VERDE[1:3], 16)}, {int(VERDE[3:5], 16)}, {int(VERDE[5:7], 16)}, 0.25)',
+        line=dict(color=VERDE, width=2),
+        hovertemplate='<b>%{x:.1f}% de las horas</b><br>Potencia: %{y:,.0f} W<extra></extra>'
+    ))
+
+    fig.update_layout(
+        title="Curva de duración -- resolución horaria completa",
+        xaxis_title="% de las 8,760 horas del año (ordenadas de mayor a menor producción)",
+        yaxis_title="Potencia (W, total del proyecto)",
+        hovermode='x unified',
+        template='plotly_white',
+        height=400,
+        margin=dict(l=60, r=20, t=40, b=60),
+        font=dict(family="sans-serif", size=11),
+        xaxis=dict(gridcolor='#E8E8E8'),
+        yaxis=dict(gridcolor='#E8E8E8'),
+    )
+
+    return fig
+
+
+def crear_produccion_mensual_plotly(kwh_mensual_total):
+    """Producción mensual interactiva con Plotly."""
+    fig = go.Figure()
+
+    fig.add_trace(go.Bar(
+        x=MESES,
+        y=kwh_mensual_total.values,
+        marker=dict(color=VERDE),
+        hovertemplate='<b>%{x}</b><br>Producción: %{y:,.0f} kWh<extra></extra>',
+        showlegend=False
+    ))
+
+    fig.update_layout(
+        title="Producción mensual (todos los clústers)",
+        xaxis_title="Mes",
+        yaxis_title="Energía (kWh)",
+        hovermode='x unified',
+        template='plotly_white',
+        height=400,
+        margin=dict(l=60, r=20, t=40, b=60),
+        font=dict(family="sans-serif", size=11),
+        xaxis=dict(gridcolor='#E8E8E8'),
+        yaxis=dict(gridcolor='#E8E8E8'),
+    )
+
     return fig
 
 
@@ -618,7 +681,7 @@ with tab_config:
                     col_img, col_specs = st.columns([1, 2])
                     with col_img:
                         if _ruta_img and os.path.exists(_ruta_img):
-                            st.image(_ruta_img, use_column_width=True)
+                            st.image(_ruta_img)
                         else:
                             st.caption("Sin imagen todavía.")
                     with col_specs:
@@ -707,11 +770,12 @@ with tab_resultados:
             kwh_total = sum(r["kwh_anual"] for r in resultados)
             n_total = sum(c["N"] for c in st.session_state.clusters)
 
-            c1, c2, c3 = st.columns(3)
+            c1, c2, c3, c4 = st.columns(4)
             c1.metric("Producción anual total", f"{kwh_total:,.0f} kWh")
             c2.metric("Turbinas totales", f"{n_total}")
             c3.metric("Corrección por densidad (elevación)",
                       f"{(1 - resultados[0]['factor_correccion_densidad']) * 100:.1f}% menos")
+            c4.metric("Altura de buje", f"{resultados[0]['altura_buje']:.0f} m")
 
             st.markdown("**Detalle por clúster**")
             tabla = pd.DataFrame([{
@@ -758,11 +822,9 @@ with tab_resultados:
                 )
 
             st.divider()
-            st.markdown("**Producción mensual (todos los clústers)**")
             kwh_mensual_total = pd.concat([r["kwh_mensual"] for r in resultados], axis=1).sum(axis=1)
-            st.bar_chart(kwh_mensual_total.rename("kWh"), color=VERDE)
-            st.markdown("**Curva de duración anual (Requisito 3 -- detalle horario completo)**")
-            st.pyplot(graficar_curva_duracion(serie_total_w))
+            st.plotly_chart(crear_produccion_mensual_plotly(kwh_mensual_total), use_container_width=True)
+            st.plotly_chart(crear_curva_duracion_plotly(serie_total_w), use_container_width=True)
 
             st.caption(
                 "Motor: `flower_turbines_curves.py` (validado Hallazgo 12) + corrección de densidad de aire "
