@@ -300,12 +300,11 @@ def graficar_curva_duracion(serie_w):
     return fig
 
 
-# --- Menú lateral: header de marca + navegador de 4 secciones ---
-# Clona la estructura real de DDP-lite/Skyplus (Hallazgo 19 v4): el sidebar es un
-# NAVEGADOR de secciones (con el resumen de "elegido hasta ahora"), no los controles de
-# entrada en sí -- esos siguen viviendo en el área principal, por sección. A diferencia
-# de DDP-lite, acá las 4 secciones quedan siempre clickeables (no hay bloqueo lineal tipo
-# wizard): elegir clima y elegir equipos son pasos independientes, no secuenciales.
+# --- Menú lateral: header de marca + resumen de proyecto (patrón Skyplus) ---
+# Clona la estructura real de Skyplus: sidebar es SOLO para marca + resumen de "elegido
+# hasta ahora", navegación principal va en TABS en la parte superior. Las 4 secciones
+# (Selección de clima, Contexto climático, Equipos y configuración, Resultados) son
+# tabs, no botones de navegación que compiten por espacio.
 
 with st.sidebar:
     _logos_html = "".join([
@@ -322,26 +321,6 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
 
-    st.markdown('<div class="eco-sidebar-section">Navegación</div>', unsafe_allow_html=True)
-
-    _SECCIONES = [
-        ("clima", "📍 Selección de clima"),
-        ("contexto", "📊 Contexto climático"),
-        ("config", "⚙️ Equipos y configuración"),
-        ("resultados", "📈 Resultados"),
-    ]
-    for _clave_sec, _etiqueta_sec in _SECCIONES:
-        if _clave_sec == st.session_state.seccion_activa:
-            st.markdown(
-                f'<div style="background:{AZUL};color:white;border-radius:4px;'
-                f'padding:8px 10px;margin:3px 0;font-size:0.85rem;font-weight:600;">'
-                f'▶ {_etiqueta_sec}</div>', unsafe_allow_html=True,
-            )
-        elif st.button(_etiqueta_sec, key=f"nav_{_clave_sec}", use_container_width=True):
-            st.session_state.seccion_activa = _clave_sec
-            st.rerun()
-
-    st.divider()
     st.markdown('<div class="eco-sidebar-section">Elegido hasta ahora</div>', unsafe_allow_html=True)
     if st.session_state.get("sitio_activo"):
         st.success(f"📍 {st.session_state.get('sitio_nombre_activo')}")
@@ -362,12 +341,20 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
 
-# --- Área principal: una sección a la vez, según lo elegido en el menú lateral ---
-# (mismo contenido/lógica que antes tenían las 4 pestañas -- sólo cambió el contenedor)
+# --- Área principal: TABS en la parte superior (patrón Skyplus) ---
+# Clona la estructura real de Skyplus: 4 tabs navegables en la parte superior,
+# cada uno con su contenido y controles. El sidebar es limpio (solo marca + resumen).
 
-if st.session_state.seccion_activa == "clima":
+tab_clima, tab_contexto, tab_config, tab_resultados = st.tabs([
+    "📍 Selección de clima",
+    "📊 Contexto climático",
+    "⚙️ Equipos y configuración",
+    "📈 Resultados",
+])
+
+with tab_clima:
     st.caption(
-        "Un solo flujo, igual que DDP-lite/Skyplus (Hallazgo 19): buscá dónde está tu "
+        "Un solo flujo, igual que Skyplus (Hallazgo 19): buscá dónde está tu "
         "proyecto -- por nombre, por coordenada, o clic en el mapa -- y elegí la estación "
         "climática real más cercana. Nada de \"modos\" para decidir de antemano."
     )
@@ -521,14 +508,14 @@ if st.session_state.seccion_activa == "clima":
             st.caption("Buscá tu sitio arriba, o clickeá en el mapa, para ver las estaciones cercanas.")
 
 
-# --- Sección: Contexto climático -- rosa de vientos + heatmap, sin depender de "Calcular" ---
+# --- Tab: Contexto climático -- rosa de vientos + heatmap, sin depender de "Calcular" ---
 
-elif st.session_state.seccion_activa == "contexto":
+with tab_contexto:
     resultado_clima = st.session_state.get("sitio_activo")
     error_clima = None if resultado_clima is None else resultado_clima.get("error")
 
     if resultado_clima is None:
-        st.info("Elegí primero un sitio en \"📍 Selección de clima\" (menú lateral) para ver su contexto climático.")
+        st.info("Elegí primero un sitio en la pestaña \"📍 Selección de clima\" para ver su contexto climático.")
     elif error_clima:
         st.error(error_clima, icon="🚫")
     else:
@@ -568,9 +555,9 @@ elif st.session_state.seccion_activa == "contexto":
             st.pyplot(graficar_heatmap_clima(hm_json))
 
 
-# --- Sección: Equipos y configuración -- turbinas, clústers, parámetros avanzados ---
+# --- Tab: Equipos y configuración -- turbinas, clústers, parámetros avanzados ---
 
-elif st.session_state.seccion_activa == "config":
+with tab_config:
     st.subheader("Clústers del proyecto")
     for i, c in enumerate(st.session_state.clusters):
         with st.container(border=True):
@@ -640,7 +627,7 @@ elif st.session_state.seccion_activa == "config":
     st.divider()
 
     if not st.session_state.get("sitio_activo"):
-        st.warning("Elegí un sitio en \"📍 Selección de clima\" (menú lateral) antes de calcular.", icon="⚠️")
+        st.warning("Elegí un sitio en la pestaña \"📍 Selección de clima\" antes de calcular.", icon="⚠️")
 
     if st.button("Calcular producción del proyecto", type="primary", use_container_width=True):
         st.session_state.calculo_listo = True
@@ -648,9 +635,9 @@ elif st.session_state.seccion_activa == "config":
         st.rerun()
 
 
-# --- Sección: Resultados -- por ahora, producción de energía (Hallazgo 12/17) ---
+# --- Tab: Resultados -- por ahora, producción de energía (Hallazgo 12/17) ---
 
-elif st.session_state.seccion_activa == "resultados":
+with tab_resultados:
     st.caption(
         "Cálculo financiero (CAPEX, tarifa eléctrica, payback) todavía no está implementado -- "
         "por ahora esta sección muestra la producción de energía del proyecto (fase futura)."
@@ -664,8 +651,7 @@ elif st.session_state.seccion_activa == "resultados":
 
         if resultado_clima is None:
             st.error(
-                "Elegí primero una estación (o una aproximación) en \"📍 Selección de clima\" "
-                "(menú lateral).",
+                "Elegí primero una estación (o una aproximación) en la pestaña \"📍 Selección de clima\".",
                 icon="🚫",
             )
         elif error:
@@ -711,7 +697,7 @@ elif st.session_state.seccion_activa == "resultados":
                     f"turbina casi nunca tienen la misma rugosidad -- hasta Hallazgo 20 esta app usaba "
                     f"un solo z0 para los dos, lo que sobreestimaba la velocidad en buje 16-24% (según "
                     f"el método) en el caso de San José, y como P∝v³ eso es ~1.6-1.9x de más en energía. "
-                    f"Ahora se usa z0 del sitio destino (seleccionable en \"⚙️ Equipos y configuración\", menú lateral) "
+                    f"Ahora se usa z0 del sitio destino (seleccionable arriba en esta pestaña) "
                     f"**distinto** de z0 de referencia (0.1, clase \"country\"/aeropuerto -- fórmula "
                     f"logarítmica, ver `engine/simulador_pista_a.py::wind_at_height()`)."
                 )
@@ -749,7 +735,7 @@ elif st.session_state.seccion_activa == "resultados":
                 "(subestima ~3x en Costa Rica, Hallazgo 1)."
             )
     else:
-        st.info("Configurá el proyecto en \"⚙️ Equipos y configuración\" (menú lateral) y presioná "
+        st.info("Configurá el proyecto en la pestaña \"⚙️ Equipos y configuración\" y presioná "
                  "**Calcular producción del proyecto**.")
 
 st.divider()
