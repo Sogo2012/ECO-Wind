@@ -459,7 +459,7 @@ with tab_clima:
         st.subheader("📍 Mapa interactivo")
         mapa = crear_mapa_estaciones(st.session_state.sitio_lat, st.session_state.sitio_lon, st.session_state.sitio_cercanas)
         mapa_html = mapa._repr_html_()
-        st.components.v1.html(mapa_html, height=420)
+        st.markdown(mapa_html, unsafe_allow_html=True)
 
     st.divider()
 
