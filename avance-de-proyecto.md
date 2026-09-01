@@ -1,7 +1,14 @@
 # ECO | Wind — Avance de Proyecto
 
 **Documento de referencia (alcance):** [`plan-tecnico-eco-wind.md`](./plan-tecnico-eco-wind.md)
-**Última actualización:** 31 de agosto, 2026 (Hallazgo 19 v3 — consolidado en UN SOLO flujo de búsqueda de clima, igual que DDP-lite/Skyplus: sin selector de modos, estación real siempre, aproximación como fallback automático sólo cuando hace falta; Hallazgo 20 — corrección real en el perfil de viento por altura, z0 de referencia distinto de z0 destino; Hallazgo 21 — vecino más cercano validado por leave-one-out, con un artefacto real de `generar_clima_gwa()` encontrado en el camino; quantile mapping probado (mecánica) y acceso a ERA5/CDS investigado; Hallazgo 22 — mitigación parcial de ese artefacto vía curva de excedencia por residuos: Liberia ya muestra una mejora clara y real con el vecino más cercano; Hallazgo 23 — validación REAL (Colab, no sintética) de quantile mapping contra NASA POWER: mejora real pero más modesta que la prueba sintética; Hallazgo 24 — corrección de rumbo: app internacional, sin anclar a San José, catálogo global de 5,276 estaciones/20 países probado y auto-pivotable en 6 países reales; Hallazgo 25 — NASA POWER descartado como ajuste espacial (falla al revés en terreno accidentado, confirmado con datos reales); GWA generalizado a cualquier país como reemplazo candidato; Hallazgo 26 — validación real de GWA: mucho mejor que NASA POWER pero mixto, el problema está en el ráster crudo de GWA en San José/Finca Favorita, no en el mecanismo de razón; credencial CDS movida a Colab Secrets tras compartirse un token real en el chat; Hallazgo 27 — Köppen-Geiger encuadrado como filtro de selección de donante, no como cuarto candidato al mecanismo de razón de ajuste de magnitud; Hallazgo 28 — validación real de ERA5/CDS: mejor que NASA POWER pero no le gana a GWA en ningún sitio, ~1 hora de cola por congestión real de CDS; Open-Meteo/ERA5-Land agregado como quinta vía sin fricción de acceso; Hallazgo 29 — Limón, 2.8x más cerca de Finca Favorita que San José, resulta un donante PEOR por exposición local, no por distancia; Hallazgo 30 — calibración real de GWA contra 8 estaciones de EEUU: ni elevación ni categorías simples de terreno explican el error, ~±20-35% de ruido sin patrón corregible claro con lo que hay hoy)
+**Última actualización:** 1 de setiembre, 2026 (Hallazgo 31 — la sensibilización validada
+(Hallazgo 21-30) por fin se conecta a `app.py`, reemplazando el mecanismo viejo; Hallazgo 32 —
+fichas técnicas de las 11 turbinas + imágenes de producto y logos integrados a la app, con dos
+gaps reales flageados (`al13_4m` sin ficha, 4 modelos sin curva de potencia); Hallazgo 33 — bug
+real de Dockerfile en producción corregido (`COPY . .`, mismo patrón de DDP-lite/Skyplus), sin
+verificar con un build real en este sandbox; Hallazgo 34 — menú lateral que clona la estructura
+real de DDP-lite/Skyplus (navegador de secciones, no los 4 tabs), verificado de punta a punta con
+Chromium/Playwright real. Hallazgo 19 v3 — consolidado en UN SOLO flujo de búsqueda de clima, igual que DDP-lite/Skyplus: sin selector de modos, estación real siempre, aproximación como fallback automático sólo cuando hace falta; Hallazgo 20 — corrección real en el perfil de viento por altura, z0 de referencia distinto de z0 destino; Hallazgo 21 — vecino más cercano validado por leave-one-out, con un artefacto real de `generar_clima_gwa()` encontrado en el camino; quantile mapping probado (mecánica) y acceso a ERA5/CDS investigado; Hallazgo 22 — mitigación parcial de ese artefacto vía curva de excedencia por residuos: Liberia ya muestra una mejora clara y real con el vecino más cercano; Hallazgo 23 — validación REAL (Colab, no sintética) de quantile mapping contra NASA POWER: mejora real pero más modesta que la prueba sintética; Hallazgo 24 — corrección de rumbo: app internacional, sin anclar a San José, catálogo global de 5,276 estaciones/20 países probado y auto-pivotable en 6 países reales; Hallazgo 25 — NASA POWER descartado como ajuste espacial (falla al revés en terreno accidentado, confirmado con datos reales); GWA generalizado a cualquier país como reemplazo candidato; Hallazgo 26 — validación real de GWA: mucho mejor que NASA POWER pero mixto, el problema está en el ráster crudo de GWA en San José/Finca Favorita, no en el mecanismo de razón; credencial CDS movida a Colab Secrets tras compartirse un token real en el chat; Hallazgo 27 — Köppen-Geiger encuadrado como filtro de selección de donante, no como cuarto candidato al mecanismo de razón de ajuste de magnitud; Hallazgo 28 — validación real de ERA5/CDS: mejor que NASA POWER pero no le gana a GWA en ningún sitio, ~1 hora de cola por congestión real de CDS; Open-Meteo/ERA5-Land agregado como quinta vía sin fricción de acceso; Hallazgo 29 — Limón, 2.8x más cerca de Finca Favorita que San José, resulta un donante PEOR por exposición local, no por distancia; Hallazgo 30 — calibración real de GWA contra 8 estaciones de EEUU: ni elevación ni categorías simples de terreno explican el error, ~±20-35% de ruido sin patrón corregible claro con lo que hay hoy)
 **Propósito:** comparar el alcance planeado contra el avance real, y dejar constancia de los
 hallazgos que no estaban previstos en el plan original. Se actualiza en cada avance
 significativo — no es una foto única.
@@ -15,7 +22,7 @@ significativo — no es una foto única.
 | **Fase 1 — Pista A** (motor empírico) | 🟢 Sólida — mecánica y fuentes de datos climáticos (EPW + GWA) validadas con datos reales; z0/afinación fina quedó pendiente para más adelante (decisión del Director del Proyecto) |
 | **Fase 1 — Pista B** (motor físico DMST + CFD) | 🟡 Aerodinámica congelada (vía agotada, sobre-predicción sigue abierta, Hallazgo 8); curvas de potencia re-verificadas contra el calculador oficial, sin dudas reales (Hallazgo 12) — módulo estructural ASCE 7 con demanda de anclaje para 5 modelos y carga de clúster conservadora (Hallazgos 9-10, 13); Cilindro Actuador implementado y validado, pero no reproduce el Efecto Bouquet real todavía (Hallazgo 15) |
 | **Fase 2** (productización: Streamlit + Cloud Run) | 🟡 Multi-clúster, corrección de densidad, cálculo horario probado (Jensen), perfil de viento por altura corregido (z0 de referencia ≠ z0 destino, Hallazgo 20), gráficos (rosa de vientos, heatmap, curva de duración), 4 sitios con datos climáticos reales propios (San José + Nicoya/Liberia/Finca Favorita) más mapa de búsqueda de estaciones (5,276 en 20 países, por nombre/coordenada/mapa, sin acotar
-a Costa Rica) y subida de EPW propio, y arquitectura para cualquier otra coordenada (ráster+forma prestada, error ya cuantificado -44%/+18%, pendiente el archivo real). Falta: PDF, leads, despliegue a Cloud Run (Hallazgos 16-20) |
+a Costa Rica) y subida de EPW propio; la sensibilización del punto exacto AHORA usa el mecanismo validado GWA (Hallazgo 31, sin ráster real para el número final), fichas técnicas + imágenes de las 11 turbinas integradas (Hallazgo 32), menú lateral tipo DDP-lite/Skyplus en vez de tabs (Hallazgo 34), y el bug de Dockerfile que rompía la búsqueda en producción está corregido (Hallazgo 33, sin verificar con build real). Falta: PDF, leads, despliegue a Cloud Run, confirmar Hallazgos 31/33 en un entorno con red real (Hallazgos 16-20, 31-34) |
 
 ---
 
@@ -1934,6 +1941,114 @@ real de GWA a 10m y se cierra esta fase de investigación con eso documentado?
 
 ---
 
+### Hallazgo 31 — La sensibilización validada (Hallazgo 21-30) se conecta por fin a `app.py`
+
+Con GWA confirmado como la mejor fuente de ajuste (Hallazgo 25/26/28), `cargar_aproximacion()` en
+`app.py` deja de usar el mecanismo viejo (`generar_clima_sitio_nuevo()` — siempre forma de San José
++ valor crudo del ráster) y pasa a llamar `generar_clima_sensibilizado()`, nuevo en
+`engine/formas_regionales.py`: vecino más cercano real para la FORMA (estacionalidad + ciclo
+diurno, no siempre San José) + razón GWA(punto exacto)/GWA(donante) aplicada a la media REAL del
+donante para la MAGNITUD. Requirió dos helpers nuevos, `_media_real_donante()` y
+`_rosa_freq_donante()`, porque San José es el único de los 4 sitios conocidos que no tiene un EPW
+real (usa el export de GWA) — sin ellos, tratar los 4 donantes igual rompía si el donante elegido
+era San José.
+
+Sin ráster real en este sandbox (Hallazgo 2), se verificó el ensamblaje con
+`factor_ajuste_gwa()` mockeado (`unittest.mock`): con factor=1.0 la media generada coincide exacto
+con la media real del donante (Nicoya), y con factor=1.5 escala proporcionalmente — confirma que el
+ensamblaje es correcto, no que el ajuste en sí lo sea (eso ya está validado con datos reales en
+Hallazgo 25/26/28). La dirección del viento (rosa) sigue siendo la del donante sin ajuste — no
+existe mecanismo de razón para dirección, sólo para magnitud; documentado explícitamente en el
+docstring de `generar_clima_sensibilizado()` y en el ALCANCE HONESTO de `app.py` como límite
+aceptado, no un bug. **Pendiente:** Pablo debe correr esto contra el ráster real de Costa Rica en su
+propio entorno (con internet real) para confirmar el número final en un punto sin estación cercana.
+
+---
+
+### Hallazgo 32 — Fichas técnicas de las 11 turbinas + imágenes/logos integrados a la app
+
+Pablo compartió un DataFrame de pandas con specs de 11 modelos (Small/Medium/3-M/Large Tulip,
+AL13 2/4/6/8m, Survival Unit, 3 variantes de EcoRoof Energy Hub) y la carpeta `Recursos Visuales/`
+con imágenes de producto y los logos de ECO Consultor y Flower Turbines. Nuevo
+`engine/turbine_specs.py`: `SPECS_TURBINAS` (11 entradas asociadas a las claves de modelo que ya
+usa `flower_turbines_curves.py`), `RUTA_IMAGEN` (las 3 variantes de AL13 comparten una imagen
+genérica; Survival Unit y los 3 EcoRoof no tienen imagen todavía), `LOGO_ECO`/`LOGO_FLOWER_TURBINES`.
+
+**Dos gaps reales encontrados, flageados en vez de inventados:** `al13_4m` no tiene fila de specs en
+el DataFrame de Pablo (los otros 3 AL13 sí); y Survival Unit + las 3 variantes EcoRoof tienen ficha
+técnica pero ningún coeficiente en `CURVE_COEFFICIENTS` — no son simulables en la app todavía, sólo
+mostrables. `app.py` ahora muestra los logos en el header y, por clúster configurado, un expander
+"Ficha técnica" con imagen + specs (potencia nominal, cut-in/supervivencia, generador, dimensiones,
+vida de diseño, cimentación) cuando existen. Se estuvo a punto de agregar "Distribuidor autorizado
+de Flower Turbines en Costa Rica" al caption del header — se sacó antes de commitear por no tener
+base real para esa afirmación de negocio.
+
+---
+
+### Hallazgo 33 — Bug real de Dockerfile en producción: búsqueda fallaba con `FileNotFoundError` fuera de los 4 sitios precacheados
+
+Pablo reportó un `FileNotFoundError` real en su despliegue Docker al buscar "Heredia, Costa Rica":
+`/app/datos_clima/epw_catalog_global.json` no existía dentro del contenedor. Comparando el
+`Dockerfile` contra el de DDP-lite/Skyplus (mismo problema ya resuelto ahí, "no reinventar"),
+la causa raíz fue que `Dockerfile` copiaba con una lista manual de carpetas (`engine/`, `app/`,
+sólo `datos_clima/gwa_juan_santamaria/`) que quedó desactualizada apenas se agregaron el catálogo
+global y los EPW reales (Hallazgo 18/19) — nunca copiaba `epw_catalog_global.json` ni
+`datos_clima/epw_real/`, así que cualquier sitio que no fuera uno de los 4 ya precacheados fallaba
+en producción, aunque funcionara siempre en local (donde esos archivos ya están en disco fuera de
+Docker). Corregido al mismo patrón de DDP-lite/Skyplus: `COPY . .` completo + un único
+`.dockerignore` como lista de exclusiones (en vez de dos listas — incluir y excluir — que se pueden
+desincronizar). De paso, `.dockerignore` se corrigió: la exclusión vieja de `datos_clima/*.epw` ya
+no era correcta (la app hoy sí necesita esos archivos en runtime).
+
+**No se pudo verificar con un build real en este sandbox** — `docker build` falla al bajar la imagen
+base (`python:3.11-slim`), Docker Hub bloqueado por la política de red del entorno (403), aunque
+`dockerd` sí arrancó. **Pendiente real: Pablo debe reconstruir la imagen y volver a probar Heredia
+(y otros puntos) para confirmar que el fix funciona en su entorno.**
+
+---
+
+### Hallazgo 34 — Menú lateral: clona la estructura real de DDP-lite/Skyplus (no los 4 tabs)
+
+Pedido explícito de Pablo: "clona la estructura de UX que tiene la app DDP lite... usa un menu
+lateral para colocar los menos de seleccion de clima y equipos". Investigando el sidebar real de
+DDP-lite (`app.py`, líneas 827-985) antes de tocar nada: **no son los controles de entrada en sí**
+— es un NAVEGADOR de secciones (header de marca con logo, lista numerada de pasos con 3 estados
+visuales — actual resaltado, completado clickeable, futuro atenuado —, botón de reconfigurar,
+resumen de "elegido hasta ahora", pie técnico). Los controles de entrada reales siguen viviendo en
+el área principal, por paso. Se clonó ese patrón, no la lectura literal de la frase.
+
+Implementado en `app.py`: las 4 pestañas (`st.tabs`) pasan a ser un menú lateral con navegador de
+4 secciones (Selección de clima / Contexto climático / Equipos y configuración / Resultados),
+header de marca con los logos ECO + Flower Turbines (antes en 3 columnas del área principal, ahora
+en el sidebar), y un resumen "Elegido hasta ahora" (sitio activo, cantidad de clústers/turbinas, si
+ya hay un cálculo listo) — todas las secciones quedan siempre clickeables, sin el bloqueo lineal
+tipo wizard de DDP-lite, porque acá elegir clima y elegir equipos son pasos independientes, no
+secuenciales.
+
+**Cambio de comportamiento real que forzó, no cosmético:** con `st.tabs()`, Streamlit ejecuta el
+cuerpo de las 4 pestañas en cada corrida del script (sólo oculta visualmente las no activas) — el
+botón "Calcular" viejo (`calcular = st.button(...)`) dependía de eso: su valor, aunque definido en
+la pestaña de configuración, se leía más abajo en la pestaña de resultados dentro de la MISMA
+corrida. Con secciones `if/elif` dirigidas por el menú, sólo la sección activa se ejecuta — ese
+patrón se rompe. Corregido: el botón ahora guarda el resultado en `st.session_state.calculo_listo`
+y cambia `seccion_activa` a "resultados" con `st.rerun()`; los widgets de `z0` y `metodo_bouquet`
+(antes sin `key=`, porque no lo necesitaban con tabs) ahora lo tienen, para sobrevivir el cambio de
+sección. Efecto colateral bueno: de paso corrige un bug menor preexistente (con tabs, los resultados
+desaparecían si navegabas a otra pestaña y volvías, porque `calcular` era un booleano transitorio de
+esa corrida) — ahora el resultado persiste correctamente hasta que se recalcula.
+
+**Verificado end-to-end con Chromium real (Playwright), no sólo HTTP 200:** las 4 secciones cargan
+sin excepción visible; la navegación por el menú funciona; el flujo completo con un sitio 100% local
+(San José, que no necesita red) — elegir estación → Contexto climático (rosa de vientos + heatmap
+reales) → Equipos y configuración → Calcular → Resultados (métricas, tabla por clúster, producción
+mensual, curva de duración) — se probó de punta a punta con capturas de pantalla en cada paso. La
+búsqueda de estaciones que sí necesitan descarga real (ej. Finca Favorita) sigue bloqueada en este
+sandbox por la misma limitación de red ya documentada (Hallazgo 2) — confirmado que es la limitación
+de siempre y no una regresión de este cambio (mismo mensaje de error `HTTPSConnectionPool` de
+siempre, manejado con un `st.error` legible, sin crashear).
+
+---
+
 ## 6. Pendientes activos / bloqueos
 
 - [x] ~~Conseguir A/k reales del Global Wind Atlas~~ — resuelto, y con datos más ricos de lo
@@ -2162,6 +2277,20 @@ real de GWA a 10m y se cierra esta fase de investigación con eso documentado?
       Copernicus CDS (paso nuevo, ni NASA POWER ni GWA lo pedían — ver instrucciones en la Parte 4
       del notebook) antes de poder correr de verdad. Si ERA5 también falla, queda sin probar
       Köppen/polígonos climáticos (Alternativa 2 original, nunca investigada).
+- [ ] **Nuevo, de Hallazgo 31:** correr `generar_clima_sensibilizado()` contra el ráster real de
+      Costa Rica en un entorno con internet real — en este sandbox sólo se verificó el ensamblaje
+      con `factor_ajuste_gwa()` mockeado, no el número final para un punto sin estación cercana.
+- [ ] **Nuevo, de Hallazgo 32:** conseguir specs de `al13_4m` (falta en el DataFrame de Pablo) y
+      decidir si vale la pena construir curvas de potencia para Survival Unit y las 3 variantes de
+      EcoRoof Energy Hub (hoy tienen ficha técnica mostrable pero no son simulables).
+- [ ] **Nuevo, de Hallazgo 33:** Pablo debe reconstruir la imagen Docker (`docker build` +
+      `docker run`) en un entorno con salida a internet normal y confirmar que Heredia (y otros
+      puntos fuera de los 4 sitios precacheados) ya buscan bien — no se pudo verificar el build en
+      este sandbox (Docker Hub bloqueado).
+- [ ] **Nuevo, de Hallazgo 34:** el menú lateral se verificó de punta a punta con Chromium
+      automatizado (Playwright) en este sandbox — falta que Pablo lo vea y lo use él mismo para
+      confirmar que el criterio de diseño ("mejor orden visual") quedó resuelto a su gusto, y no
+      sólo funcionalmente correcto.
 
 ## 7. Cómo navegar el repositorio en este punto
 
@@ -2169,14 +2298,21 @@ real de GWA a 10m y se cierra esta fase de investigación con eso documentado?
 ECO-Wind/
 ├── plan-tecnico-eco-wind.md          ← alcance (este documento lo compara contra avance real)
 ├── avance-de-proyecto.md             ← este documento
-├── Dockerfile, .dockerignore          ← Docker local (Hallazgo 16) -- build sin verificar en
-│                                         este entorno, ver adenda de Hallazgo 16
-├── app/                               ← Fase 2, MVP de Streamlit (Hallazgos 16-20)
-│   ├── app.py                         ← interfaz, multi-clúster + gráficos + mapa, corre local con
-│   │                                     `streamlit run app/app.py`
+├── Dockerfile, .dockerignore          ← Docker local (Hallazgo 16); `COPY . .` + un solo
+│                                         `.dockerignore` (Hallazgo 33) en vez de lista manual --
+│                                         build sin verificar con red real en este entorno
+├── Recursos Visuales/                 ← imágenes de producto + logos ECO/Flower Turbines
+│                                         (Hallazgo 32)
+├── app/                               ← Fase 2, MVP de Streamlit (Hallazgos 16-20, 31-34)
+│   ├── app.py                         ← interfaz: menú lateral (navegador de 4 secciones, clona
+│   │                                     estructura DDP-lite/Skyplus, Hallazgo 34) + multi-clúster
+│   │                                     + fichas técnicas/imágenes (Hallazgo 32) + gráficos + mapa,
+│   │                                     corre local con `streamlit run app/app.py`
 │   └── requirements.txt               ← incluye folium/streamlit-folium desde Hallazgo 19
 ├── engine/
 │   ├── flower_turbines_curves.py     ← motor de curvas de potencia, validado (Hallazgo 12)
+│   ├── turbine_specs.py              ← fichas técnicas (11 modelos) + rutas de imagen/logos
+│   │                                     (Hallazgo 32); al13_4m sin ficha, gap real de Pablo
 │   ├── simulador_pista_a.py          ← simular()/wind_at_height()/GWA/wind rose/Jensen/ley de
 │   │                                     potencia EnergyPlus (Hallazgos 16-17, 20)
 │   ├── atmosfera_estandar.py         ← densidad ISA por elevación (Hallazgo 17)
@@ -2190,9 +2326,11 @@ ECO-Wind/
 │   │                                     Favorita, Hallazgo 18) + búsqueda/geocodificación/
 │   │                                     descarga de estaciones, 20 países, homologado con
 │   │                                     DDP-lite/Skyplus (Hallazgo 19)
-│   ├── formas_regionales.py          ← investigación, NO conectado a app.py: vecino más cercano +
+│   ├── formas_regionales.py          ← CONECTADO a app.py desde Hallazgo 31: vecino más cercano +
 │   │                                     leave-one-out entre los 4 sitios reales (Hallazgo 21) +
-│   │                                     curva de excedencia por residuos, usar_residuo=True (Hallazgo 22)
+│   │                                     curva de excedencia por residuos, usar_residuo=True
+│   │                                     (Hallazgo 22) + generar_clima_sensibilizado(), el punto de
+│   │                                     entrada real que usa app.py (Hallazgo 31)
 │   ├── quantile_mapping.py           ← investigación, NO conectado a app.py: quantile mapping
 │   │                                     genérico + prueba de mecánica contra EPW real (Hallazgo 21)
 │   ├── dmst_model.py, rotor_combinado.py, polar_hibrido.py, naca0018_polar.py  ← Pista B aerodinámica
