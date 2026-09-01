@@ -63,6 +63,7 @@ from engine.simulador_pista_a import (
 from engine.flower_turbines_curves import CURVE_COEFFICIENTS
 from engine.gwa_raster import RUTA_RASTER_CR_DEFAULT
 from engine.formas_regionales import generar_clima_sensibilizado
+from engine.turbine_specs import SPECS_TURBINAS, RUTA_IMAGEN, LOGO_ECO, LOGO_FLOWER_TURBINES
 from engine.epw_real import (
     SITIOS_EPW_REAL, cargar_epw_real, heatmap_json_desde_epw, rosa_frecuencia_desde_epw,
     obtener_estaciones_cercanas, geocode_name, descargar_y_extraer_epw, sitio_precacheado_cercano,
@@ -107,7 +108,15 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🌬️ ECO | Wind — Simulador de microgeneración")
+_col_logo_eco, _col_titulo, _col_logo_ft = st.columns([1, 4, 1])
+with _col_logo_eco:
+    if os.path.exists(LOGO_ECO):
+        st.image(LOGO_ECO, width=120)
+with _col_titulo:
+    st.title("🌬️ ECO | Wind — Simulador de microgeneración")
+with _col_logo_ft:
+    if os.path.exists(LOGO_FLOWER_TURBINES):
+        st.image(LOGO_FLOWER_TURBINES, width=120)
 st.caption("Ver avance-de-proyecto.md (Hallazgos 1-3, 16-17) para el detalle técnico completo.")
 
 if "clusters" not in st.session_state:
@@ -505,6 +514,34 @@ with tab_config:
             if cc4.button("✕", key=f"del_{i}", help="Quitar este clúster") and len(st.session_state.clusters) > 1:
                 st.session_state.clusters.pop(i)
                 st.rerun()
+
+            _specs = SPECS_TURBINAS.get(c["modelo"])
+            _ruta_img = RUTA_IMAGEN.get(c["modelo"])
+            with st.expander(f"Ficha técnica -- {NOMBRES_MODELO.get(c['modelo'], c['modelo'])}"):
+                if not _specs:
+                    st.caption("Sin ficha técnica cargada todavía para este modelo.")
+                else:
+                    col_img, col_specs = st.columns([1, 2])
+                    with col_img:
+                        if _ruta_img and os.path.exists(_ruta_img):
+                            st.image(_ruta_img, use_container_width=True)
+                        else:
+                            st.caption("Sin imagen todavía.")
+                    with col_specs:
+                        st.caption(f"N° de parte: {_specs['numero_parte']} -- {_specs['clase_iec']}")
+                        st.markdown(
+                            f"- **Potencia nominal:** {_specs['potencia_nominal_w']} W "
+                            f"a {_specs['viento_potencia_nominal_ms']} m/s\n"
+                            f"- **Cut-in / supervivencia:** {_specs['velocidad_cutin_ms']} m/s / "
+                            f"{_specs['velocidad_supervivencia_ms']} m/s\n"
+                            f"- **Generador:** {_specs['tipo_generador']} ({_specs['polos_generador']} polos)\n"
+                            f"- **Salida:** {_specs['voltaje_salida']}\n"
+                            f"- **Dimensiones:** {_specs['altura_total_m']} m altura total, "
+                            f"{_specs['diametro_rotor_m']} m diámetro de rotor, "
+                            f"{_specs['peso_total_kg']} kg\n"
+                            f"- **Vida de diseño:** {_specs['vida_diseno_anos']} años\n"
+                            f"- **Cimentación requerida:** {_specs['cimentacion_requerida']}"
+                        )
 
     if st.button("+ Agregar clúster"):
         st.session_state.clusters.append({"modelo": "medium_tulip", "N": 1, "altura_buje": 3.0})
