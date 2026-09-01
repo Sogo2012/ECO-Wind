@@ -1,7 +1,7 @@
 # ECO | Wind — Avance de Proyecto
 
 **Documento de referencia (alcance):** [`plan-tecnico-eco-wind.md`](./plan-tecnico-eco-wind.md)
-**Última actualización:** 31 de agosto, 2026 (Hallazgo 19 v3 — consolidado en UN SOLO flujo de búsqueda de clima, igual que DDP-lite/Skyplus: sin selector de modos, estación real siempre, aproximación como fallback automático sólo cuando hace falta; Hallazgo 20 — corrección real en el perfil de viento por altura, z0 de referencia distinto de z0 destino; Hallazgo 21 — vecino más cercano validado por leave-one-out, con un artefacto real de `generar_clima_gwa()` encontrado en el camino; quantile mapping probado (mecánica) y acceso a ERA5/CDS investigado; Hallazgo 22 — mitigación parcial de ese artefacto vía curva de excedencia por residuos: Liberia ya muestra una mejora clara y real con el vecino más cercano; Hallazgo 23 — validación REAL (Colab, no sintética) de quantile mapping contra NASA POWER: mejora real pero más modesta que la prueba sintética; Hallazgo 24 — corrección de rumbo: app internacional, sin anclar a San José, catálogo global de 5,276 estaciones/20 países probado y auto-pivotable en 6 países reales; Hallazgo 25 — NASA POWER descartado como ajuste espacial (falla al revés en terreno accidentado, confirmado con datos reales); GWA generalizado a cualquier país como reemplazo candidato; Hallazgo 26 — validación real de GWA: mucho mejor que NASA POWER pero mixto, el problema está en el ráster crudo de GWA en San José/Finca Favorita, no en el mecanismo de razón; credencial CDS movida a Colab Secrets tras compartirse un token real en el chat; Hallazgo 27 — Köppen-Geiger encuadrado como filtro de selección de donante, no como cuarto candidato al mecanismo de razón de ajuste de magnitud; Hallazgo 28 — validación real de ERA5/CDS: mejor que NASA POWER pero no le gana a GWA en ningún sitio, ~1 hora de cola por congestión real de CDS; Open-Meteo/ERA5-Land agregado como quinta vía sin fricción de acceso; Hallazgo 29 — Limón, 2.8x más cerca de Finca Favorita que San José, resulta un donante PEOR por exposición local, no por distancia)
+**Última actualización:** 31 de agosto, 2026 (Hallazgo 19 v3 — consolidado en UN SOLO flujo de búsqueda de clima, igual que DDP-lite/Skyplus: sin selector de modos, estación real siempre, aproximación como fallback automático sólo cuando hace falta; Hallazgo 20 — corrección real en el perfil de viento por altura, z0 de referencia distinto de z0 destino; Hallazgo 21 — vecino más cercano validado por leave-one-out, con un artefacto real de `generar_clima_gwa()` encontrado en el camino; quantile mapping probado (mecánica) y acceso a ERA5/CDS investigado; Hallazgo 22 — mitigación parcial de ese artefacto vía curva de excedencia por residuos: Liberia ya muestra una mejora clara y real con el vecino más cercano; Hallazgo 23 — validación REAL (Colab, no sintética) de quantile mapping contra NASA POWER: mejora real pero más modesta que la prueba sintética; Hallazgo 24 — corrección de rumbo: app internacional, sin anclar a San José, catálogo global de 5,276 estaciones/20 países probado y auto-pivotable en 6 países reales; Hallazgo 25 — NASA POWER descartado como ajuste espacial (falla al revés en terreno accidentado, confirmado con datos reales); GWA generalizado a cualquier país como reemplazo candidato; Hallazgo 26 — validación real de GWA: mucho mejor que NASA POWER pero mixto, el problema está en el ráster crudo de GWA en San José/Finca Favorita, no en el mecanismo de razón; credencial CDS movida a Colab Secrets tras compartirse un token real en el chat; Hallazgo 27 — Köppen-Geiger encuadrado como filtro de selección de donante, no como cuarto candidato al mecanismo de razón de ajuste de magnitud; Hallazgo 28 — validación real de ERA5/CDS: mejor que NASA POWER pero no le gana a GWA en ningún sitio, ~1 hora de cola por congestión real de CDS; Open-Meteo/ERA5-Land agregado como quinta vía sin fricción de acceso; Hallazgo 29 — Limón, 2.8x más cerca de Finca Favorita que San José, resulta un donante PEOR por exposición local, no por distancia; Hallazgo 30 — calibración real de GWA contra 8 estaciones de EEUU: ni elevación ni categorías simples de terreno explican el error, ~±20-35% de ruido sin patrón corregible claro con lo que hay hoy)
 **Propósito:** comparar el alcance planeado contra el avance real, y dejar constancia de los
 hallazgos que no estaban previstos en el plan original. Se actualiza en cada avance
 significativo — no es una foto única.
@@ -1865,6 +1865,72 @@ diría "recurso insuficiente" sin importar el error porcentual exacto del modelo
 Pablo decida si seguir afinando la precisión en este sitio específico es la mejor inversión de
 tiempo ahora, frente al pendiente de Hallazgo 26 (por qué el ráster crudo de GWA falla en San José,
 que sí tiene recurso real: 3.669 m/s, 156 kWh/año).
+
+---
+
+### Hallazgo 30 — Calibración de GWA contra 8 estaciones reales de EEUU: ni la elevación ni una categoría simple de terreno explican el error; dos bugs reales de memoria encontrados en el camino
+
+Pablo propuso un pivote (en vez de seguir explicando San José/Finca Favorita como casos aislados,
+calibrar el patrón de error de GWA contra una muestra más grande con ground-truth más confiable —
+la red ASOS de EEUU) — ver `notebooks/calibracion_gwa_usa.ipynb`. Se probaron 8 aeropuertos elegidos
+por diversidad de terreno (llanura abierta, costa abierta, desierto, valle de montaña, llanura alta
+junto a las Rocosas, valle forestal, costa compleja, urbano).
+
+**Dos bugs reales encontrados y corregidos antes de tener el número final** (no en la lógica de
+negocio, en la infraestructura):
+
+1. `descargar_raster_pais()` siempre re-descargaba el ráster aunque ya existiera en disco — con
+   Costa Rica (chico) no importaba; agregado `forzar=False` (default) que salta la descarga si el
+   archivo ya está — necesario para que el notebook sobreviva un reinicio de runtime sin re-bajar
+   cientos de MB.
+2. **Más serio:** `muestrear_velocidad_media()` cargaba la banda COMPLETA del ráster a memoria
+   (`src.read(1)`) para leer un solo pixel. Con Costa Rica nunca se notó. Con el ráster de EEUU
+   (843.7 MB en disco a 10m, bastante más ya descomprimido en memoria) agotaba la RAM del runtime
+   de Colab — el **kernel crasheaba y se reiniciaba solo** a mitad del diagnóstico (confirmado con
+   el log de crash real del kernel, no solo sospechado), dejando celdas corriendo contra una sesión
+   nueva y vacía — producía un `NameError` engañoso que parecía un problema de orden de ejecución
+   pero era memoria. Arreglado con una ventana de rasterio (lee 1 pixel, no la banda entera) — este
+   bug no era específico de EEUU, cualquier país grande en el catálogo lo habría disparado.
+
+**Resultado real, las 8 estaciones:**
+
+| Estación | Media real | GWA 10m | Diferencia | Elevación |
+|---|---|---|---|---|
+| Chicago O'Hare (IL) | 4.300 | 3.924 | **-8.7%** | 201.8 m |
+| Dodge City (KS) | 5.747 | 4.947 | -13.9% | 789.7 m |
+| Phoenix Sky Harbor (AZ) | 2.725 | 2.321 | -14.8% | 337.4 m |
+| Reno Tahoe (NV) | 2.676 | 2.231 | -16.6% | 1344.2 m |
+| Corpus Christi (TX) | 5.194 | 4.124 | -20.6% | 15.3 m |
+| Denver Intl (CO) | 4.558 | 3.264 | -28.4% | 1650.2 m |
+| Monterey (CA) | 2.566 | 1.691 | **-34.1%** | 80.0 m |
+| Eugene (OR) | 2.708 | 3.683 | **+36.0%** | 107.6 m |
+
+**Correlación real calculada (no a ojo):** elevación vs. |error| → r=-0.094 — prácticamente cero.
+Denver (1650m) y Reno (1344m) son las dos estaciones más altas, con errores muy distintos entre sí
+(-28.4% vs -16.6%); Corpus Christi (15m) y Monterey (80m) están entre las más bajas y aun así entre
+las peores. La hipótesis "elevación = terreno complejo = error grande", con la que se eligieron las
+estaciones, no se sostiene.
+
+Hay una señal cualitativa, no una relación limpia: los 3 peores (Eugene, Monterey, Denver) comparten
+terreno regional complejo o cobertura forestal densa cerca; los 3 mejores (Phoenix, Dodge City,
+Chicago) están en regiones abiertas de relieve bajo. Pero con excepciones reales — Corpus Christi
+(costa abierta, "debería" ser fácil) sale peor de lo esperado; Reno (valle de montaña, análogo
+directo a San José) sale mejor de lo esperado. Y la dirección del error es inconsistente entre
+países para el mismo tipo de cobertura: Eugene (forestal) SOBRE-estima (+36.0%), Finca Favorita en
+Costa Rica (también forestal, Hallazgo 26) SUB-estima fuerte (-87.2%) — cobertura boscosa por sí
+sola no predice ni la dirección del error.
+
+**Conclusión honesta, con 12 sitios reales combinados (8 EEUU + 4 CR):** no hay una variable simple
+(elevación, "es costero", "tiene bosque") que explique el patrón de error de GWA de forma limpia.
+Clasificar sitios a ojo no alcanza. Hace falta una métrica de terreno CALCULADA (TPI real desde un
+DEM, cobertura de suelo real desde ESA WorldCover — lo que ya proponía el informe externo de Pablo,
+Hallazgo 28) para saber si existe un patrón corregible, o si el error de GWA es, en la práctica,
+ruido del orden de ±20-35% que conviene aceptar y comunicar como incertidumbre en vez de intentar
+modelar con lo que hay hoy.
+
+**Pendiente, decisión de Pablo:** ¿vale la pena invertir en calcular TPI/land-cover real (trabajo
+nuevo, no arrancado) para buscar el patrón en serio, o se acepta el ±20-35% como la incertidumbre
+real de GWA a 10m y se cierra esta fase de investigación con eso documentado?
 
 ---
 
