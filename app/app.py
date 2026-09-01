@@ -396,7 +396,7 @@ with tab_clima:
         )
     with col2:
         st.write("")  # Espaciador
-        if st.button("🔍 Buscar", use_container_width=True):
+        if st.button("🔍 Buscar"):
             if _coords_input:
                 try:
                     partes = [p.strip() for p in _coords_input.split(",")]
@@ -425,7 +425,7 @@ with tab_clima:
             with col1:
                 st.write(f"**{_row['name']}** — {_row.get('state', '')} ({_row['distancia_km']:.0f} km)")
             with col2:
-                if st.button("Usar", key=f"btn_est_{_i}", use_container_width=True):
+                if st.button("Usar", key=f"btn_est_{_i}"):
                     _res_est = cargar_estacion_elegida(_row)
                     if _res_est.get("error"):
                         st.error(_res_est["error"])
@@ -458,7 +458,7 @@ with tab_clima:
                     key="sitio_elev_aprox"
                 )
             with col2:
-                if st.button("Usar aprox.", use_container_width=True):
+                if st.button("Usar aprox."):
                     _res_aprox = cargar_aproximacion(
                         st.session_state.sitio_lat, st.session_state.sitio_lon, _elev_aprox,
                         usar_gower=st.session_state.usar_gower)
@@ -570,7 +570,7 @@ with tab_config:
                     col_img, col_specs = st.columns([1, 2])
                     with col_img:
                         if _ruta_img and os.path.exists(_ruta_img):
-                            st.image(_ruta_img, use_container_width=True)
+                            st.image(_ruta_img, use_column_width=True)
                         else:
                             st.caption("Sin imagen todavía.")
                     with col_specs:
@@ -616,7 +616,7 @@ with tab_config:
     if not st.session_state.get("sitio_activo"):
         st.warning("Elegí un sitio en la pestaña \"📍 Selección de clima\" antes de calcular.", icon="⚠️")
 
-    if st.button("Calcular producción del proyecto", type="primary", use_container_width=True):
+    if st.button("Calcular producción del proyecto", type="primary"):
         st.session_state.calculo_listo = True
         st.session_state.seccion_activa = "resultados"
         st.rerun()
@@ -672,7 +672,7 @@ with tab_resultados:
                 "V. medio buje (m/s)": round(r["v_hub_medio"], 2),
                 "% bajo cut-in": round(r["pct_horas_bajo_cutin"], 1),
             } for r in resultados])
-            st.dataframe(tabla, hide_index=True, use_container_width=True)
+            st.dataframe(tabla, hide_index=True, use_column_width=True)
 
             media_confirmada = resultado_clima["media"]
             with st.expander("Hallazgo 20 -- perfil de viento por altura: dos rugosidades, y un cross-check independiente"):
