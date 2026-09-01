@@ -52,6 +52,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -459,7 +460,7 @@ with tab_clima:
         st.subheader("📍 Mapa interactivo")
         mapa = crear_mapa_estaciones(st.session_state.sitio_lat, st.session_state.sitio_lon, st.session_state.sitio_cercanas)
         mapa_html = mapa._repr_html_()
-        st.markdown(mapa_html, unsafe_allow_html=True)
+        components.html(mapa_html, height=500, scrolling=False)
 
     st.divider()
 
