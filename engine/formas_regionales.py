@@ -287,7 +287,7 @@ def _rosa_freq_donante(clave, donante):
 
 
 def generar_clima_sensibilizado(lat, lon, ruta_raster=RUTA_RASTER_CR_DEFAULT, formas=None,
-                                 año=2023, seed=42):
+                                 año=2023, seed=42, usar_gower=False):
     """
     Sensibilización real del punto exacto (Hallazgo 21-30): reemplaza a
     generar_clima_sitio_nuevo() de gwa_raster.py (que siempre prestaba la
@@ -312,15 +312,27 @@ def generar_clima_sensibilizado(lat, lon, ruta_raster=RUTA_RASTER_CR_DEFAULT, fo
     razón para dirección como el que sí existe para magnitud. Es una
     aproximación declarada, igual que la forma.
 
+    PHASE B MEJORADO (usar_gower=True): Reemplaza selección por Haversine pura
+    con Gower distance (clima Köppen + elevación + distancia) para evitar
+    transferencias de clima erróneo en zonas de frontera climática.
+
     Devuelve un dict con el mismo formato que usa app.py para las otras 3
     rutas (estación precacheada / EPW recién descargado / EPW subido):
     df_clima, media, hm_json, rosa_freq, es_aproximacion=True,
     donante_nombre, distancia_km, factor_ajuste -- estos dos últimos para
     que la app pueda mostrar de qué estación real y con qué factor salió
-    el número, en vez de ocultarlo.
+    el número, en vez de ocultarlo. Agrega 'gower_distance' si usar_gower=True.
     """
     formas = formas or cargar_formas_conocidas(usar_residuo=True)
-    clave_donante, dist_km = vecino_mas_cercano(lat, lon, formas)
+
+    # PHASE B: Selección mejorada de estación donante
+    if usar_gower:
+        clave_donante, dist_km = vecino_gower(lat, lon, formas)
+        metric_name = "gower_distance"
+    else:
+        clave_donante, dist_km = vecino_mas_cercano(lat, lon, formas)
+        metric_name = "haversine_km"
+
     donante = formas[clave_donante]
 
     factor, _, _ = factor_ajuste_gwa(lat, lon, donante["lat"], donante["lon"], ruta_raster=ruta_raster)
@@ -331,9 +343,11 @@ def generar_clima_sensibilizado(lat, lon, ruta_raster=RUTA_RASTER_CR_DEFAULT, fo
                                      year=año, seed=seed, media_objetivo=media_ajustada)
     rosa_freq = _rosa_freq_donante(clave_donante, donante)
 
-    return dict(df_clima=df_clima, media=media_ajustada, hm_json=donante["hm_json"], rosa_freq=rosa_freq,
-                es_aproximacion=True, error=None, donante_nombre=donante["nombre"],
-                distancia_km=dist_km, factor_ajuste=factor)
+    resultado = dict(df_clima=df_clima, media=media_ajustada, hm_json=donante["hm_json"], rosa_freq=rosa_freq,
+                    es_aproximacion=True, error=None, donante_nombre=donante["nombre"],
+                    distancia_km=dist_km, factor_ajuste=factor, metodo_seleccion=metric_name)
+
+    return resultado
 
 
 def validar_leave_one_out(modelo="medium_tulip", N=3, altura_buje=3.0, usar_residuo=False):
