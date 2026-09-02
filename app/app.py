@@ -369,6 +369,88 @@ def crear_produccion_mensual_plotly(kwh_mensual_total):
     return fig
 
 
+def crear_rosa_vientos_plotly(rosa_freq):
+    """Rosa de vientos interactiva con Plotly (paleta azul→rojo weather report)."""
+    sectores = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSO', 'SO', 'OSO']
+    min_freq = np.min(rosa_freq)
+    max_freq = np.max(rosa_freq)
+
+    # Paleta azul→rojo (weather report)
+    colores = []
+    for freq in rosa_freq:
+        norm = (freq - min_freq) / (max_freq - min_freq + 0.001)
+        # Interpolación: azul #4b6ba9 → rojo #ea2600
+        r = int(75 + (234 - 75) * norm)
+        g = int(107 + (38 - 107) * norm)
+        b = int(169 + (0 - 169) * norm)
+        colores.append(f'rgba({r},{g},{b},0.85)')
+
+    fig = go.Figure(data=go.Barpolar(
+        r=rosa_freq, theta=sectores,
+        marker=dict(color=colores, line=dict(color='#888', width=1)),
+        hovertemplate='<b>%{theta}</b><br>Frecuencia: %{r:.1f}%<extra></extra>'
+    ))
+    fig.update_layout(
+        title="Rosa de vientos - Frecuencia por dirección (%)",
+        polar=dict(
+            radialaxis=dict(visible=True, range=[0, max(rosa_freq) * 1.15], gridcolor='#D8D8D8'),
+            angularaxis=dict(gridcolor='#D8D8D8'),
+            bgcolor='rgba(250, 250, 250, 0.7)'
+        ),
+        height=500, font=dict(family="sans-serif", size=10),
+        margin=dict(l=60, r=60, t=50, b=50)
+    )
+    return fig
+
+
+def crear_heatmap_plotly(hm_json):
+    """Heatmap interactivo (mes × hora)."""
+    import json
+    data = json.loads(hm_json) if isinstance(hm_json, str) else hm_json
+    array = np.array(data).reshape(12, 24)
+    fig = go.Figure(data=go.Heatmap(
+        z=array, x=list(range(24)),
+        y=['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'],
+        colorscale='RdYlBu_r',
+        hovertemplate='<b>%{y}</b><br>Hora: %{x}:00<br>Índice: %{z:.2f}<extra></extra>',
+        colorbar=dict(title='Índice', thickness=15)
+    ))
+    fig.update_layout(
+        title="Índice de viento relativo a la media anual (mes × hora)",
+        xaxis_title="Hora del día", yaxis_title="Mes",
+        height=450, font=dict(family="sans-serif", size=10),
+        margin=dict(l=80, r=100, t=50, b=60),
+        xaxis=dict(tickmode='linear', tick0=0, dtick=3)
+    )
+    return fig
+
+
+def crear_perfil_viento_plotly(velocidad_10m, z0_ref=0.3, altura_max=10):
+    """Perfil logarítmico interactivo con Plotly (paleta azul)."""
+    alturas = np.linspace(0.1, altura_max, 100)
+    velocidades = wind_at_height_potencia(
+        velocidad_10m, 10, alturas, terreno="suburban", terreno_met="country"
+    )
+    AZUL_CLARO = '#4b6ba9'
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=velocidades, y=alturas,
+        fill='tonextx',
+        fillcolor='rgba(75, 107, 169, 0.15)',
+        line=dict(color=AZUL_CLARO, width=2.5),
+        hovertemplate='<b>%{y:.2f}m</b><br>Viento: %{x:.2f} m/s<extra></extra>'
+    ))
+    fig.update_layout(
+        title=f"Perfil logarítmico de viento (z0={z0_ref} m)",
+        xaxis_title="Velocidad (m/s)", yaxis_title="Altura (m)",
+        height=380, template='plotly_white',
+        font=dict(family="sans-serif", size=10),
+        margin=dict(l=80, r=60, t=50, b=60),
+        xaxis=dict(gridcolor='#E8E8E8'), yaxis=dict(gridcolor='#E8E8E8')
+    )
+    return fig
+
+
 def graficar_perfil_viento(velocidad_10m, z0_ref=0.1, altura_max=10):
     """Perfil logarítmico de viento sensibilizado (como LB Wind Profile)."""
     alturas = np.linspace(0.1, altura_max, 100)
@@ -643,14 +725,15 @@ with tab_contexto:
         st.divider()
         col_g1, col_g2 = st.columns(2)
         with col_g1:
-            st.pyplot(graficar_rosa_vientos(rosa_freq))
+            st.plotly_chart(crear_rosa_vientos_plotly(rosa_freq), use_container_width=True)
         with col_g2:
-            st.pyplot(graficar_heatmap_clima(hm_json))
+            st.plotly_chart(crear_heatmap_plotly(hm_json), use_container_width=True)
 
         st.divider()
-        st.subheader("Perfil de viento sensibilizado (0-10m)")
-        _altura_perfil = st.slider("Altura máxima a mostrar", 1.0, 15.0, 10.0, 0.5, key="altura_perfil_slider")
-        st.pyplot(graficar_perfil_viento(media_confirmada, altura_max=_altura_perfil))
+        col_perfil = st.columns(1)[0]
+        with col_perfil:
+            _altura_perfil = st.slider("Altura máxima a mostrar", 1.0, 15.0, 10.0, 0.5, key="altura_perfil_slider")
+            st.plotly_chart(crear_perfil_viento_plotly(media_confirmada, altura_max=_altura_perfil), use_container_width=True)
 
 
 # --- Tab: Equipos y configuración -- turbinas, clústers, parámetros avanzados ---
