@@ -106,11 +106,15 @@ def _img_base64(path, max_width):
             f'style="max-width:{max_width}px; width:100%; height:auto; display:block;">')
 
 
-st.set_page_config(page_title="ECO | Wind — Simulador", page_icon="🌬️", layout="wide")
+st.set_page_config(page_title="ECO | Wind — Simulador", page_icon=LOGO_ECO, layout="wide")
 
+# Fondo y colores base de la app: los define .streamlit/config.toml (theme.backgroundColor,
+# etc.) -- Streamlit los aplica solo, sin necesitar un ".stApp { background-color: ... }"
+# a mano acá. Forzarlo con CSS (como estaba antes) pisaba ese mecanismo nativo sin ninguna
+# ventaja real. Lo que sigue son estilos de componentes propios (menu lateral, header de
+# marca) que Streamlit no cubre con su sistema de theme, así que sí necesitan CSS.
 st.markdown(f"""
 <style>
-    .stApp {{ background-color: {FONDO}; }}
     h1, h2, h3 {{ color: {AZUL}; }}
     .stButton>button, button[kind="primary"], button[kind="primaryFormSubmit"] {{
         background-color: {VERDE} !important; color: white !important; border: none !important;
