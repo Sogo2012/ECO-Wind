@@ -2142,6 +2142,60 @@ más fuerte):**
 
 ---
 
+### Hallazgo 36 — Simplificación de producto: se descarta toda sensibilización espacial de magnitud (GWA/NASA POWER/ERA5/Köppen); la app corre 100% sobre EPW real, con upload manual agregado
+
+Decisión directa de Pablo tras Hallazgo 35: "nos olvidamos de todas las fuentes, solo vamos a usar
+EPW, el usuario escoge cuál estación referenciar... no tenemos tiempo para más investigaciones
+erráticas". Corta de raíz la línea de investigación de Hallazgo 21-30 (vecino más cercano + razón de
+magnitud vía GWA/NASA POWER/ERA5/Köppen) en vez de seguir afinándola -- consistente con Hallazgo 35,
+que ya había encontrado que el ráster crudo de GWA a 10m es más ruidoso que la señal real que debía
+resolver en el Valle Central.
+
+**Cambios reales en `app/app.py`:**
+- Eliminados: `cargar_aproximacion()`, `_resultado_san_jose()`, `_rosa_y_heatmap_san_jose()`,
+  `UMBRAL_APROXIMACION_KM`, el checkbox de Gower, el input manual de elevación para la aproximación,
+  y el bloque de UI que mostraba factor de ajuste/donante en la pestaña "Contexto climático". San
+  José deja de tener una ruta especial vía el export del panel de GWA (Hallazgo 3, `windSpeed.json` +
+  `heatmapData.json` + `.lib`) -- ahora usa su propio EPW real (`SITIOS_EPW_REAL["san_jose"]`, mismo
+  aeropuerto Juan Santamaría) exactamente igual que Nicoya/Liberia/Finca Favorita. Verificado con la
+  app corriendo de verdad (Streamlit + Playwright, no sólo lectura de código): la media anual pasa de
+  3.67 m/s (curva de GWA) a 4.03 m/s (EPW real, WMO 787620) -- ambas son datos reales del mismo sitio,
+  simplemente de dos fuentes distintas; se elige la fuente más simple y homogénea con el resto de la
+  app.
+- Agregado (no existía conectado a la UI, aunque `cargar_epw_subido()` ya estaba escrito): un
+  `st.file_uploader` en la pestaña "📍 Selección de clima" para subir un `.epw` propio -- para un
+  sitio sin estación real cercana, o para usar a propósito el EPW de otro lugar como referencia.
+  Mismo resultado unificado que elegir una estación de la lista (`_resultado_desde_epw()`), sin
+  ningún ajuste de magnitud.
+- La única sensibilización que queda es por ALTURA, no por ubicación: `wind_at_height()`
+  (`engine/simulador_pista_a.py`, Hallazgo 20) ya implementa el perfil logarítmico de
+  ladybug-tools/ladybug con dos rugosidades (referencia meteorológica vs. sitio destino) -- se
+  confirmó de nuevo, leyendo `ladybug/windprofile.py` real (`TERRAIN_PARAMETERS`, fórmula log y de
+  potencia), que la tabla `TERRENOS_ENERGYPLUS` y las fórmulas de `wind_at_height()` /
+  `wind_at_height_potencia()` ya en este repo coinciden exactas con el código fuente real de
+  ladybug-tools -- no hacía falta reescribir nada de esa parte, sólo mantenerla como el único
+  mecanismo de sensibilización de velocidad de la app.
+
+**Verificado end-to-end con Chromium real (Playwright), no sólo lectura de código:** búsqueda de
+estaciones → elegir San José de la lista (ahora vía su EPW real) → pestaña Contexto climático (rosa
++ heatmap + perfil de viento, sin ningún texto de "aproximación") → Equipos y configuración →
+Calcular → Resultados (245 kWh/año, 3 turbinas, corrección de densidad 8.5%) -- sin excepciones. Se
+probó también el flujo nuevo de upload manual (subiendo el mismo EPW de San José como archivo propio):
+"Sitio activo: EPW subido -- ...epw", mismo resultado que elegirlo de la lista.
+
+**Qué queda sin usar, no borrado:** `engine/gwa_raster.py`, `engine/formas_regionales.py`,
+`engine/era5_client.py`, `engine/open_meteo_client.py`, `engine/terrain_classification.py` (Gower/
+Köppen/WorldCover) y el ráster `datos_clima/gwa_costa_rica_10m.tif` quedan en el repo como historial
+de la investigación (Hallazgo 21-30, 35) pero ya no los importa `app.py`. Los scripts de validación
+que sí los usan (`validar_phase_b_clima.py`, `validar_phase_b_simple.py`, `test_phase_b.py`,
+`test_bug_media_san_jose.py`) tampoco se tocaron -- documentan una línea de investigación cerrada,
+no código de producción.
+
+**Pendiente:** decidir si vale la pena borrar ese código muerto ahora o dejarlo como referencia
+histórica; no bloquea nada del flujo actual.
+
+---
+
 ## 6. Pendientes activos / bloqueos
 
 - [x] ~~Conseguir A/k reales del Global Wind Atlas~~ — resuelto, y con datos más ricos de lo
@@ -2357,20 +2411,16 @@ más fuerte):**
       validación leave-one-out con `factor_ajuste_gwa()`~~ — resuelto (Hallazgo 26): resultado
       mixto, mucho mejor que NASA POWER pero no una victoria limpia (bien en Guanacaste, mal en San
       José/Finca Favorita). Ver el siguiente pendiente.
-- [ ] **Reabierto por Hallazgo 35 (decisión de Pablo, ya no sólo "pausado"):** investigar por qué el
-      ráster crudo de GWA se aleja tanto de la realidad en San José (-43%) y Finca Favorita (-87%) —
-      el mecanismo de razón en sí funciona bien (Liberia mejoró sobre todo lo anterior), el problema
-      está en el dato crudo. Hallazgo 35 agrega evidencia nueva y más fuerte con el ráster real ya en
-      el repo: en el Valle Central el ráster no sólo tiene sesgo, tiene más ruido pixel-a-pixel
-      (desvío=78% de la media en una grilla de 20×40 km) que señal real, e invierte el orden real
-      entre Santamaría y La Sabana. Candidatos sin probar: otra altura del ráster, otro producto de
-      GWA, o el downscaling topográfico real (TPI/WorldCover) de Hallazgo 28/30.
-- [ ] **Nuevo, de Hallazgo 26/27:** correr la Parte 4 de `notebooks/sensibilizar_punto_exacto.ipynb`
-      en Colab para tener el número real de ERA5 — `engine/era5_client.py` (`factor_ajuste_era5()`)
-      construido y probado con un NetCDF sintético, pero necesita que Pablo tenga cuenta+token de
-      Copernicus CDS (paso nuevo, ni NASA POWER ni GWA lo pedían — ver instrucciones en la Parte 4
-      del notebook) antes de poder correr de verdad. Si ERA5 también falla, queda sin probar
-      Köppen/polígonos climáticos (Alternativa 2 original, nunca investigada).
+- [x] ~~Reabierto por Hallazgo 35: investigar por qué el ráster crudo de GWA se aleja tanto de la
+      realidad en San José (-43%) y Finca Favorita (-87%), e invierte el orden Santamaría/La
+      Sabana~~ — **cerrado por decisión de producto (Hallazgo 36), no resuelto técnicamente:** Pablo
+      decidió abandonar toda sensibilización espacial de magnitud (GWA/NASA POWER/ERA5/Köppen) en vez
+      de seguir afinándola. La app ahora corre 100% sobre EPW real (estación de la lista o subida por
+      el usuario); el código de esta línea de investigación queda en el repo sin usar, no borrado.
+- [x] ~~Nuevo, de Hallazgo 26/27: correr la Parte 4 de
+      `notebooks/sensibilizar_punto_exacto.ipynb` en Colab para tener el número real de ERA5~~ —
+      cerrado sin correr, por decisión de producto (Hallazgo 36): se abandonó toda la línea de ajuste
+      espacial por fuente externa (GWA/NASA POWER/ERA5/Köppen), no sólo ERA5.
 - [x] ~~Nuevo, de Hallazgo 31: correr `generar_clima_sensibilizado()` contra el ráster real de
       Costa Rica~~ — resuelto (Hallazgo 35): el ráster real ya está en el repo, se corrió con el
       código de producción real (no mock) contra varios puntos del Valle Central y contra los 4
