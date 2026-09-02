@@ -2196,6 +2196,55 @@ histórica; no bloquea nada del flujo actual.
 
 ---
 
+### Hallazgo 37 — Aclaraciones de UI post-Hallazgo 36: el heatmap no mostraba m/s reales, y la rosa de vientos vieja no se entendía (12 sectores mal etiquetados, un solo color)
+
+Dos pedidos directos después de ver la app con datos reales de San José (EPW, Hallazgo 36):
+
+**1) El heatmap mes×hora mostraba un índice relativo, no velocidad -- se confundía con m/s.**
+El color va de 0 a ~2 porque `heatmap_json_desde_epw()` calcula `valor = media(mes,hora) /
+media_anual` (índice adimensional centrado en 1.0), no velocidad -- un valor de 2.0 significa
+"el doble de la media anual" (con San José a 4.03 m/s, eso es ~8 m/s reales), nunca "2 m/s". El
+gráfico no estaba mal, sólo el hover no aclaraba la conversión. Se agregó la velocidad real al
+hover de `crear_heatmap_plotly()` (`app/app.py`).
+
+**Bug real encontrado al implementarlo:** el primer intento usó `customdata` + `%{customdata:.2f}`
+en el `hovertemplate` (patrón estándar de Plotly) -- funcionaba perfecto en un HTML standalone
+generado con el paquete `plotly` de Python, pero **NO en la app real**: verificado con Streamlit
+corriendo + Chromium real (Playwright), el hover mostraba literalmente el texto sin resolver,
+`%{customdata:.2f}`, en vez del número. Causa real: la versión de Plotly.js que Streamlit 1.35
+trae empaquetada (independiente de la versión del paquete `pip install plotly`) no interpola
+`customdata` en trazas `Heatmap`. Arreglado armando el texto del hover ya resuelto en Python,
+celda por celda (`text=... , hoverinfo='text'`), sin depender de `customdata` -- funciona en
+cualquier versión. **Lección para cualquier gráfico Plotly futuro en esta app:** probar el hover
+en la app real (Streamlit + navegador), no sólo con `fig.write_html()` -- las dos rutas pueden
+usar versiones distintas de Plotly.js con soporte distinto de features.
+
+**2) La rosa de vientos no se entendía.** Pedido explícito: algo como la rosa de
+`github.com/pollination-apps/weather-report` (usa `ladybug.windrose.WindRose`). Dos problemas
+reales en la versión vieja: (a) 12 sectores de 30° etiquetados con nombres de compás de 16 puntos
+(NNE, ENE, SSO, OSO...), que sólo son correctos a múltiplos de 22.5° -- las etiquetas no
+correspondían a los ángulos reales; (b) un solo color por sector, codificando sólo frecuencia
+total de esa dirección, sin distinguir viento flojo de fuerte.
+
+Reemplazada por una rosa clásica dirección × velocidad (mismo concepto que
+`ladybug.windrose.WindRose`, reimplementado directo con Plotly -- `go.Barpolar` apilado por
+`barmode='stack'` -- en vez de agregar `ladybug` como dependencia nueva sólo para un gráfico):
+`engine/epw_real.py::rosa_vientos_detallada_desde_epw()` calcula, para 8 sectores de compás
+correctos (N/NE/E/SE/S/SO/O/NO, cada uno exacto a 45°) × 5 bins de velocidad (0-2, 2-4, 4-6, 6-8,
+>8 m/s), el % de horas del año en cada combinación, más el % de calma (≤0.5 m/s, sin dirección
+definida) reportado aparte en el título. Verificado con datos reales de San José: la matriz suma
+96.7% + 3.3% de calma = 100% exacto, y confirma un patrón físicamente coherente con la geografía
+real (el 50% de las horas del año el viento viene del Este -- consistente con el corredor de
+vientos alisios del Valle Central que ya se documentó en hallazgos anteriores), no un artefacto.
+
+**Verificado end-to-end con Streamlit + Playwright real** (San José, ambos gráficos): el heatmap
+muestra "Sep Hora: 14:00 Índice: 1.17 (4.72 m/s)"; la rosa nueva muestra N arriba, sentido horario,
+8 sectores correctos, leyenda "Velocidad: 0-2 m/s ... >8 m/s", sin ninguna excepción. De paso se
+eliminó `graficar_rosa_vientos()` (versión matplotlib vieja, dead code -- no se llamaba desde
+ningún lado, sobrevivió al rediseño a Plotly de hace unos commits).
+
+---
+
 ## 6. Pendientes activos / bloqueos
 
 - [x] ~~Conseguir A/k reales del Global Wind Atlas~~ — resuelto, y con datos más ricos de lo
