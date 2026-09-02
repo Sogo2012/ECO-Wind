@@ -14,60 +14,62 @@ Voltajes soportados:
 - Industrial: 600V CC, 277/480V CA (trifásico) - Modelo 60K
 - BESS: 410V-614V CC (interior/exterior con climatización)
 
-ADVERTENCIA DE FUENTE (Hallazgo 43) -- los 4 modelos LATAM (9K, 12K, 12K-2P-LL, 15K)
-tienen `Specs_Verificadas=False`: sólo el PRECIO viene de una cotización real
-(QuotesReport, mismo documento que el 18K/30K/60K). Los campos técnicos (peso,
-dimensiones, y sobre todo `Corriente_Carga_Descarga_Max_A` -- el dato del que
-depende `seleccionar_inversor_solark()`) NO vienen de un datasheet real todavía:
-las 4 filas comparten exactamente las mismas dimensiones que el 18K (863x464x282mm)
-y el peso/corriente de batería escalan en pasos perfectamente lineales desde el
-18K real -- patrón típico de una estimación, no de 4 productos físicos distintos
-medidos por separado. Usar con esa reserva hasta tener el datasheet oficial de
-Sol-Ark para estos 4 modelos.
+RESUELTO (Hallazgo 44): los 4 modelos LATAM (9K, 12K, 12K-2P-LL, 15K) que Hallazgo 43
+había marcado `Specs_Verificadas=False` (specs fabricadas -- dimensiones idénticas al
+18K, corriente de batería escalada linealmente) ya se verificaron contra datasheets
+reales de Sol-Ark que Pablo consiguió (PS-00034 Rev.3, SK150-0003 Rev.3, PS-00060 v1.1,
+PS-00001 Rev.7) -- se reemplazaron todos los campos técnicos por los valores reales de
+cada datasheet, la bandera `Specs_Verificadas` ya no aplica (se quita de las 4 filas).
+Los 4 son físicamente distintos entre sí (dimensiones, peso, corrientes de batería y
+de passthrough todas diferentes -- no hay ningún patrón de escalado lineal en los
+datos reales, a diferencia de los que se habían descartado).
 """
 import pandas as pd
 
 SOLARK_SPECS = [
     {
-        "Modelo": "9K-2P-LV (Residencial LATAM)",
+        # Verificado (Hallazgo 44) contra datasheet real PS-00034 Rev.3 (6/jun/2025),
+        # "Limitless 9K-LV", SKU 9K-2P.
+        "Modelo": "9K-2P-N (Residencial)",
         "Tipo_Equipo": "Inversor/Cargador",
-        "Specs_Verificadas": False,  # Hallazgo 43 -- ver docstring del módulo
         "Costo_USD": 2926.83,
-        "Potencia_FV_Max_W": 18000,
-        "Entrada_FV_Corriente_A": 36,
-        "Entrada_FV_Corriente_CC_A": 36,
+        "Potencia_FV_Max_W": 13000,
+        "Entrada_FV_Corriente_A": 26,
+        "Entrada_FV_Corriente_CC_A": 44,
         "MPPT_Cantidad": 2,
         "Voltaje_FV_Max_V": 500,
         "Potencia_Salida_CA_Continua_W": 9000,
-        "Potencia_Arranque_W": 18000,
+        "Potencia_Arranque_W": 24000,
         "Voltaje_Salida_CA": "120/240V",
-        "Voltaje_Salida_CA_Alternativo": "208V",
+        "Voltaje_Salida_CA_Alternativo": "120/208V",
         "Frecuencia_CA_Hz": "50/60",
         "Corriente_Max_Salida_CA_A": 37.5,
         "Corriente_Passthrough_A": 200,
         "Voltaje_Nominal_CC_V": 48,
-        "Voltaje_Operativo_CC_Min_V": 41,
+        "Voltaje_Operativo_CC_Min_V": 43,
         "Voltaje_Operativo_CC_Max_V": 63,
-        "Corriente_Carga_Descarga_Max_A": 200,
+        "Corriente_Carga_Descarga_Max_A": 185,
         "Capacidad_BESS_kWh": None,
-        "Altura_mm": 863,
-        "Ancho_mm": 464,
-        "Profundidad_mm": 282,
-        "Peso_kg": 55.00,
+        "Altura_mm": 807,
+        "Ancho_mm": 494,
+        "Profundidad_mm": 306,
+        "Peso_kg": 61.2,
         "Garantia_Anos": 10,
-        "Firmware_Diseño": "EE. UU.",
-        "Notas_Tecnicas": "LATAM Edition; 9 kW de salida continua; Garantía 10 años",
-        "Stackable": False
+        "Firmware_Diseño": None,
+        "Notas_Tecnicas": "Pico 24,000VA/10s y 30,000VA/100ms fuera de red; apilable hasta 12 en paralelo; "
+                          "compatible Litio y Plomo-Ácido",
+        "Stackable": True
     },
     {
-        "Modelo": "12K-2P-LL (Residencial LATAM Limitless)",
+        # Verificado (Hallazgo 44) contra datasheet real PS-00060-01.1 v1.1 (may/2026),
+        # "Inversor Híbrido Limitless 12K", modelo 12K-2P-LL.
+        "Modelo": "12K-2P-LL (Residencial)",
         "Tipo_Equipo": "Inversor/Cargador",
-        "Specs_Verificadas": False,  # Hallazgo 43 -- ver docstring del módulo
         "Costo_USD": 3657.32,
-        "Potencia_FV_Max_W": 24000,
-        "Entrada_FV_Corriente_A": 36,
-        "Entrada_FV_Corriente_CC_A": 40,
-        "MPPT_Cantidad": 2,
+        "Potencia_FV_Max_W": 19200,
+        "Entrada_FV_Corriente_A": 32,
+        "Entrada_FV_Corriente_CC_A": 60,
+        "MPPT_Cantidad": 3,
         "Voltaje_FV_Max_V": 500,
         "Potencia_Salida_CA_Continua_W": 12000,
         "Potencia_Arranque_W": 24000,
@@ -75,82 +77,90 @@ SOLARK_SPECS = [
         "Voltaje_Salida_CA_Alternativo": "208V",
         "Frecuencia_CA_Hz": "50/60",
         "Corriente_Max_Salida_CA_A": 50.0,
-        "Corriente_Passthrough_A": 200,
+        "Corriente_Passthrough_A": 100,
         "Voltaje_Nominal_CC_V": 48,
-        "Voltaje_Operativo_CC_Min_V": 41,
-        "Voltaje_Operativo_CC_Max_V": 63,
-        "Corriente_Carga_Descarga_Max_A": 250,
+        "Voltaje_Operativo_CC_Min_V": 43,
+        "Voltaje_Operativo_CC_Max_V": 59,
+        "Corriente_Carga_Descarga_Max_A": 220,
         "Capacidad_BESS_kWh": None,
-        "Altura_mm": 863,
-        "Ancho_mm": 464,
-        "Profundidad_mm": 282,
-        "Peso_kg": 58.00,
+        "Altura_mm": 654,
+        "Ancho_mm": 452,
+        "Profundidad_mm": 254,
+        "Peso_kg": 29.5,
         "Garantia_Anos": 10,
-        "Firmware_Diseño": "EE. UU.",
-        "Notas_Tecnicas": "LATAM Limitless Edition; 12 kW de salida continua; Garantía 10 años",
-        "Stackable": False
+        "Firmware_Diseño": None,
+        "Notas_Tecnicas": "12,000W continua sólo con red (grid-tied); 10,000W continua sólo con baterías "
+                          "(41A@240V); puerto GEN hasta 14,000W; apilable hasta 12 en paralelo; "
+                          "compatible Plomo-Ácido y Ion-Litio",
+        "Stackable": True
     },
     {
-        "Modelo": "12K-2P (Residencial LATAM)",
+        # Verificado (Hallazgo 44) contra datasheet real SK150-0003 Rev.3 (18/jun/2025),
+        # "Limitless 12K-LV", SKU 12K-2P (modelo estándar, distinto del -LL).
+        "Modelo": "12K-2P-N (Residencial)",
         "Tipo_Equipo": "Inversor/Cargador",
-        "Specs_Verificadas": False,  # Hallazgo 43 -- ver docstring del módulo
         "Costo_USD": 3926.83,
-        "Potencia_FV_Max_W": 24000,
-        "Entrada_FV_Corriente_A": 36,
-        "Entrada_FV_Corriente_CC_A": 40,
+        "Potencia_FV_Max_W": 12000,
+        "Entrada_FV_Corriente_A": 20,
+        "Entrada_FV_Corriente_CC_A": None,  # no viene un valor de cortocircuito separado en este datasheet
         "MPPT_Cantidad": 2,
         "Voltaje_FV_Max_V": 500,
-        "Potencia_Salida_CA_Continua_W": 12000,
-        "Potencia_Arranque_W": 24000,
+        "Potencia_Salida_CA_Continua_W": 9000,
+        "Potencia_Arranque_W": 16000,
         "Voltaje_Salida_CA": "120/240V",
-        "Voltaje_Salida_CA_Alternativo": "208V",
+        "Voltaje_Salida_CA_Alternativo": "120/208V",
         "Frecuencia_CA_Hz": "50/60",
-        "Corriente_Max_Salida_CA_A": 50.0,
-        "Corriente_Passthrough_A": 200,
+        "Corriente_Max_Salida_CA_A": 37.5,
+        "Corriente_Passthrough_A": 63,
         "Voltaje_Nominal_CC_V": 48,
-        "Voltaje_Operativo_CC_Min_V": 41,
+        "Voltaje_Operativo_CC_Min_V": 43,
         "Voltaje_Operativo_CC_Max_V": 63,
-        "Corriente_Carga_Descarga_Max_A": 250,
+        "Corriente_Carga_Descarga_Max_A": 185,
         "Capacidad_BESS_kWh": None,
-        "Altura_mm": 863,
-        "Ancho_mm": 464,
-        "Profundidad_mm": 282,
-        "Peso_kg": 58.00,
+        "Altura_mm": 750,
+        "Ancho_mm": 450,
+        "Profundidad_mm": 254,
+        "Peso_kg": 35.4,
         "Garantia_Anos": 10,
-        "Firmware_Diseño": "EE. UU.",
-        "Notas_Tecnicas": "LATAM Edition; 12 kW de salida continua; Garantía 10 años",
-        "Stackable": False
+        "Firmware_Diseño": None,
+        "Notas_Tecnicas": "Nameplate 12K = 9,000W CA continua (cargas/venta a red) + 3,000W CC de "
+                          "baterías; sólo compatible con batería de Litio (no Plomo-Ácido); apilable "
+                          "hasta 9 en paralelo",
+        "Stackable": True
     },
     {
-        "Modelo": "15K-2P (Residencial LATAM)",
+        # Verificado (Hallazgo 44) contra datasheet real PS-00001 Rev.7 (16/jul/2026),
+        # "Limitless 15K", modelo 15K-2P-LV.
+        "Modelo": "15K-2P-LV (Residencial)",
         "Tipo_Equipo": "Inversor/Cargador",
-        "Specs_Verificadas": False,  # Hallazgo 43 -- ver docstring del módulo
         "Costo_USD": 4756.10,
-        "Potencia_FV_Max_W": 30000,
-        "Entrada_FV_Corriente_A": 36,
-        "Entrada_FV_Corriente_CC_A": 50,
+        "Potencia_FV_Max_W": 23400,
+        "Entrada_FV_Corriente_A": 26,
+        "Entrada_FV_Corriente_CC_A": 44,
         "MPPT_Cantidad": 3,
         "Voltaje_FV_Max_V": 500,
         "Potencia_Salida_CA_Continua_W": 15000,
-        "Potencia_Arranque_W": 30000,
+        "Potencia_Arranque_W": 24000,
         "Voltaje_Salida_CA": "120/240V",
-        "Voltaje_Salida_CA_Alternativo": "208V",
+        "Voltaje_Salida_CA_Alternativo": "120/208V",
         "Frecuencia_CA_Hz": "50/60",
         "Corriente_Max_Salida_CA_A": 62.5,
         "Corriente_Passthrough_A": 200,
         "Voltaje_Nominal_CC_V": 48,
-        "Voltaje_Operativo_CC_Min_V": 41,
-        "Voltaje_Operativo_CC_Max_V": 63,
-        "Corriente_Carga_Descarga_Max_A": 300,
+        "Voltaje_Operativo_CC_Min_V": 43,
+        "Voltaje_Operativo_CC_Max_V": 59,
+        "Corriente_Carga_Descarga_Max_A": 275,
         "Capacidad_BESS_kWh": None,
-        "Altura_mm": 863,
-        "Ancho_mm": 464,
-        "Profundidad_mm": 282,
-        "Peso_kg": 60.00,
+        "Altura_mm": 838,
+        "Ancho_mm": 494,
+        "Profundidad_mm": 306,
+        "Peso_kg": 61.2,
         "Garantia_Anos": 10,
         "Firmware_Diseño": "EE. UU.",
-        "Notas_Tecnicas": "LATAM Edition; 15 kW de salida continua; Garantía 10 años",
-        "Stackable": False
+        "Notas_Tecnicas": "15,000W continua sólo con red (62.5A@240V); 12,000W continua sólo con "
+                          "baterías/off-grid (240V, 10,400W a 208V); puerto GEN hasta 80A/19,200W; "
+                          "apilable hasta 12 en paralelo; compatible Plomo-Ácido y Litio",
+        "Stackable": True
     },
     {
         "Modelo": "18K-2P-LV (Residencial)",
@@ -179,8 +189,9 @@ SOLARK_SPECS = [
         "Peso_kg": 62.14,
         "Garantia_Anos": 10,
         "Firmware_Diseño": "EE. UU.",
-        "Notas_Tecnicas": "Firmware diseñado en EE. UU.; 36 kW de arranque (10s); Garantía 10 años",
-        "Stackable": False
+        "Notas_Tecnicas": "Firmware diseñado en EE. UU.; 36 kW de arranque (10s); Garantía 10 años; "
+                          "apilable hasta 12 en paralelo",
+        "Stackable": True  # corregido (Hallazgo 44): el datasheet PS-00044 Rev.2 dice "Apilable en Paralelo: Yes; Max 12"
     },
     {
         "Modelo": "30K-3P-208V (Comercial)",
