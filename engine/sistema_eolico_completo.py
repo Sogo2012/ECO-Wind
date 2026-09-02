@@ -8,8 +8,11 @@ from typing import Dict, List, Optional
 from engine.dimensionador_sistema_eolico import dimensionar_sistema_eolico_completo
 from engine.financial_engine_eolico import FinancialEngineEolico
 from engine.price_calculator import (
-    calcular_precio_final,
+    calcular_precio_venta_proyecto,
     calcular_precio_kwh_instalado,
+    IMPORT_COST_USD,
+    MARGIN_PCT,
+    MODO_IMPORTACION_DEFAULT,
 )
 
 
@@ -23,6 +26,7 @@ def analizar_sistema_eolico_completo(
     costo_instalacion_pct: float = 0.35,
     vida_util_anos: int = 40,
     tasa_descuento_pct: float = 8.0,
+    modo_importacion: str = MODO_IMPORTACION_DEFAULT,
 ) -> Dict:
     """
     Análisis técnico y financiero integrado de sistema eólico.
@@ -47,6 +51,15 @@ def analizar_sistema_eolico_completo(
         costo_instalacion_pct   : Costo instalación como % de equipos (default 35%)
         vida_util_anos          : Vida útil del proyecto (default 40)
         tasa_descuento_pct      : Tasa descuento para NPV (default 8%)
+        modo_importacion        : "por_sku" (default) o "por_proyecto" -- ver
+                                  price_calculator.py. Acá se aplica a nivel de
+                                  CATEGORÍA de equipo (turbinas/inversor/BESS como 3
+                                  líneas), no por unidad física individual como hace
+                                  `dimensionador_sistema_eolico.py::precio_venta_equipos_usd`
+                                  -- son dos granularidades distintas del mismo
+                                  parámetro, ambas expuestas (ver
+                                  `arquitectura_tecnica.precio_venta_equipos_usd` para
+                                  la versión por unidad).
 
     Returns:
         dict con análisis técnico-financiero completo. Si el arreglo no tiene
@@ -65,6 +78,7 @@ def analizar_sistema_eolico_completo(
         consumo_diario_kWh=consumo_diario_kWh,
         horas_autonomia=horas_autonomia,
         energia_anual_kWh=energia_anual_kWh,
+        modo_importacion=modo_importacion,
     )
 
     potencia_pico = arquitectura["arreglo_turbinas"]["potencia_pico_total_W"]
@@ -92,13 +106,44 @@ def analizar_sistema_eolico_completo(
 
     costo_inversor_base = arquitectura["inversor_seleccionado"]["costo_USD"]
     costo_bess_base = arquitectura["bess_seleccionado"]["costo_total_USD"]
+    costo_bess_base_efectivo = costo_bess_base if sistema_tipo == "Standalone" else 0.0
 
-    # PASO 3: Aplicar margen y costo de importación
-    costo_turbinas_con_margen = calcular_precio_final(costo_turbinas_total)
-    costo_inversor_con_margen = calcular_precio_final(costo_inversor_base)
+    # PASO 3: Aplicar margen y costo de importación -- 2 o 3 líneas (turbinas/inversor,
+    # y BESS sólo si el sistema es Standalone) vía la MISMA función que ya resuelve
+    # por_sku/por_proyecto en el resto de la app (price_calculator.py).
+    #
+    # OJO (bug real encontrado con Playwright, Hallazgo 48): en Hybrid, el BESS no
+    # existe -- si se pasa como un costo de $0 en la lista, calcular_precio_venta()
+    # igual le suma el fee de importación completo a esa línea (cobra "importar algo de
+    # $0"), inflando el CAPEX en el valor de un fee fantasma. Se excluye la línea de
+    # BESS por completo del cálculo cuando no aplica, en vez de pasarla como cero.
+    costos_categorias = [costo_turbinas_total, costo_inversor_base]
     if sistema_tipo == "Standalone":
-        costo_bess_con_margen = calcular_precio_final(costo_bess_base)
+        costos_categorias.append(costo_bess_base_efectivo)
+
+    precios_por_categoria, _ = calcular_precio_venta_proyecto(
+        costos_categorias, modo_importacion=modo_importacion)
+
+    if precios_por_categoria is None:
+        # modo "por_proyecto": un solo fee de importación para todo el embarque, sin
+        # desglose por línea -- se reparte proporcionalmente al costo base de cada
+        # categoría para poder seguir mostrando Turbinas/Inversor/(BESS) por separado
+        # sin cambiar el total del proyecto (la suma de las líneas de abajo da
+        # exactamente el mismo total que calcular_precio_venta_proyecto ya calculó).
+        suma_base = sum(costos_categorias)
+        margen_pct = MARGIN_PCT * 100
+        if suma_base > 0:
+            precios_por_categoria = [
+                (c + IMPORT_COST_USD * (c / suma_base)) * (1 + margen_pct / 100)
+                for c in costos_categorias
+            ]
+        else:
+            precios_por_categoria = [0.0] * len(costos_categorias)
+
+    if sistema_tipo == "Standalone":
+        costo_turbinas_con_margen, costo_inversor_con_margen, costo_bess_con_margen = precios_por_categoria
     else:
+        costo_turbinas_con_margen, costo_inversor_con_margen = precios_por_categoria
         costo_bess_con_margen = 0.0
 
     # PASO 4: Análisis financiero
@@ -143,10 +188,9 @@ def analizar_sistema_eolico_completo(
         "costos_sin_margen": {
             "turbinas_usd": round(costo_turbinas_total, 2),
             "inversor_usd": round(costo_inversor_base, 2),
-            "bess_usd": round(costo_bess_base, 2) if sistema_tipo == "Standalone" else 0.0,
+            "bess_usd": round(costo_bess_base_efectivo, 2),
             "total_equipos_usd": round(
-                costo_turbinas_total + costo_inversor_base + (costo_bess_base if sistema_tipo == "Standalone" else 0),
-                2,
+                costo_turbinas_total + costo_inversor_base + costo_bess_base_efectivo, 2
             ),
         },
 

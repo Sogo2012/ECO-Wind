@@ -68,6 +68,8 @@ from engine.epw_real import (
     SITIOS_EPW_REAL, cargar_epw_real, heatmap_json_desde_epw, rosa_vientos_detallada_desde_epw,
     obtener_estaciones_cercanas, geocode_name, descargar_y_extraer_epw, sitio_precacheado_cercano,
 )
+from engine.sistema_eolico_completo import analizar_sistema_eolico_completo
+from engine.price_calculator import MODO_IMPORTACION_DEFAULT
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -512,11 +514,12 @@ with st.sidebar:
 # Clona la estructura real de Skyplus: 4 tabs navegables en la parte superior,
 # cada uno con su contenido y controles. El sidebar es limpio (solo marca + resumen).
 
-tab_clima, tab_contexto, tab_config, tab_resultados = st.tabs([
+tab_clima, tab_contexto, tab_config, tab_resultados, tab_financiero = st.tabs([
     "📍 Selección de clima",
     "📊 Contexto climático",
     "⚙️ Equipos y configuración",
     "📈 Resultados",
+    "💰 Análisis Financiero",
 ])
 
 with tab_clima:
@@ -763,8 +766,8 @@ with tab_config:
 
 with tab_resultados:
     st.caption(
-        "Cálculo financiero (CAPEX, tarifa eléctrica, payback) todavía no está implementado -- "
-        "por ahora esta sección muestra la producción de energía del proyecto (fase futura)."
+        "Producción de energía del proyecto -- el cálculo financiero (CAPEX, tarifa eléctrica, "
+        "payback) está en la pestaña \"💰 Análisis Financiero\"."
     )
 
     if st.session_state.get("calculo_listo"):
@@ -861,9 +864,182 @@ with tab_resultados:
         st.info("Configurá el proyecto en la pestaña \"⚙️ Equipos y configuración\" y presioná "
                  "**Calcular producción del proyecto**.")
 
+
+# --- Tab: Análisis Financiero (Hallazgo 40-48) -- CAPEX, inversor/BESS recomendados, payback/ROI/NPV ---
+
+with tab_financiero:
+    st.caption(
+        "Estimación de CAPEX, inversor y banco de baterías recomendados (Sol-Ark + EG4), y retorno "
+        "de inversión -- usa las turbinas ya configuradas en \"⚙️ Equipos y configuración\" y la "
+        "producción ya calculada en \"📈 Resultados\"."
+    )
+
+    if not st.session_state.get("calculo_listo"):
+        st.info("Configurá el proyecto en la pestaña \"⚙️ Equipos y configuración\" y presioná "
+                 "**Calcular producción del proyecto** primero.")
+    else:
+        resultado_clima = st.session_state.sitio_activo
+        error = None if resultado_clima is None else resultado_clima.get("error")
+
+        if resultado_clima is None:
+            st.error(
+                "Elegí primero una estación (o subí un EPW) en la pestaña \"📍 Selección de clima\".",
+                icon="🚫",
+            )
+        elif error:
+            st.error(error, icon="🚫")
+        else:
+            df_clima = resultado_clima["df_clima"]
+            elevacion_m = resultado_clima["elevacion_m"]
+            z0 = st.session_state.z0_avanzado
+            metodo_bouquet = st.session_state.metodo_bouquet_radio
+
+            # Mismo cálculo de kWh/año que "📈 Resultados" (Hallazgo 12/17), recalculado acá
+            # para no depender de que el usuario haya visitado esa pestaña en esta sesión.
+            kwh_anual_total = sum(
+                simular(df_clima, altura_buje=c["altura_buje"], modelo=c["modelo"], N=int(c["N"]),
+                        elevacion_m=elevacion_m, z0=z0, metodo_bouquet=metodo_bouquet)["kwh_anual"]
+                for c in st.session_state.clusters
+            )
+            turbinas_seleccionadas = [
+                c["modelo"] for c in st.session_state.clusters for _ in range(int(c["N"]))
+            ]
+
+            st.markdown("**Parámetros financieros**")
+            col_f1, col_f2, col_f3 = st.columns(3)
+            with col_f1:
+                consumo_diario_kWh = st.number_input(
+                    "Consumo diario del sitio (kWh/día)", min_value=0.1, value=20.0, step=1.0,
+                    help="Dimensiona el banco de baterías (BESS) según las horas de autonomía deseadas.",
+                )
+            with col_f2:
+                horas_autonomia = st.number_input(
+                    "Horas de autonomía deseadas", min_value=1, max_value=48, value=12, step=1)
+            with col_f3:
+                tarifa_kwh_USD = st.number_input(
+                    "Tarifa eléctrica ($/kWh)", min_value=0.01, value=0.15, step=0.01, format="%.2f")
+
+            sistema_tipo_label = st.radio(
+                "Tipo de sistema",
+                ["Standalone (con banco de baterías)", "Hybrid (sin banco de baterías)"],
+                horizontal=True,
+            )
+            sistema_tipo = "Standalone" if sistema_tipo_label.startswith("Standalone") else "Hybrid"
+
+            with st.expander("Parámetros avanzados"):
+                col_a1, col_a2, col_a3 = st.columns(3)
+                with col_a1:
+                    costo_instalacion_pct = st.slider(
+                        "Costo de instalación (% de equipos)", 0, 100, 35, step=5) / 100
+                with col_a2:
+                    vida_util_anos = st.number_input(
+                        "Vida útil del proyecto (años)", min_value=1, value=40, step=1)
+                with col_a3:
+                    tasa_descuento_pct = st.number_input(
+                        "Tasa de descuento para NPV (%)", min_value=0.0, value=8.0, step=0.5)
+                modo_importacion = st.radio(
+                    "Fee de importación", ["por_sku", "por_proyecto"],
+                    index=0 if MODO_IMPORTACION_DEFAULT == "por_sku" else 1, horizontal=True,
+                    help="'por_sku': cada categoría de equipo (turbinas/inversor/BESS) paga su propio "
+                         "fee de importación. 'por_proyecto': un solo fee para todo el embarque. Sin "
+                         "dato real de flete/aduana consolidado todavía -- ver Hallazgo 41 en "
+                         "avance-de-proyecto.md.",
+                )
+
+            analisis = analizar_sistema_eolico_completo(
+                turbinas_seleccionadas=turbinas_seleccionadas,
+                consumo_diario_kWh=consumo_diario_kWh,
+                energia_anual_kWh=kwh_anual_total,
+                horas_autonomia=int(horas_autonomia),
+                tarifa_kwh_USD=tarifa_kwh_USD,
+                sistema_tipo=sistema_tipo,
+                costo_instalacion_pct=costo_instalacion_pct,
+                vida_util_anos=int(vida_util_anos),
+                tasa_descuento_pct=tasa_descuento_pct,
+                modo_importacion=modo_importacion,
+            )
+
+            st.divider()
+            arquitectura = analisis["arquitectura_tecnica"]
+            inversor = arquitectura["inversor_seleccionado"]
+
+            if analisis.get("pendiente_ingenieria_o_costo"):
+                st.warning(analisis["nota_pendiente"], icon="⚠️")
+                costo_turbinas = arquitectura["arreglo_turbinas"]["costo_total_usd"]
+                if costo_turbinas is not None:
+                    st.metric("Costo de fábrica -- sólo turbinas (sin inversor/BESS todavía)",
+                              f"${costo_turbinas:,.2f}")
+            else:
+                if not inversor.get("specs_verificadas", True):
+                    st.warning(
+                        f"El inversor seleccionado ({inversor['modelo']}) todavía no tiene datasheet "
+                        "oficial verificado -- la corriente de carga de batería usada es una estimación "
+                        "(ver Hallazgo 43 en avance-de-proyecto.md).", icon="⚠️",
+                    )
+
+                fin = analisis["analisis_financiero"]
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("CAPEX total", f"${fin['capex']:,.0f}")
+                c2.metric("Payback",
+                          f"{fin['payback_years']:.1f} años" if fin["payback_years"] is not None else "N/A")
+                c3.metric("ROI (vida útil)",
+                          f"{fin['roi_percentage']:.0f}%" if fin["roi_percentage"] is not None else "N/A")
+                c4.metric("Viabilidad", analisis["indicadores_viabilidad"]["viabilidad_economica"])
+
+                if fin["opex_anual_neto"] <= 0:
+                    # Nota (bug real encontrado con Playwright, Hallazgo 48): dos "$" en el mismo
+                    # st.caption() arman un par que Streamlit interpreta como LaTeX ($...$) y
+                    # rompe el texto -- se escapan con "\$" para que se muestren literales.
+                    st.caption(
+                        "⚠ El ahorro anual estimado en electricidad no alcanza a cubrir el mantenimiento "
+                        f"anual (ahorro: \\${fin['ahorro_anual_USD']:,.0f}/año vs. mantenimiento: "
+                        f"\\${fin['mantenimiento_anual_USD']:,.0f}/año) -- por eso Payback/ROI/NPV muestran N/A."
+                    )
+
+                st.markdown("**Arquitectura del sistema**")
+                col_arq1, col_arq2 = st.columns(2)
+                with col_arq1:
+                    st.write(f"**Inversor:** {inversor['modelo']}")
+                    st.write(
+                        f"Capacidad de carga de batería: {inversor['capacidad_bateria_max_W']:,.0f} W "
+                        f"(arreglo: {arquitectura['arreglo_turbinas']['potencia_pico_total_W']:,.0f} W pico)"
+                    )
+                with col_arq2:
+                    if sistema_tipo == "Standalone":
+                        bess = arquitectura["bess_seleccionado"]
+                        st.write(f"**BESS:** {', '.join(b['modelo'] for b in bess['bess_seleccionados'])}")
+                        st.write(f"Capacidad total: {bess['capacidad_total_kWh']:.1f} kWh")
+                    else:
+                        st.write("**BESS:** no aplica (sistema Hybrid, sin banco de baterías)")
+
+                st.markdown("**Desglose de costos (precio de venta: costo de fábrica + importación + margen)**")
+                cm = analisis["costos_con_margen_importacion"]
+                tabla_costos = pd.DataFrame([
+                    {"Categoría": "Turbinas", "Precio de venta (USD)": cm["turbinas_usd"]},
+                    {"Categoría": "Inversor", "Precio de venta (USD)": cm["inversor_usd"]},
+                    {"Categoría": "BESS", "Precio de venta (USD)": cm["bess_usd"]},
+                    {"Categoría": "Instalación", "Precio de venta (USD)": fin["capex_instalacion"]},
+                    {"Categoría": "TOTAL (CAPEX)", "Precio de venta (USD)": fin["capex"]},
+                ])
+                st.dataframe(
+                    tabla_costos.style.format({"Precio de venta (USD)": "${:,.2f}"}),
+                    hide_index=True,
+                )
+
+                with st.expander("Recomendaciones"):
+                    for rec in analisis["recomendaciones"]:
+                        st.write(rec)
+
+                st.caption(
+                    "Motor: `dimensionador_sistema_eolico.py` + `financial_engine_eolico.py` "
+                    "(Hallazgo 40-48). Turbinas y Sol-Ark 18K/30K/60K + 9K/12K/12K-LL/15K: costo de "
+                    "fábrica/cotización real. BESS EG4 (48V): precio retail, no de fábrica -- ver "
+                    "`eg4_specs.py`."
+                )
+
 st.divider()
 st.caption(
     "ECO Consultor — Simulador en desarrollo (Fase 2). "
-    "Pendiente: cálculo financiero (CAPEX, tarifa, payback), DEM automático para elevación, "
+    "Pendiente: DEM automático para elevación, "
     "PDF de cotización, registro de leads, despliegue a Cloud Run."
 )
