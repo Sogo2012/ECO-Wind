@@ -11,8 +11,12 @@ gatherUsageStats = false
 showErrorDetails = false
 
 [theme]
-primaryColor = "#003C52"
+# Colores EXACTOS de libro_de_marca_de_Eco_consultor.pdf (Hallazgo 49) -- antes eran
+# aproximados. "font" en config.toml de Streamlit sólo acepta sans serif/serif/
+# monospace (no un nombre de fuente propio) -- Montserrat/Dosis (las reales de marca)
+# se cargan aparte vía Google Fonts en el CSS de app.py.
+primaryColor = "#173D4A"
 backgroundColor = "#E8F0F3"
 secondaryBackgroundColor = "#F0F2F6"
-textColor = "#262730"
+textColor = "#414549"
 font = "sans serif"
