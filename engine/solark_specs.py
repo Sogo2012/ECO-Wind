@@ -1,22 +1,142 @@
 """
-Especificaciones técnicas detalladas de equipos Sol-Ark.
+Especificaciones técnicas detalladas de equipos Sol-Ark LATAM.
 
 Incluye:
-- 3 inversores/cargadores (18K, 30K, 60K)
+- 7 inversores/cargadores (9K, 12K, 12K-LL, 15K, 18K, 30K, 60K) - LATAM 2P/3P
 - 3 bancos de baterías LiFePO4 (40kWh, 60kWh interior/exterior)
 
 Todos los datos incluyen parámetros eléctricos, mecánicos y operacionales
 para submittal técnico de ingeniería (datasheet-level).
 
 Voltajes soportados:
-- Residencial: 48V CC, 120/240V CA (monofásico)
-- Comercial: 300V CC, 120/208V CA (trifásico)
-- Industrial: 600V CC, 277/480V CA (trifásico)
+- Residencial: 48V CC, 120/240V CA (monofásico) - Modelos 2P
+- Comercial: 300V CC, 120/208V CA (trifásico) - Modelo 30K
+- Industrial: 600V CC, 277/480V CA (trifásico) - Modelo 60K
 - BESS: 410V-614V CC (interior/exterior con climatización)
 """
 import pandas as pd
 
 SOLARK_SPECS = [
+    {
+        "Modelo": "9K-2P-LV (Residencial LATAM)",
+        "Tipo_Equipo": "Inversor/Cargador",
+        "Costo_USD": 2926.83,
+        "Potencia_FV_Max_W": 18000,
+        "Entrada_FV_Corriente_A": 36,
+        "Entrada_FV_Corriente_CC_A": 36,
+        "MPPT_Cantidad": 2,
+        "Voltaje_FV_Max_V": 500,
+        "Potencia_Salida_CA_Continua_W": 9000,
+        "Potencia_Arranque_W": 18000,
+        "Voltaje_Salida_CA": "120/240V",
+        "Voltaje_Salida_CA_Alternativo": "208V",
+        "Frecuencia_CA_Hz": "50/60",
+        "Corriente_Max_Salida_CA_A": 37.5,
+        "Corriente_Passthrough_A": 200,
+        "Voltaje_Nominal_CC_V": 48,
+        "Voltaje_Operativo_CC_Min_V": 41,
+        "Voltaje_Operativo_CC_Max_V": 63,
+        "Corriente_Carga_Descarga_Max_A": 200,
+        "Capacidad_BESS_kWh": None,
+        "Altura_mm": 863,
+        "Ancho_mm": 464,
+        "Profundidad_mm": 282,
+        "Peso_kg": 55.00,
+        "Garantia_Anos": 10,
+        "Firmware_Diseño": "EE. UU.",
+        "Notas_Tecnicas": "LATAM Edition; 9 kW de salida continua; Garantía 10 años",
+        "Stackable": False
+    },
+    {
+        "Modelo": "12K-2P-LL (Residencial LATAM Limitless)",
+        "Tipo_Equipo": "Inversor/Cargador",
+        "Costo_USD": 3657.32,
+        "Potencia_FV_Max_W": 24000,
+        "Entrada_FV_Corriente_A": 36,
+        "Entrada_FV_Corriente_CC_A": 40,
+        "MPPT_Cantidad": 2,
+        "Voltaje_FV_Max_V": 500,
+        "Potencia_Salida_CA_Continua_W": 12000,
+        "Potencia_Arranque_W": 24000,
+        "Voltaje_Salida_CA": "120/240V",
+        "Voltaje_Salida_CA_Alternativo": "208V",
+        "Frecuencia_CA_Hz": "50/60",
+        "Corriente_Max_Salida_CA_A": 50.0,
+        "Corriente_Passthrough_A": 200,
+        "Voltaje_Nominal_CC_V": 48,
+        "Voltaje_Operativo_CC_Min_V": 41,
+        "Voltaje_Operativo_CC_Max_V": 63,
+        "Corriente_Carga_Descarga_Max_A": 250,
+        "Capacidad_BESS_kWh": None,
+        "Altura_mm": 863,
+        "Ancho_mm": 464,
+        "Profundidad_mm": 282,
+        "Peso_kg": 58.00,
+        "Garantia_Anos": 10,
+        "Firmware_Diseño": "EE. UU.",
+        "Notas_Tecnicas": "LATAM Limitless Edition; 12 kW de salida continua; Garantía 10 años",
+        "Stackable": False
+    },
+    {
+        "Modelo": "12K-2P (Residencial LATAM)",
+        "Tipo_Equipo": "Inversor/Cargador",
+        "Costo_USD": 3926.83,
+        "Potencia_FV_Max_W": 24000,
+        "Entrada_FV_Corriente_A": 36,
+        "Entrada_FV_Corriente_CC_A": 40,
+        "MPPT_Cantidad": 2,
+        "Voltaje_FV_Max_V": 500,
+        "Potencia_Salida_CA_Continua_W": 12000,
+        "Potencia_Arranque_W": 24000,
+        "Voltaje_Salida_CA": "120/240V",
+        "Voltaje_Salida_CA_Alternativo": "208V",
+        "Frecuencia_CA_Hz": "50/60",
+        "Corriente_Max_Salida_CA_A": 50.0,
+        "Corriente_Passthrough_A": 200,
+        "Voltaje_Nominal_CC_V": 48,
+        "Voltaje_Operativo_CC_Min_V": 41,
+        "Voltaje_Operativo_CC_Max_V": 63,
+        "Corriente_Carga_Descarga_Max_A": 250,
+        "Capacidad_BESS_kWh": None,
+        "Altura_mm": 863,
+        "Ancho_mm": 464,
+        "Profundidad_mm": 282,
+        "Peso_kg": 58.00,
+        "Garantia_Anos": 10,
+        "Firmware_Diseño": "EE. UU.",
+        "Notas_Tecnicas": "LATAM Edition; 12 kW de salida continua; Garantía 10 años",
+        "Stackable": False
+    },
+    {
+        "Modelo": "15K-2P (Residencial LATAM)",
+        "Tipo_Equipo": "Inversor/Cargador",
+        "Costo_USD": 4756.10,
+        "Potencia_FV_Max_W": 30000,
+        "Entrada_FV_Corriente_A": 36,
+        "Entrada_FV_Corriente_CC_A": 50,
+        "MPPT_Cantidad": 3,
+        "Voltaje_FV_Max_V": 500,
+        "Potencia_Salida_CA_Continua_W": 15000,
+        "Potencia_Arranque_W": 30000,
+        "Voltaje_Salida_CA": "120/240V",
+        "Voltaje_Salida_CA_Alternativo": "208V",
+        "Frecuencia_CA_Hz": "50/60",
+        "Corriente_Max_Salida_CA_A": 62.5,
+        "Corriente_Passthrough_A": 200,
+        "Voltaje_Nominal_CC_V": 48,
+        "Voltaje_Operativo_CC_Min_V": 41,
+        "Voltaje_Operativo_CC_Max_V": 63,
+        "Corriente_Carga_Descarga_Max_A": 300,
+        "Capacidad_BESS_kWh": None,
+        "Altura_mm": 863,
+        "Ancho_mm": 464,
+        "Profundidad_mm": 282,
+        "Peso_kg": 60.00,
+        "Garantia_Anos": 10,
+        "Firmware_Diseño": "EE. UU.",
+        "Notas_Tecnicas": "LATAM Edition; 15 kW de salida continua; Garantía 10 años",
+        "Stackable": False
+    },
     {
         "Modelo": "18K-2P-LV (Residencial)",
         "Tipo_Equipo": "Inversor/Cargador",
