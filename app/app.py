@@ -59,7 +59,8 @@ import streamlit.components.v1 as components
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.simulador_pista_a import (
-    simular, comparar_metodo_ingenuo_vs_horario, wind_at_height_potencia,
+    simular, comparar_metodo_ingenuo_vs_horario, wind_at_height, wind_at_height_potencia,
+    Z0_DEFAULT, Z0_MET_DEFAULT,
 )
 from engine.flower_turbines_curves import CURVE_COEFFICIENTS
 from engine.turbine_specs import SPECS_TURBINAS, RUTA_IMAGEN, LOGO_ECO, LOGO_FLOWER_TURBINES
@@ -308,38 +309,53 @@ def crear_rosa_vientos_plotly(rosa_detallada):
     return fig
 
 
-def crear_heatmap_plotly(hm_json, media_anual):
-    """Heatmap interactivo (mes × hora) -- muestra velocidad REAL en m/s a 10m (altura
-    de referencia meteorológica del EPW, WS10M -- ni 0m ni la altura de buje de la
-    turbina, eso sale del perfil logarítmico de abajo).
+def crear_heatmap_plotly(hm_json, media_anual, altura_m=10.0, z0=Z0_DEFAULT, z0_met=Z0_MET_DEFAULT):
+    """Heatmap interactivo (mes × hora) -- velocidad REAL en m/s, a la altura `altura_m`
+    (default 10m, la altura de referencia meteorológica del EPW, WS10M).
 
     `hm_json` (heatmap_json_desde_epw()) trae el patrón como ÍNDICE relativo a la media
-    anual (valor=1.0 en la media, 2.0 = el doble) -- formato compartido con
+    anual A 10M (valor=1.0 en la media, 2.0 = el doble) -- formato compartido con
     generar_clima_gwa() en engine/simulador_pista_a.py (que sí necesita el índice, para
-    escalarlo a distintas medias objetivo). Acá se multiplica por `media_anual` (m/s
-    real de la fuente elegida) ANTES de graficar, para mostrar velocidad real de una vez
-    -- versión anterior mostraba el índice crudo (máximo visual ~2) y sólo agregaba los
-    m/s en el hover; en un screenshot o print no hay hover, así que seguía sin
-    entenderse (aclaración pedida después de Hallazgo 37, ver avance-de-proyecto.md).
+    escalarlo a distintas medias objetivo). Acá se multiplica por `media_anual` para
+    tener la velocidad real a 10m, y LUEGO se lleva a `altura_m` con el mismo perfil
+    logarítmico de dos rugosidades que usa `simular()` para el cálculo de energía real
+    (`wind_at_height()`, Hallazgo 20) -- así el heatmap muestra la misma velocidad de
+    buje que de verdad entra a la curva de potencia, no sólo la de 10m.
+
+    Como `wind_at_height()` escala la velocidad por un factor que sólo depende de la
+    altura (no del valor de v en sí -- es la misma razón logarítmica para cualquier
+    hora), cambiar `altura_m` reescala el heatmap COMPLETO por una misma constante: el
+    patrón (qué horas/meses son más ventosos que otros) no cambia, sólo la escala de
+    colores -- es el resultado esperado de este modelo, no una limitación del gráfico.
+
+    Si `altura_m` queda por debajo de `z0` (subcapa de rugosidad, perfil no confiable),
+    devuelve (None, aviso) en vez de una figura -- mismo criterio que wind_at_height().
 
     El texto del hover se arma en Python (celda por celda), NO con `customdata` +
     `hovertemplate` -- se probó esa vía primero y el Plotly.js que trae Streamlit 1.35
     NO interpola `%{customdata}` en heatmaps (se confirmó en vivo con la app corriendo:
     el hover mostraba literalmente el texto `%{customdata:.2f}` sin reemplazar), así que
     se arma el texto ya resuelto por celda -- funciona en cualquier versión."""
+    if altura_m <= z0:
+        return None, (f"Altura elegida ({altura_m:.1f}m) por debajo de la rugosidad del "
+                       f"terreno destino (z0={z0}m) -- el perfil logarítmico no es "
+                       f"físicamente confiable ahí, mismo criterio que wind_at_height().")
+
     meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
-    # Parsear formato: lista de dicts con {month, hour, value=índice relativo a la media anual}
+    # Parsear formato: lista de dicts con {month, hour, value=índice relativo a la media anual a 10m}
     data = json.loads(hm_json) if isinstance(hm_json, str) else hm_json
     indice = np.zeros((12, 24))
     for item in data:
         indice[item["month"] - 1, item["hour"]] = item["value"]
-    grid_ms = indice * media_anual
+    grid_10m = indice * media_anual
+    grid_ms = wind_at_height(grid_10m, 10, altura_m, z0=z0, z0_met=z0_met)
 
     texto = np.empty((12, 24), dtype=object)
     for m in range(12):
         for h in range(24):
             texto[m, h] = (f"<b>{meses[m]}</b><br>Hora: {h}:00<br>"
-                            f"{grid_ms[m, h]:.2f} m/s (índice {indice[m, h]:.2f})")
+                            f"{grid_ms[m, h]:.2f} m/s a {altura_m:.1f}m "
+                            f"(índice {indice[m, h]:.2f})")
 
     fig = go.Figure(data=go.Heatmap(
         z=grid_ms, x=list(range(24)), text=texto, hoverinfo='text',
@@ -348,22 +364,35 @@ def crear_heatmap_plotly(hm_json, media_anual):
         colorbar=dict(title='m/s', thickness=15)
     ))
     fig.update_layout(
-        title="Velocidad media real del viento a 10m (mes × hora)",
+        title=f"Velocidad media real del viento a {altura_m:.1f}m (mes × hora)",
         xaxis_title="Hora del día", yaxis_title="Mes",
         height=450, font=dict(family="sans-serif", size=10),
         margin=dict(l=80, r=100, t=50, b=60),
         xaxis=dict(tickmode='linear', tick0=0, dtick=3),
         paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
     )
-    return fig
+    return fig, None
 
 
-def crear_perfil_viento_plotly(velocidad_10m, z0_ref=0.3, altura_max=10):
-    """Perfil logarítmico interactivo con Plotly (paleta azul)."""
+def crear_perfil_viento_plotly(velocidad_10m, z0=Z0_DEFAULT, z0_met=Z0_MET_DEFAULT,
+                                altura_max=10, altura_marcada=None):
+    """Perfil logarítmico interactivo con Plotly (paleta azul) -- MISMA fórmula y
+    rugosidades que `simular()` usa para el cálculo real de energía
+    (`wind_at_height()`, log law con z0 de destino y z0_met de referencia
+    meteorológica, Hallazgo 20).
+
+    BUG REAL corregido acá: la versión anterior recibía un `z0_ref` que sólo se
+    mostraba en el título -- el cálculo en sí ignoraba ese valor y usaba SIEMPRE la ley
+    de potencia con terreno "suburban" fijo (z0=0.5m según TERRENOS_ENERGYPLUS), sin
+    importar lo que dijera el título (que por default decía "z0=0.3 m", un valor
+    DISTINTO al que realmente se estaba usando). Ahora `z0` se usa de verdad, con la
+    misma ley logarítmica que ya usa el cálculo de producción -- no la ley de potencia
+    (esa queda sólo para el cross-check explícito de Hallazgo 20 en Resultados).
+
+    `altura_marcada`: si se da, agrega un punto + anotación en esa altura exacta (para
+    que se vea el mismo valor que muestra el heatmap a esa altura, con el mismo z0)."""
     alturas = np.linspace(0.1, altura_max, 100)
-    velocidades = wind_at_height_potencia(
-        velocidad_10m, 10, alturas, terreno="suburban", terreno_met="country"
-    )
+    velocidades = wind_at_height(velocidad_10m, 10, alturas, z0=z0, z0_met=z0_met)
     AZUL_CLARO = '#4b6ba9'
     fig = go.Figure()
     fig.add_trace(go.Scatter(
@@ -371,10 +400,20 @@ def crear_perfil_viento_plotly(velocidad_10m, z0_ref=0.3, altura_max=10):
         fill='tonextx',
         fillcolor='rgba(75, 107, 169, 0.15)',
         line=dict(color=AZUL_CLARO, width=2.5),
-        hovertemplate='<b>%{y:.2f}m</b><br>Viento: %{x:.2f} m/s<extra></extra>'
+        hovertemplate='<b>%{y:.2f}m</b><br>Viento: %{x:.2f} m/s<extra></extra>',
+        showlegend=False,
     ))
+    if altura_marcada is not None:
+        v_marcada = float(wind_at_height(velocidad_10m, 10, altura_marcada, z0=z0, z0_met=z0_met))
+        fig.add_trace(go.Scatter(
+            x=[v_marcada], y=[altura_marcada], mode='markers+text',
+            marker=dict(color='#ea2600', size=10),
+            text=[f"{v_marcada:.2f} m/s"], textposition='top center',
+            hovertemplate=f'<b>{altura_marcada:.2f}m</b><br>Viento: {v_marcada:.2f} m/s<extra></extra>',
+            showlegend=False,
+        ))
     fig.update_layout(
-        title=f"Perfil logarítmico de viento (z0={z0_ref} m)",
+        title=f"Perfil logarítmico de viento (z0 destino={z0} m)",
         xaxis_title="Velocidad (m/s)", yaxis_title="Altura (m)",
         height=380, template='plotly_white',
         font=dict(family="sans-serif", size=10),
@@ -598,17 +637,42 @@ with tab_contexto:
                        f"Media anual real (10m): {media_confirmada:.2f} m/s.", icon="✅")
 
         st.divider()
+
+        # Altura de buje a explorar (Hallazgo 39): un solo slider mueve tanto el heatmap
+        # como el perfil de abajo, con la MISMA rugosidad de destino que se usa en el
+        # cálculo real de energía (Equipos y configuración > Parámetros avanzados) --
+        # si esa pestaña todavía no se visitó en esta sesión, cae al default de simular().
+        z0_actual = st.session_state.get("z0_avanzado", Z0_DEFAULT)
+        _altura_explorar = st.slider(
+            "Altura de buje a explorar (m)", 0.5, 15.0, 10.0, 0.5, key="altura_explorar_slider",
+            help="Mueve esta altura para ver cómo cambia la velocidad real del viento (heatmap y "
+                 "perfil de abajo) entre la altura de referencia del EPW (10m) y la altura real de "
+                 "buje de tu turbina -- misma fórmula y rugosidad que usa el cálculo de energía.",
+        )
+        st.caption(
+            f"Rugosidad de destino usada abajo: z0={z0_actual} m -- configurable en "
+            f"\"⚙️ Equipos y configuración\" > Parámetros avanzados."
+        )
+
         col_g1, col_g2 = st.columns(2)
         with col_g1:
             st.plotly_chart(crear_rosa_vientos_plotly(rosa_detallada), use_container_width=True)
         with col_g2:
-            st.plotly_chart(crear_heatmap_plotly(hm_json, media_anual=media_confirmada), use_container_width=True)
+            _fig_heatmap, _aviso_heatmap = crear_heatmap_plotly(
+                hm_json, media_anual=media_confirmada, altura_m=_altura_explorar, z0=z0_actual)
+            if _aviso_heatmap:
+                st.warning(_aviso_heatmap, icon="⚠️")
+            else:
+                st.plotly_chart(_fig_heatmap, use_container_width=True)
 
         st.divider()
         col_perfil = st.columns(1)[0]
         with col_perfil:
-            _altura_perfil = st.slider("Altura máxima a mostrar", 1.0, 15.0, 10.0, 0.5, key="altura_perfil_slider")
-            st.plotly_chart(crear_perfil_viento_plotly(media_confirmada, altura_max=_altura_perfil), use_container_width=True)
+            _altura_max_perfil = max(_altura_explorar * 1.15, 10.0)
+            st.plotly_chart(
+                crear_perfil_viento_plotly(media_confirmada, z0=z0_actual,
+                                            altura_max=_altura_max_perfil, altura_marcada=_altura_explorar),
+                use_container_width=True)
 
 
 # --- Tab: Equipos y configuración -- turbinas, clústers, parámetros avanzados ---

@@ -2291,6 +2291,54 @@ un valor fijo).
 
 ---
 
+### Hallazgo 39 — Slider de altura de buje: el heatmap (y el perfil) ahora muestran la velocidad real a CUALQUIER altura, no sólo a los 10m del EPW; bug real de vectorización encontrado y corregido en `wind_at_height()`
+
+Pedido directo: "quiero ver cómo varía la velocidad del aire no sólo en el perfil sino también en el
+heatmap -- quiero que el heatmap cambie con la altura". Antes del Hallazgo 38, el heatmap sólo podía
+mostrar la velocidad a 10m (la altura de referencia del EPW); el perfil logarítmico de abajo era la
+única vista a otras alturas, y encima con dos problemas reales propios (ver más abajo).
+
+**Un solo slider, "Altura de buje a explorar (m)" (0.5-15m), mueve ahora los dos gráficos a la vez:**
+- El heatmap recalcula la velocidad real a esa altura con `wind_at_height()` -- la MISMA fórmula
+  logarítmica de dos rugosidades que `simular()` usa para el cálculo real de energía (Hallazgo 20),
+  no una aproximación aparte. Título y colorbar cambian con la altura (ej. "...a 3.0m").
+- El perfil logarítmico de abajo (ya existía) ahora marca con un punto rojo la velocidad exacta en
+  esa misma altura, para comparar visualmente los dos gráficos.
+- Los dos usan la MISMA rugosidad de destino (z0) que el usuario elige en "Equipos y configuración >
+  Parámetros avanzados" -- antes el perfil ignoraba por completo ese valor (ver bug de abajo).
+
+**Aclaración física importante, no una limitación del gráfico:** como `wind_at_height()` escala la
+velocidad por un factor que sólo depende de la altura (misma razón logarítmica para cualquier hora
+del año), mover el slider reescala el heatmap COMPLETO por una misma constante -- el patrón (qué
+horas/meses son más ventosos que otros) no cambia, sólo la escala de colores. Es el comportamiento
+correcto de este modelo de perfil de viento, no algo a corregir.
+
+**Bug real #1, encontrado al implementar esto, no antes:** `wind_at_height()` nunca soportó un
+arreglo de alturas -- sólo alturas escalares (un buje real) o arreglos de VELOCIDAD (las 8760 horas).
+El perfil logarítmico necesita evaluar 100 alturas a la vez para dibujar la curva completa, y el
+`if h_target <= z0:` de la función (comparación de Python normal, no vectorizada) reventaba con
+`ValueError: The truth value of an array with more than one element is ambiguous` en cuanto se le
+pasó un arreglo de alturas -- confirmado en vivo con Streamlit + Playwright, no en una prueba
+sintética. Arreglado vectorizando con `np.where()` en vez de un `if` de Python -- retrocompatible
+100% con el uso normal (altura escalar), ahora también acepta un arreglo de alturas.
+
+**Bug real #2, preexistente, encontrado al tocar `crear_perfil_viento_plotly()`:** el parámetro
+`z0_ref` de esa función sólo se usaba para el TÍTULO del gráfico ("z0=0.3 m") -- el cálculo en sí
+ignoraba `z0_ref` por completo y usaba siempre la ley de potencia con terreno fijo `"suburban"`
+(z0=0.5m según `TERRENOS_ENERGYPLUS`, NO 0.3m). El título mentía sobre qué rugosidad se estaba
+usando de verdad, y encima no era la que el usuario elegía en "Parámetros avanzados". Arreglado:
+ahora usa `wind_at_height()` (la misma ley logarítmica del cálculo real, no la de potencia -- esa
+queda sólo para el cross-check explícito de Hallazgo 20) con el `z0` que de verdad se le pasa.
+
+**Verificado end-to-end con Streamlit + Playwright real:** bajando el slider a 3m con San José (z0=0.3
+default), el heatmap muestra ~2-4.5 m/s (antes 2-8 m/s a 10m) y el perfil marca "2.02 m/s" en altura
+3m -- coincide exacto con `v_hub_medio` que ya calcula `simular()` para ese mismo caso (Hallazgo
+anterior sobre cómo se calcula el kWh). También se probó el caso límite (altura por debajo de z0,
+ej. z0=1.0 urbano denso + altura=1.0m): la app muestra un aviso explícito en vez de un heatmap
+degenerado en ceros o una excepción.
+
+---
+
 ## 6. Pendientes activos / bloqueos
 
 - [x] ~~Conseguir A/k reales del Global Wind Atlas~~ — resuelto, y con datos más ricos de lo

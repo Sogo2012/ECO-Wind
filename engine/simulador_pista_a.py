@@ -96,11 +96,18 @@ def wind_at_height(v_ref, h_ref, h_target, z0=Z0_DEFAULT, z0_met=Z0_MET_DEFAULT)
     ladybug-tools/ladybug (el perfil logaritmico no es fisicamente
     confiable ahi; mejor un 0 explicito que un numero negativo o
     indefinido silencioso).
+
+    h_target puede ser escalar (el uso normal -- un buje real) O un arreglo
+    (p.ej. para graficar el perfil completo contra la altura, un rango de
+    alturas de una sola vez) -- vectorizado con np.where en vez de un `if`
+    de Python, que fallaria (ValueError, "truth value of an array... is
+    ambiguous") si h_target trae mas de un elemento.
     """
     v_ref = np.asarray(v_ref, dtype=float)
-    if h_target <= z0:
-        return v_ref * 0.0
-    return v_ref * np.log(h_target / z0) / np.log(h_ref / z0_met)
+    h_target = np.asarray(h_target, dtype=float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        resultado = v_ref * np.log(h_target / z0) / np.log(h_ref / z0_met)
+    return np.where(h_target <= z0, 0.0, resultado)
 
 
 def wind_at_height_potencia(v_ref, h_ref, h_target, terreno="suburban", terreno_met="country"):
