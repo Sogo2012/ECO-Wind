@@ -2423,29 +2423,96 @@ pagaría múltiples fees de $2,500 -- $20,000+ solo en "importación" para un si
 residencial modesto, casi seguro muy por encima de la realidad de un solo envío
 consolidado.
 
-**Pendiente, decisión de Pablo, nada de esto se implementó todavía en `app.py` ni se
-construyó la pestaña:**
-- ¿El fee de importación de $2,500 es por SKU o por proyecto/embarque completo? Cambia
-  el CAPEX total de forma significativa en sistemas con varios componentes chicos.
-- Corregir los dos bugs eléctricos de `dimensionador_sistema_eolico.py` (límite del
-  18K basado en corriente de batería, no en `Potencia_FV_Max_W`; filtro de BESS que no
-  filtra) antes de confiar en su salida.
-- Agregar los 4 inversores residenciales que sí tienen precio real (9K/12K/12K-LL/15K)
-  pero les falta ficha técnica completa (sólo tenemos precio de la cotización, no
-  datasheet).
-- Agregar la variante de 307V del BESS `L3-HVR-60KWH` (falta, ver arriba).
-- Conseguir una cotización de fábrica/mayorista real de EG4 (o de cualquiera de los
-  otros socios de 48V) para reemplazar el precio retail por uno de la misma calidad
-  que Sol-Ark.
-- Verificar `flowerturbines_specs.py`/`flowerturbines_costos.py` contra un datasheet o
-  cotización real de Flower Turbines -- todavía no se pudo, a diferencia de Sol-Ark.
-- Decidir la arquitectura de datos: ¿un solo `SPECS_TURBINAS` (el que ya usa `app.py`,
-  Hallazgo 32) o mantener el duplicado de `flowerturbines_specs.py` con su propio
-  esquema de claves?
-- Cómo tratar en la pestaña financiera los sistemas que necesiten 30K/60K (HV): sin
-  conversor DC-DC ni inversor eólico grid-tie precificados todavía, no hay CAPEX
-  confiable para esos casos (ver conversación, pendiente de decidir mostrar aviso vs.
-  estimar con una línea genérica).
+**Pendiente en el momento de escribir esto -- ver Hallazgo 41, que resuelve las cuatro
+primeras decisiones de esta lista:**
+- [x] ~~¿El fee de importación de $2,500 es por SKU o por proyecto/embarque
+      completo?~~ -- resuelto (Hallazgo 41): se deja como parámetro
+      (`modo_importacion`), no se hardcodea ninguno de los dos.
+- [x] ~~Corregir los dos bugs eléctricos de `dimensionador_sistema_eolico.py`~~ --
+      resuelto (Hallazgo 41): capacidad real del puerto de batería, y BESS de 48V
+      movido a EG4 en vez de buscar en el catálogo HV de Sol-Ark.
+- [x] ~~Decidir la arquitectura de datos de turbinas~~ -- resuelto (Hallazgo 41):
+      `turbine_specs.py` como única fuente, `flowerturbines_specs.py`/`_costos.py`
+      eliminados.
+- [x] ~~Cómo tratar en la pestaña financiera los sistemas que necesiten 30K/60K
+      (HV)~~ -- resuelto en parte (Hallazgo 41): paquetes de fábrica AL13 (30kW/60kW)
+      cuando el arreglo calza exacto; nota pendiente explícita (no bloqueo) para
+      arreglos personalizados que no calzan con ningún paquete.
+- [ ] Agregar los 4 inversores residenciales que sí tienen precio real
+      (9K/12K/12K-LL/15K) pero les falta ficha técnica completa (sólo tenemos precio
+      de la cotización, no datasheet) -- todavía no agregados a `solark_specs.py`.
+- [ ] Agregar la variante de 307V del BESS `L3-HVR-60KWH` (falta, ver Hallazgo 40).
+- [ ] Conseguir una cotización de fábrica/mayorista real de EG4 (o de cualquiera de los
+      otros socios de 48V) para reemplazar el precio retail por uno de la misma calidad
+      que Sol-Ark.
+- [ ] Verificar Flower Turbines contra un datasheet o cotización real -- todavía no se
+      pudo, a diferencia de Sol-Ark (y la respuesta de Hallazgo 41 sobre los paquetes
+      AL13 tampoco está verificada contra una fuente primaria).
+
+---
+
+### Hallazgo 41 — Se resuelven las cuatro decisiones pendientes de Hallazgo 40: cadena de valor parametrizada, dos bugs eléctricos corregidos, specs de turbinas unificadas, y ruta de acople HV con paquete de fábrica AL13
+
+Pablo resolvió las cuatro preguntas abiertas del Hallazgo 40:
+
+1. **Fee de importación por SKU vs. por proyecto: no se decide, se parametriza.** "Es
+   necesario sensibilizar todos los datos, deja los números no hardcodeados pero sí
+   con un valor para poder hacer recálculos después." `engine/price_calculator.py`
+   agrega `calcular_precio_venta_proyecto(costos_base, modo_importacion="por_sku" |
+   "por_proyecto")` -- ninguno de los dos modos se borra, los dos quedan disponibles
+   como parámetro explícito de `dimensionar_sistema_eolico_completo()`. Con el caso de
+   ejemplo (3 turbinas + inversor + BESS, 5 líneas): "por_sku" da $57,488 de precio de
+   venta, "por_proyecto" da $44,488 -- $13,000 de diferencia, confirma que la elección
+   sí importa y no se puede dejar sin decidir para una cotización real, pero mientras
+   tanto la app puede correr con cualquiera de los dos sin reescribir código.
+
+2. **Los dos bugs eléctricos de Hallazgo 40 -- corregidos en `dimensionador_sistema_eolico.py`:**
+   - `seleccionar_inversor_solark()` ahora calcula la capacidad real desde el puerto de
+     BATERÍA (`Corriente_Carga_Descarga_Max_A × Voltaje_Nominal_CC_V`, leído directo de
+     `solark_specs.py`) en vez del puerto solar (`Potencia_FV_Max_W`) -- para el 18K
+     esto baja el límite real de 32,400W a 16,800W. También filtra de verdad por
+     `Voltaje_Nominal_CC_V == voltaje_sistema_V` (antes el chequeo `if voltaje_sistema_V
+     == 48` era tautológico, siempre verdadero, nunca comparaba nada).
+   - `seleccionar_bess_solark()` se reemplaza por `seleccionar_bess_48v()`, que ya no
+     busca en el catálogo Sol-Ark (100% alta tensión, ningún producto ahí es 48V) sino
+     en `eg4_specs.py` -- consistente con lo que confirmó Sol-Ark en Hallazgo 40 (no
+     fabrican batería de litio propia para su línea residencial).
+   - Ninguna de las dos funciones lanza excepción si no hay match: devuelven
+     `compatible: False` con la razón, para que el resto del CAPEX se siga calculando
+     (turbinas + lo que sí se pudo dimensionar) en vez de frenar todo -- "no dejemos de
+     calcular", el mismo criterio que ya se venía aplicando en toda la sesión.
+
+3. **Specs de turbinas unificadas, sin duplicado.** Se agregó `costo_usd` (real, de
+   `flowerturbines_costos.py`) a las 4 filas de `engine/turbine_specs.py::SPECS_TURBINAS`
+   que ya tenían precio de lista (small_tulip, medium_tulip, three_m_tulip, al13_2m) --
+   `None` en las otras 7. Se eliminan `engine/flowerturbines_specs.py` y
+   `engine/flowerturbines_costos.py` -- eran datos duplicados con un esquema de claves
+   incompatible con el resto de la app (nombres completos en vez de las claves
+   canónicas `small_tulip`/`al13_2m`/etc.). `turbine_specs.py` queda como única fuente
+   de verdad, tal como ya estaba conectado a `app.py` desde Hallazgo 32.
+
+4. **Ruta de acople para 30K/60K: no se bloquea, se usa el paquete de fábrica AL13
+   cuando aplica.** Flower Turbines confirmó (misma cautela de fuente que el resto de
+   las respuestas de chat, no verificado contra datasheet/cotización real) que venden
+   paquetes On-Grid "todo incluido" -- 6x AL13 de 6 módulos (~30kW, $126,100) o 6x AL13
+   de 8 módulos (~60kW, $188,500) -- con inversor y BESS de alta tensión ya integrados
+   de fábrica, evitando el problema de acople DC que un arreglo personalizado sí tiene.
+   `PAQUETES_INDUSTRIALES_AL13` en `dimensionador_sistema_eolico.py`: si el arreglo
+   seleccionado calza exacto con uno de los dos paquetes, se sugiere ese precio cerrado
+   (con la advertencia de fuente); si no calza (arreglo personalizado que igual supera
+   la línea residencial), se deja `pendiente_ingenieria_acople=True` con una nota
+   explícita -- nunca una excepción que corte el cálculo.
+
+**Verificado con dos casos reales corridos end-to-end** (`python3 -m
+engine.dimensionador_sistema_eolico`): un arreglo chico (3 turbinas distintas) resuelve
+completo con el 18K + un módulo EG4, precio de venta calculado con las líneas
+individuales; un arreglo de 6x AL13-6m (30kW) no encuentra inversor residencial
+compatible, no revienta, y sugiere el paquete industrial correcto automáticamente.
+
+**Sigue pendiente, no resuelto en este hallazgo:** cotización de fábrica/mayorista real
+de EG4 (hoy es precio retail), verificación de Flower Turbines contra datasheet propio,
+y agregar los 4 inversores residenciales nuevos (9K/12K/12K-LL/15K) que salieron en la
+cotización de Sol-Ark pero sin datasheet técnico completo todavía.
 
 ---
 
