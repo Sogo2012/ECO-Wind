@@ -4,22 +4,108 @@
 # Aplica márgenes comerciales e importación
 # =============================================================================
 
+import math
 from typing import Dict, List, Optional
 
-# Sin decidir todavia (pendiente, Hallazgo 40/41): la lectura literal del plan aplica
-# el fee de importacion POR SKU -- con un proyecto de varias lineas (turbinas +
-# inversor + varios modulos de BESS) eso puede sumar $15,000-$20,000+ solo en
-# "importacion" para un sistema residencial modesto, probablemente muy por encima de
-# lo que cuesta de verdad un embarque consolidado real. Se deja como parametro
-# explicito (MODO_IMPORTACION_DEFAULT), no hardcodeado en la formula, para poder
-# recalcular todo el CAPEX con el otro modo en cuanto haya un dato real de flete/
-# aduana consolidado -- "sensibilizar" el numero despues sin tocar la logica.
+# HISTÓRICO (Hallazgo 40/41, superado por Hallazgo 50 -- ver más abajo): antes de
+# tener un dato real de flete, esta app dudaba entre cobrar un fee fijo de $2,500
+# "por SKU" (cada turbina/inversor/módulo de BESS paga su propio fee -- podía sumar
+# $15,000-$20,000+ en un sistema residencial modesto) o "por proyecto" (un solo fee
+# para todo el embarque). MODO_IMPORTACION_DEFAULT/IMPORT_COST_USD se conservan sólo
+# por compatibilidad con las funciones viejas de abajo (calcular_precio_final,
+# calcular_bom_turbinas, etc. -- ya no forman parte del cálculo real de la app,
+# sólo las usan sus propias pruebas). El cálculo real de importación ahora es
+# calcular_flete_consolidado_usd()/calcular_precio_venta_proyecto_por_peso().
 MODO_IMPORTACION_DEFAULT = "por_sku"  # o "por_proyecto"
 
 
 # Parámetros globales de pricing
-IMPORT_COST_USD = 2500.0  # Costo fijo de importación (USD)
+IMPORT_COST_USD = 2500.0  # Costo fijo de importación (USD) -- ver nota histórica arriba
 MARGIN_PCT = 0.30  # Margen comercial (30%)
+
+
+# =============================================================================
+# Flete por peso (Hallazgo 50) -- reemplaza el fee plano de arriba
+# =============================================================================
+# Pablo (ECO Consultor) señaló que $2,500 por línea sobreestimaba brutalmente el
+# flete real: un contenedor de 40 pies de EE.UU. a Costa Rica no pasa de ~$10,000,
+# sin importar cuántas líneas de equipo lleve adentro -- con turbinas chicas (unos
+# pocos kg) ese fee plano por SKU podía llegar a costar 100-300x más que el flete
+# real por unidad. Estas tarifas y límites de peso son datos de mercado dados por
+# Pablo, NO una cotización de un forwarder real ni la ficha de empaque de fábrica
+# de Flower Turbines -- usar para dar una ORDEN DE MAGNITUD al cliente, confirmar
+# con un forwarder antes de cotizar en firme (ver avance-de-proyecto.md).
+COSTO_FLETE_UNIDAD_USD = 2000.0       # envío suelto (courier/carga chica), 1 embarque
+COSTO_FLETE_PALLET_USD = 3500.0       # 1 pallet, hasta LIMITE_PESO_PALLET_KG
+COSTO_FLETE_CONTENEDOR_USD = 10000.0  # 1 contenedor de 40', hasta LIMITE_PESO_CONTENEDOR_KG
+
+# El peso es el factor limitante que se usa acá (no el volumen): válido si la
+# fábrica embarca las turbinas desarmadas/en secciones (típico para mástiles y
+# torres), pero no confirmado con una ficha de empaque real -- ver advertencia
+# arriba. LIMITE_PESO_UNIDAD_KG es un techo razonable para que "unidad" sólo
+# aplique a envíos sueltos chicos, no a un pedido que ya llena un pallet.
+LIMITE_PESO_UNIDAD_KG = 200.0
+LIMITE_PESO_PALLET_KG = 1000.0
+LIMITE_PESO_CONTENEDOR_KG = 26000.0
+
+
+def calcular_flete_consolidado_usd(peso_total_kg: float) -> Dict:
+    """
+    Costo de flete de UN SOLO embarque consolidado de peso_total_kg (ej. todas las
+    turbinas + el inversor + el BESS de un proyecto, si van juntos), eligiendo el
+    modo más barato entre unidad suelta / N pallets / N contenedores completos.
+
+    peso_total_kg <= 0 devuelve costo 0 (nada que enviar).
+    """
+    if peso_total_kg <= 0:
+        return {"modo": "n/a", "unidades_de_transporte": 0, "costo_usd": 0.0}
+
+    opciones = []
+    if peso_total_kg <= LIMITE_PESO_UNIDAD_KG:
+        opciones.append(("unidad", 1, COSTO_FLETE_UNIDAD_USD))
+
+    n_pallets = math.ceil(peso_total_kg / LIMITE_PESO_PALLET_KG)
+    opciones.append(("pallet", n_pallets, n_pallets * COSTO_FLETE_PALLET_USD))
+
+    n_contenedores = math.ceil(peso_total_kg / LIMITE_PESO_CONTENEDOR_KG)
+    opciones.append(("contenedor", n_contenedores, n_contenedores * COSTO_FLETE_CONTENEDOR_USD))
+
+    modo, cantidad, costo = min(opciones, key=lambda o: o[2])
+    return {"modo": modo, "unidades_de_transporte": cantidad, "costo_usd": round(costo, 2)}
+
+
+def calcular_precio_venta_proyecto_por_peso(costos_base_usd: List[float],
+                                             pesos_kg: List[Optional[float]],
+                                             margen_pct: float = MARGIN_PCT * 100) -> tuple:
+    """
+    Reemplazo de calcular_precio_venta_proyecto() -- en vez de un fee fijo por
+    línea o por proyecto, calcula UN SOLO flete consolidado a partir del PESO
+    TOTAL del embarque (calcular_flete_consolidado_usd) y lo reparte proporcional
+    al costo base de cada línea, para poder seguir mostrando el desglose por
+    categoría/equipo sin cambiar el total real del embarque.
+
+    costos_base_usd, pesos_kg: listas paralelas (mismo orden, mismo largo), un
+    costo y un peso por línea. Un peso en None (dato no disponible, ej. specs de
+    BESS incompletas) se trata como 0 kg -- subestima un poco el flete total en
+    vez de inventar un peso que no se tiene.
+
+    Devuelve (precios_por_linea, precio_total, flete_info) -- flete_info es el
+    dict de calcular_flete_consolidado_usd(), útil para mostrarle al usuario qué
+    modo de envío (unidad/pallet/contenedor) se usó y por qué.
+    """
+    peso_total = sum(p for p in pesos_kg if p is not None)
+    flete_info = calcular_flete_consolidado_usd(peso_total)
+    flete_total = flete_info["costo_usd"]
+    suma_base = sum(costos_base_usd)
+
+    if suma_base <= 0:
+        return [0.0] * len(costos_base_usd), 0.0, flete_info
+
+    precios_por_linea = [
+        (c + flete_total * (c / suma_base)) * (1 + margen_pct / 100)
+        for c in costos_base_usd
+    ]
+    return precios_por_linea, sum(precios_por_linea), flete_info
 
 
 def calcular_precio_final(costo_base_usd: float,

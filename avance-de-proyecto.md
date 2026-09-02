@@ -3031,6 +3031,88 @@ generado por el botón y confirmarlo visualmente página por página) -- sin tra
 
 ---
 
+### Hallazgo 50 — El fee de importación plano de $2,500/línea sobreestimaba el flete real hasta ~300x: reemplazado por un modelo de flete consolidado por peso (unidad/pallet/contenedor)
+
+Pablo, revisando los resultados financieros para su reunión, señaló que el CAPEX no
+podía estar bien: "un contenedor de 40 pies de EE.UU. a Costa Rica no va a costar más
+de $10,000". Dio 3 tarifas de mercado (no cotización de forwarder, pero sí un dato real
+de referencia, corregido en la conversación de $35,000→$5,000→**$3,500** para el
+pallet tras detectar él mismo la inconsistencia con su propio ejemplo numérico):
+
+- **Unidad** (envío suelto, carga chica): $2,000
+- **Pallet**: $3,500
+- **Contenedor de 40'**: $10,000
+
+**El problema real que esto exponía:** desde Hallazgo 40/41, `price_calculator.py`
+tenía un `IMPORT_COST_USD=$2,500` FIJO aplicado por cada LÍNEA del pedido (modo
+"por_sku": cada turbina individual, el inversor, y cada módulo de BESS pagaban su
+propio fee de $2,500) o por todo el proyecto (modo "por_proyecto", 1 solo fee). Ninguno
+de los dos modos tenía relación con el flete real: una Small Tulip de 20kg pagaba el
+mismo fee que un contenedor entero. Verificado con las 4 turbinas de costo real
+verificado: el fee plano sobreestimaba el flete real entre **16x (3-Meter Tulip) y
+~300x (Small Tulip)**.
+
+**Solución implementada:** nuevo modelo de flete CONSOLIDADO por peso real del
+embarque, en `engine/price_calculator.py`:
+- `calcular_flete_consolidado_usd(peso_total_kg)`: dado el peso total de un embarque
+  (turbinas + inversor + BESS juntos), elige el modo más barato entre 1 unidad suelta
+  (≤200kg, techo razonable), N pallets (≤1,000kg c/u) o N contenedores (≤26,000kg
+  c/u) -- los 3 límites de peso son supuestos de ingeniería (peso como factor
+  limitante, no volumen; válido si la fábrica embarca las turbinas
+  desarmadas/en secciones, típico para mástiles/torres, pero NO verificado con una
+  ficha de empaque real de Flower Turbines).
+- `calcular_precio_venta_proyecto_por_peso(costos, pesos)`: reemplaza
+  `calcular_precio_venta_proyecto()` en los 2 lugares donde de verdad se usaba
+  (`dimensionador_sistema_eolico.py` a nivel de unidad física, y
+  `sistema_eolico_completo.py` a nivel de categoría turbinas/inversor/BESS) --
+  calcula el flete UNA vez sobre el peso total y lo reparte proporcional al costo
+  base de cada línea, igual que ya hacía el viejo modo "por_proyecto" pero con el
+  costo real en vez del fee inventado.
+- Se agregó `peso_kg`/`peso_total_kg` a `seleccionar_inversor_solark()`,
+  `seleccionar_bess_48v()` y `calcular_costo_arreglo_turbinas()` (de
+  `solark_specs.py`/`eg4_specs.py`/`turbine_specs.py`, ya existían esos datos, sólo no
+  se exponían) -- un peso en `None` (ej. EG4 WallMount Indoor sin ficha completa,
+  Hallazgo 49) se trata como 0kg, subestima un poco el flete en vez de inventar un dato.
+- **Se elimina el parámetro `modo_importacion`** ("por_sku"/"por_proyecto") de
+  `dimensionar_sistema_eolico_completo()` y `analizar_sistema_eolico_completo()`, y
+  el radio button correspondiente en la pestaña "Análisis Financiero" -- ya no hay
+  ambigüedad que sensibilizar, el modelo de peso reemplaza a los dos modos viejos.
+  `IMPORT_COST_USD`/`MODO_IMPORTACION_DEFAULT`/`calcular_precio_venta_proyecto()`
+  quedan en el archivo sólo por compatibilidad con las funciones viejas de PR #18
+  (`calcular_precio_final`, `calcular_bom_turbinas`, etc.) que ya no forman parte del
+  cálculo real de la app -- sus pruebas existentes siguen intactas.
+- La app ahora le muestra a Pablo, en el desglose de costos de "Análisis Financiero",
+  qué modo de flete se usó y cuánto costó ("Flete de importación incluido arriba: modo
+  **pallet** (1 -- $3,500 total)...").
+
+**Resultado verificado** (mismo caso default, 3× Medium Tulip en San José): el CAPEX
+total baja de **$72,261 a $65,241** (−9.7%) con el mismo arreglo -- sigue "NO VIABLE"
+(el costo de fábrica de las turbinas sigue dominando, ver Hallazgo 49), pero es un
+número más honesto. Probado también con un arreglo grande (20× 3-Meter Tulip, cae en
+modo "contenedor" con múltiples unidades) y en modo Hybrid (sin BESS) -- ningún caso
+rompe ni da un flete negativo/fantasma.
+
+**Verificado:** `py_compile` limpio en los 3 archivos de motor + `app.py`, las 32
+pruebas existentes siguen pasando sin modificarlas, y pruebas manuales de los límites
+de peso (`calcular_flete_consolidado_usd` en 50/200/500/1000/1500/5000/26000/30000/
+60000 kg) confirman que siempre elige el modo más barato, incluyendo el caso donde
+un pallet parcial sale más caro que consolidar en un contenedor. Flujo completo
+probado en vivo con Playwright (EPW real → clústers → calcular → Financiero →
+Especificación Técnica → descarga de PDF) sin tracebacks.
+
+**Pendiente, no resuelto en este hallazgo:**
+- Las 3 tarifas de flete y los 2 límites de peso (pallet/contenedor) son datos de
+  mercado dados por Pablo, NO una cotización de un forwarder real -- confirmar antes
+  de cotizar en firme a un cliente.
+- Los límites de peso asumen que las turbinas se embarcan desarmadas/en secciones
+  (razonable para mástiles de varios metros, pero no confirmado con una ficha de
+  empaque real de Flower Turbines) -- si el volumen real es el factor limitante en
+  vez del peso, estos números podrían quedar cortos.
+- El "modo unidad" (≤200kg) es un supuesto propio, no un techo real de ningún
+  forwarder consultado.
+
+---
+
 ## 6. Pendientes activos / bloqueos
 
 - [x] ~~Conseguir A/k reales del Global Wind Atlas~~ — resuelto, y con datos más ricos de lo
@@ -3305,6 +3387,16 @@ generado por el botón y confirmarlo visualmente página por página) -- sin tra
 - [ ] **Nuevo, de Hallazgo 49:** cuantificar en dólares el valor de respaldo/resiliencia
       energética que se le sugiere a Pablo presentar cuando el sistema da "NO VIABLE" por
       ahorro puro — hoy es sólo una recomendación en texto en la pestaña financiera.
+- [x] ~~Nuevo, de Hallazgo 49: sensibilizar el fee de importación plano de $2,500/línea,
+      muy por encima del flete real~~ — resuelto (Hallazgo 50): reemplazado por un modelo
+      de flete consolidado por peso (unidad $2,000/pallet $3,500/contenedor $10,000).
+- [ ] **Nuevo, de Hallazgo 50:** confirmar con un forwarder real (no un dato de mercado
+      dado de memoria) las 3 tarifas de flete y los límites de peso por pallet/contenedor
+      usados en `price_calculator.py::calcular_flete_consolidado_usd()`.
+- [ ] **Nuevo, de Hallazgo 50:** confirmar con Flower Turbines si las turbinas se
+      embarcan desarmadas/en secciones (supuesto usado para tratar el peso como el único
+      factor limitante) — si el volumen real limita antes que el peso, los límites de
+      pallet/contenedor podrían estar sobrestimando cuántas unidades entran.
 
 ## 7. Cómo navegar el repositorio en este punto
 
