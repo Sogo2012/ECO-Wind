@@ -27,3 +27,12 @@ out/
 .streamlit/secrets.toml
 tests/
 .github/
+
+# Datos de investigación/referencia que NO usa la app en producción -- confirmado que
+# ningún módulo que app.py importa (directa o indirectamente) los lee en tiempo de
+# ejecución. Se quedan en el repo (git) para consulta, pero no hace falta que viajen
+# en la imagen de Docker -- sacarlos reduce bastante el tamaño de la imagen, lo que
+# ayuda directamente contra un cold-start lento en Cloud Run.
+documentos_tecnicos/
+datos_clima/gwa_costa_rica_10m.tif
+datos_clima/gwa_juan_santamaria/
