@@ -8,11 +8,8 @@ from typing import Dict, List, Optional
 from engine.dimensionador_sistema_eolico import dimensionar_sistema_eolico_completo
 from engine.financial_engine_eolico import FinancialEngineEolico
 from engine.price_calculator import (
-    calcular_precio_venta_proyecto,
+    calcular_precio_venta_proyecto_por_peso,
     calcular_precio_kwh_instalado,
-    IMPORT_COST_USD,
-    MARGIN_PCT,
-    MODO_IMPORTACION_DEFAULT,
 )
 
 
@@ -26,7 +23,6 @@ def analizar_sistema_eolico_completo(
     costo_instalacion_pct: float = 0.35,
     vida_util_anos: int = 40,
     tasa_descuento_pct: float = 8.0,
-    modo_importacion: str = MODO_IMPORTACION_DEFAULT,
     costo_mantenimiento_pct_anual: float = 0.02,
 ) -> Dict:
     """
@@ -52,15 +48,6 @@ def analizar_sistema_eolico_completo(
         costo_instalacion_pct   : Costo instalación como % de equipos (default 35%)
         vida_util_anos          : Vida útil del proyecto (default 40)
         tasa_descuento_pct      : Tasa descuento para NPV (default 8%)
-        modo_importacion        : "por_sku" (default) o "por_proyecto" -- ver
-                                  price_calculator.py. Acá se aplica a nivel de
-                                  CATEGORÍA de equipo (turbinas/inversor/BESS como 3
-                                  líneas), no por unidad física individual como hace
-                                  `dimensionador_sistema_eolico.py::precio_venta_equipos_usd`
-                                  -- son dos granularidades distintas del mismo
-                                  parámetro, ambas expuestas (ver
-                                  `arquitectura_tecnica.precio_venta_equipos_usd` para
-                                  la versión por unidad).
         costo_mantenimiento_pct_anual: Mantenimiento anual como % del CAPEX (default
                                   2%) -- antes quedaba fijo en `FinancialEngineEolico`
                                   sin exponerse acá; es el parámetro que más pesa en
@@ -84,7 +71,6 @@ def analizar_sistema_eolico_completo(
         consumo_diario_kWh=consumo_diario_kWh,
         horas_autonomia=horas_autonomia,
         energia_anual_kWh=energia_anual_kWh,
-        modo_importacion=modo_importacion,
     )
 
     potencia_pico = arquitectura["arreglo_turbinas"]["potencia_pico_total_W"]
@@ -114,37 +100,29 @@ def analizar_sistema_eolico_completo(
     costo_bess_base = arquitectura["bess_seleccionado"]["costo_total_USD"]
     costo_bess_base_efectivo = costo_bess_base if sistema_tipo == "Standalone" else 0.0
 
-    # PASO 3: Aplicar margen y costo de importación -- 2 o 3 líneas (turbinas/inversor,
-    # y BESS sólo si el sistema es Standalone) vía la MISMA función que ya resuelve
-    # por_sku/por_proyecto en el resto de la app (price_calculator.py).
+    # PASO 3: Aplicar margen y flete de importación -- 2 o 3 líneas (turbinas/inversor,
+    # y BESS sólo si el sistema es Standalone). El flete se calcula UNA vez sobre el
+    # peso TOTAL real del embarque consolidado (calcular_precio_venta_proyecto_por_peso,
+    # Hallazgo 50) y se reparte proporcional al costo base de cada categoría --
+    # reemplaza el viejo fee plano de $2,500/línea (modo_importacion "por_sku"/
+    # "por_proyecto") que sobreestimaba el flete real hasta ~300x en turbinas chicas.
     #
     # OJO (bug real encontrado con Playwright, Hallazgo 48): en Hybrid, el BESS no
-    # existe -- si se pasa como un costo de $0 en la lista, calcular_precio_venta()
-    # igual le suma el fee de importación completo a esa línea (cobra "importar algo de
-    # $0"), inflando el CAPEX en el valor de un fee fantasma. Se excluye la línea de
-    # BESS por completo del cálculo cuando no aplica, en vez de pasarla como cero.
+    # existe -- si se pasa como un costo (y un peso) de 0 en la lista, el flete de
+    # todas formas se reparte una porción a esa línea (cobra "importar algo de $0"),
+    # inflando el CAPEX en el valor de un fee fantasma. Se excluye la línea de BESS
+    # por completo del cálculo cuando no aplica, en vez de pasarla como cero.
     costos_categorias = [costo_turbinas_total, costo_inversor_base]
+    pesos_categorias = [
+        arquitectura["arreglo_turbinas"]["peso_total_kg"],
+        arquitectura["inversor_seleccionado"]["peso_kg"],
+    ]
     if sistema_tipo == "Standalone":
         costos_categorias.append(costo_bess_base_efectivo)
+        pesos_categorias.append(arquitectura["bess_seleccionado"]["peso_total_kg"])
 
-    precios_por_categoria, _ = calcular_precio_venta_proyecto(
-        costos_categorias, modo_importacion=modo_importacion)
-
-    if precios_por_categoria is None:
-        # modo "por_proyecto": un solo fee de importación para todo el embarque, sin
-        # desglose por línea -- se reparte proporcionalmente al costo base de cada
-        # categoría para poder seguir mostrando Turbinas/Inversor/(BESS) por separado
-        # sin cambiar el total del proyecto (la suma de las líneas de abajo da
-        # exactamente el mismo total que calcular_precio_venta_proyecto ya calculó).
-        suma_base = sum(costos_categorias)
-        margen_pct = MARGIN_PCT * 100
-        if suma_base > 0:
-            precios_por_categoria = [
-                (c + IMPORT_COST_USD * (c / suma_base)) * (1 + margen_pct / 100)
-                for c in costos_categorias
-            ]
-        else:
-            precios_por_categoria = [0.0] * len(costos_categorias)
+    precios_por_categoria, _, flete_info = calcular_precio_venta_proyecto_por_peso(
+        costos_categorias, pesos_categorias)
 
     if sistema_tipo == "Standalone":
         costo_turbinas_con_margen, costo_inversor_con_margen, costo_bess_con_margen = precios_por_categoria
@@ -210,6 +188,11 @@ def analizar_sistema_eolico_completo(
                 2,
             ),
         },
+
+        # Flete consolidado por peso real del embarque (Hallazgo 50) -- modo elegido
+        # (unidad/pallet/contenedor), cuántas unidades de transporte y el costo total
+        # ya repartido arriba en costos_con_margen_importacion.
+        "flete": flete_info,
 
         "analisis_financiero": analisis_financiero,
 

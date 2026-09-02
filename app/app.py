@@ -71,7 +71,6 @@ from engine.epw_real import (
 )
 from engine.sistema_eolico_completo import analizar_sistema_eolico_completo
 from engine.dimensionador_sistema_eolico import dimensionar_sistema_eolico_completo, VOLTAJE_TURBINAS_V
-from engine.price_calculator import MODO_IMPORTACION_DEFAULT
 from engine.solark_specs import get_solark_df
 from engine.eg4_specs import get_eg4_df
 from engine.pdf_reporte import generar_pdf_especificacion
@@ -963,14 +962,6 @@ with tab_financiero:
                 with col_a4:
                     tasa_descuento_pct = st.number_input(
                         "Tasa de descuento para NPV (%)", min_value=0.0, value=8.0, step=0.5)
-                modo_importacion = st.radio(
-                    "Fee de importación", ["por_sku", "por_proyecto"],
-                    index=0 if MODO_IMPORTACION_DEFAULT == "por_sku" else 1, horizontal=True,
-                    help="'por_sku': cada categoría de equipo (turbinas/inversor/BESS) paga su propio "
-                         "fee de importación. 'por_proyecto': un solo fee para todo el embarque. Sin "
-                         "dato real de flete/aduana consolidado todavía -- ver Hallazgo 41 en "
-                         "avance-de-proyecto.md.",
-                )
 
             analisis = analizar_sistema_eolico_completo(
                 turbinas_seleccionadas=turbinas_seleccionadas,
@@ -983,7 +974,6 @@ with tab_financiero:
                 costo_mantenimiento_pct_anual=costo_mantenimiento_pct_anual,
                 vida_util_anos=int(vida_util_anos),
                 tasa_descuento_pct=tasa_descuento_pct,
-                modo_importacion=modo_importacion,
             )
 
             st.divider()
@@ -1070,6 +1060,15 @@ with tab_financiero:
                 st.dataframe(
                     tabla_costos.style.format({"Precio de venta (USD)": "${:,.2f}"}),
                     hide_index=True,
+                )
+                flete = analisis["flete"]
+                st.caption(
+                    f"Flete de importación incluido arriba: modo **{flete['modo']}** "
+                    f"({flete['unidades_de_transporte']} -- ${flete['costo_usd']:,.0f} total), "
+                    "calculado por el peso real del embarque consolidado (turbinas + inversor + "
+                    "BESS), no un fee plano por línea -- ver Hallazgo 50 en avance-de-proyecto.md. "
+                    "Tarifas de mercado dadas por Pablo/ECO Consultor, pendientes de confirmar con "
+                    "un forwarder real antes de cotizar en firme."
                 )
 
                 with st.expander("Recomendaciones"):

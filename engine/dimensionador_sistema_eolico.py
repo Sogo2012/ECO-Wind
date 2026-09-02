@@ -38,7 +38,7 @@ from typing import List, Dict, Optional
 from engine.turbine_specs import SPECS_TURBINAS
 from engine.solark_specs import get_solark_inversores_df
 from engine.eg4_specs import get_eg4_df
-from engine.price_calculator import calcular_precio_venta_proyecto, MODO_IMPORTACION_DEFAULT
+from engine.price_calculator import calcular_precio_venta_proyecto_por_peso
 
 VOLTAJE_TURBINAS_V = 48  # fijo -- así lo entregan los controladores de fábrica, no es una opción de diseño
 
@@ -111,6 +111,8 @@ def calcular_costo_arreglo_turbinas(turbinas_seleccionadas: List[str]) -> Dict:
         "costos_individuales_usd": costos,
         "costo_total_usd": sum(costos) if not falta_costo else None,
         "turbinas_sin_costo": falta_costo,
+        "pesos_individuales_kg": [t["peso_total_kg"] for t in turbinas_data],
+        "peso_total_kg": sum(t["peso_total_kg"] for t in turbinas_data),
     }
 
 
@@ -169,11 +171,13 @@ def seleccionar_inversor_solark(potencia_pico_W, voltaje_sistema_V=VOLTAJE_TURBI
         razon += (" -- OJO: este modelo todavía no tiene datasheet oficial verificado "
                    "(Hallazgo 43), la corriente de carga de batería usada acá es una "
                    "estimación, no un dato confirmado por Sol-Ark.")
+    peso_fila = fila.get("Peso_kg")
     return {
         "compatible": True,
         "modelo": fila["Modelo"],
         "potencia_ca_salida_W": fila["Potencia_Salida_CA_Continua_W"],
         "costo_USD": fila["Costo_USD"],
+        "peso_kg": float(peso_fila) if pd.notna(peso_fila) else None,
         "voltaje_entrada_dc_V": fila["Voltaje_Nominal_CC_V"],
         "voltaje_salida_ca_V": fila["Voltaje_Salida_CA"],
         "capacidad_bateria_max_W": float(fila["capacidad_bateria_max_W"]),
@@ -222,12 +226,14 @@ def seleccionar_bess_48v(capacidad_requerida_kWh: float) -> Dict:
     for _, fila in df_eg4.sort_values("Capacidad_kWh", ascending=False).iterrows():
         if capacidad_acumulada >= capacidad_requerida_kWh:
             break
+        peso_fila = fila.get("Peso_kg")
         seleccionados.append({
             "modelo": fila["Modelo"],
             "fabricante": fila["Fabricante"],
             "capacidad_kWh": fila["Capacidad_kWh"],
             "voltaje_V": fila["Voltaje_Nominal_CC_V"],
             "costo_USD": fila["Costo_USD"],
+            "peso_kg": float(peso_fila) if pd.notna(peso_fila) else None,
         })
         capacidad_acumulada += fila["Capacidad_kWh"]
 
@@ -239,6 +245,10 @@ def seleccionar_bess_48v(capacidad_requerida_kWh: float) -> Dict:
         "capacidad_total_kWh": capacidad_acumulada,
         "cantidad_modulos": len(seleccionados),
         "costo_total_USD": sum(b["costo_USD"] for b in seleccionados),
+        # Módulos sin peso verificado (ej. EG4 WallMount Indoor, ver Hallazgo 49)
+        # se tratan como 0 kg -- subestima un poco el flete en vez de inventar un
+        # peso que no está en la ficha (ver calcular_precio_venta_proyecto_por_peso).
+        "peso_total_kg": sum(b["peso_kg"] for b in seleccionados if b["peso_kg"] is not None),
         "voltaje_sistema_V": VOLTAJE_TURBINAS_V,
         "fuente": "EG4 (tercero, precio retail -- ver eg4_specs.py, no cotización de fábrica)",
     }
@@ -249,7 +259,6 @@ def dimensionar_sistema_eolico_completo(
     consumo_diario_kWh: float,
     horas_autonomia: int = 12,
     energia_anual_kWh: Optional[float] = None,
-    modo_importacion: str = MODO_IMPORTACION_DEFAULT,
 ) -> Dict:
     """
     FUNCIÓN PRINCIPAL: dimensiona CAPEX de equipos (turbinas + inversor + BESS) --
@@ -264,11 +273,11 @@ def dimensionar_sistema_eolico_completo(
     de resolver con ingeniería de acople aparte (o con un PAQUETE_INDUSTRIAL_AL13 si
     el arreglo calza con uno de los dos paquetes de fábrica).
 
-    modo_importacion: "por_sku" (default) aplica un fee de importación a CADA
-    componente (cada turbina, el inversor, cada módulo de BESS); "por_proyecto"
-    aplica un solo fee a todo el embarque. Ver price_calculator.py -- pregunta
-    todavía sin resolver con un dato real de flete/aduana consolidado, se deja como
-    parámetro explícito para poder recalcular sin tocar esta función.
+    El flete de importación se calcula por PESO real del embarque consolidado
+    (turbinas + inversor + BESS juntos) vía
+    calcular_precio_venta_proyecto_por_peso() -- reemplaza el viejo parámetro
+    modo_importacion "por_sku"/"por_proyecto" con fee plano de $2,500 (Hallazgo
+    50): ese fee sobreestimaba el flete real hasta ~300x en turbinas chicas.
     """
     arreglo = calcular_costo_arreglo_turbinas(turbinas_seleccionadas)
     corriente_dc_total = calcular_corriente_total_dc(arreglo["potencia_pico_W"], arreglo["voltaje_sistema_V"])
@@ -288,6 +297,7 @@ def dimensionar_sistema_eolico_completo(
             "corriente_total_dc_A": round(corriente_dc_total, 2),
             "costo_total_usd": arreglo["costo_total_usd"],
             "turbinas_sin_costo": arreglo["turbinas_sin_costo"],
+            "peso_total_kg": arreglo["peso_total_kg"],
         },
         "inversor_seleccionado": inversor,
     }
@@ -329,17 +339,23 @@ def dimensionar_sistema_eolico_completo(
         )
         return resultado
 
-    # Una línea de costo por componente INDIVIDUAL (cada turbina, el inversor, cada
-    # módulo de BESS) -- para que modo_importacion="por_sku" aplique el fee a cada
-    # pieza real del pedido, no a 3 categorías agregadas (turbinas/inversor/BESS).
+    # Una línea de costo (y su peso) por componente INDIVIDUAL (cada turbina, el
+    # inversor, cada módulo de BESS) -- el flete se calcula UNA vez sobre el peso
+    # TOTAL del embarque consolidado y se reparte proporcional al costo de cada
+    # línea (ver calcular_precio_venta_proyecto_por_peso, Hallazgo 50).
     costos_individuales = (
         arreglo["costos_individuales_usd"]
         + [inversor["costo_USD"]]
         + [b["costo_USD"] for b in bess["bess_seleccionados"]]
     )
-    precios_por_linea, precio_total = calcular_precio_venta_proyecto(
-        costos_individuales, modo_importacion=modo_importacion)
-    resultado["modo_importacion"] = modo_importacion
+    pesos_individuales = (
+        arreglo["pesos_individuales_kg"]
+        + [inversor["peso_kg"]]
+        + [b["peso_kg"] for b in bess["bess_seleccionados"]]
+    )
+    precios_por_linea, precio_total, flete_info = calcular_precio_venta_proyecto_por_peso(
+        costos_individuales, pesos_individuales)
+    resultado["flete_consolidado"] = flete_info
     resultado["precios_por_linea_usd"] = precios_por_linea
     resultado["precio_venta_equipos_usd"] = precio_total
     return resultado
@@ -372,14 +388,10 @@ if __name__ == "__main__":
 
     print()
     print("=" * 90)
-    print("Caso 1, comparando modo_importacion 'por_sku' vs 'por_proyecto'")
+    print("Caso 1, flete consolidado por peso (Hallazgo 50, reemplaza modo_importacion)")
     print("=" * 90)
-    r_sku = dimensionar_sistema_eolico_completo(
+    r = dimensionar_sistema_eolico_completo(
         turbinas_seleccionadas=["small_tulip", "medium_tulip", "three_m_tulip"],
-        consumo_diario_kWh=15, horas_autonomia=12, modo_importacion="por_sku")
-    r_proy = dimensionar_sistema_eolico_completo(
-        turbinas_seleccionadas=["small_tulip", "medium_tulip", "three_m_tulip"],
-        consumo_diario_kWh=15, horas_autonomia=12, modo_importacion="por_proyecto")
-    print(f"  por_sku      -> precio_venta_equipos_usd = ${r_sku['precio_venta_equipos_usd']:,.2f}")
-    print(f"  por_proyecto -> precio_venta_equipos_usd = ${r_proy['precio_venta_equipos_usd']:,.2f}")
-    print(f"  Diferencia: ${r_sku['precio_venta_equipos_usd'] - r_proy['precio_venta_equipos_usd']:,.2f}")
+        consumo_diario_kWh=15, horas_autonomia=12)
+    print(f"  flete_consolidado -> {r['flete_consolidado']}")
+    print(f"  precio_venta_equipos_usd = ${r['precio_venta_equipos_usd']:,.2f}")
