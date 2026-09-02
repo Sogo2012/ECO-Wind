@@ -2339,6 +2339,116 @@ degenerado en ceros o una excepción.
 
 ---
 
+### Hallazgo 40 — Arranca la pestaña "Análisis Financiero": auditoría de lo que trajo la sesión "Eco Wind 2" (Flower Turbines + Sol-Ark), dos bugs eléctricos reales confirmados con datasheets, y un hueco de BESS 48V resuelto con dato de mercado (no de fábrica)
+
+Pablo pidió una nueva pestaña "Análisis Financiero" a partir de un plan externo
+(`PLAN_ANALISIS_FINANCIERO_ECO_WIND.md`) y de trabajo ya hecho en otra sesión ("Eco Wind
+2", PRs #12/#15 de la rama `claude/eco-wind-audit-velocidades-7fv1sy`, ya mergeadas):
+`engine/flowerturbines_specs.py`, `engine/flowerturbines_costos.py`,
+`engine/solark_specs.py`, `engine/dimensionador_sistema_eolico.py`. Ninguno de los
+cuatro está conectado a `app.py` todavía -- es 100% trabajo de integración nuevo, sin
+nada que romper.
+
+**Duplicación real encontrada:** `flowerturbines_specs.py` es un duplicado exacto de
+los datos que ya vivían en `engine/turbine_specs.py::SPECS_TURBINAS` (Hallazgo 32, ya
+usado por `app.py` para las fichas técnicas) -- mismos 11 modelos, mismos valores, pero
+con las filas indexadas por el nombre completo del modelo ("Small Tulip Turbine (1m)")
+en vez de las claves internas que ya usa la app (`small_tulip`). Dos fuentes de verdad
+para el mismo dato, con esquemas de clave incompatibles.
+
+**Dos bugs eléctricos reales confirmados con datasheets, no solo con la palabra de un
+"representante"** (ver más abajo la aclaración sobre la fiabilidad de esas respuestas):
+`dimensionador_sistema_eolico.py::seleccionar_inversor_solark()` usa
+`Potencia_FV_Max_W` (capacidad del puerto SOLAR/MPPT) como límite para dimensionar el
+arreglo eólico -- pero las turbinas Flower Turbines (salida regulada 48V CC) se
+conectan al puerto de BATERÍA, no al solar (confirmado por dos fuentes independientes,
+y es la única lectura que tiene sentido eléctrico: el MPPT de los inversores Sol-Ark
+tiene voltaje de arranque de 125-200V, muy por encima de 48V fijos). El límite correcto
+es la corriente máxima de carga de batería (`Corriente_Carga_Descarga_Max_A`) por el
+voltaje del bus -- para el 18K eso da **16,800W (350A×48V), menos de la mitad** de los
+32,400W que usa hoy el código. Segundo bug: `seleccionar_bess_solark()` filtra con un
+`or` que es cierto para las 3 baterías del catálogo sin importar el voltaje, así que en
+la práctica no filtra nada -- y ninguna de esas 3 baterías (Serie L3, 307-614V) es
+compatible con el bus de 48V de todos modos.
+
+**Verificado con datasheets reales (PS-00019 Rev.11 480V, PS-00020 Rev.13 208V, y
+cotización de fábrica Q1136780 Miami Greentech/Sol-Ark, 28/ago/2026), no solo con la
+respuesta en texto de "Sol-Ark":** los 6 precios ya cargados en `solark_specs.py`
+(18K/30K/60K inversores + 3 BESS Serie L3) coinciden EXACTOS con la cotización real, y
+todas las specs técnicas (voltajes, corrientes, dimensiones, peso) coinciden con los
+datasheets. Dos hallazgos nuevos de esa verificación: (1) la cotización trae 4
+inversores residenciales más baratos (9K $2,926.83, 12K $3,926.83, 12K-LL $3,657.32,
+15K $4,756.10) que no están cargados todavía -- justo la línea que SÍ es compatible en
+DC directo con el bus de 48V; (2) el SKU `L3-HVR-60KWH` es en realidad DOS baterías
+físicamente distintas según con qué inversor se empareje (307V con el 30K-208V, 614.4V
+con el 60K-480V, mismo precio) -- `solark_specs.py` sólo tiene cargada la variante de
+614.4V.
+
+**Aviso de calidad de fuente, aplicado con la misma vara a ambos "fabricantes":** las
+respuestas en texto atribuidas a "Sol-Ark" y "Flower Turbines" en esta conversación no
+son documentos oficiales -- la de "Flower Turbines" en particular traía pegado un
+reporte de estado de otra sesión de Claude Code (checkmarks y un link a PR), lo que
+indica que es una respuesta generada por IA simulando al fabricante, no una
+comunicación real. Se trató como hipótesis razonable pero no verificada, igual que se
+hizo con el "$11,200 de turbinas" inventado del plan original. La respuesta de Sol-Ark
+sí resultó consistente con los datasheets reales donde se pudo cruzar (naming
+18K-2P-N/LV, arquitectura de puertos) pero tampoco es un documento oficial -- por
+ejemplo, la lista de socios de batería de 48V que dio no menciona a EG4, que en la
+práctica real del mercado es uno de los socios más comunes de Sol-Ark (misma
+distribuidora en EE.UU., Signature Solar) -- una señal de que la lista podría no ser
+completa.
+
+**Hueco real resuelto (parcialmente): no existe una batería Sol-Ark de 48V.** Sol-Ark
+confirmó (de nuevo, sin datasheet propio, sólo por texto) que no fabrica batería de
+litio propia para la línea residencial de 48V -- su único producto de batería con
+marca propia (Serie L3) es exclusivamente de alta tensión. Se agregó
+`engine/eg4_specs.py` (EG4 LifePower4 5.12kWh y WallMount 14.3kWh, tercero, NO
+Sol-Ark) con datos reales del datasheet del fabricante + precio de mercado (el más
+bajo verificado entre varios distribuidores de EE.UU. en una búsqueda web del
+02/sep/2026) -- **diferencia importante declarada en el propio archivo:** este precio
+es RETAIL (ya con margen del distribuidor puesto), no una cotización de fábrica como
+la de Sol-Ark -- son datos de calidad distinta, no deben tratarse igual de firmes.
+
+**Se creó `engine/price_calculator.py`** con la fórmula de cadena de valor del plan
+(`Precio_Venta = (Costo_Base + $2,500) × 1.30`) en un solo lugar, para aplicarla igual
+a cualquier componente nuevo. Al aplicarla de verdad al módulo EG4 más chico (costo
+base $1,199) salió **$939/kWh** -- muy por encima de lo razonable para LiFePO4
+(~$300-500/kWh típico) porque el fee fijo de $2,500 de importación, pensado para un
+componente grande (turbina/inversor/banco completo), más que duplica el costo de un
+módulo de batería chico si se aplica por unidad. **Esto expone una pregunta real sobre
+la fórmula que el plan nunca probó con un componente barato: el fee de importación,
+¿es por SKU o por embarque/proyecto completo?** Con la lectura literal (por SKU), un
+proyecto típico de varias líneas (turbinas + inversor + varios módulos de batería)
+pagaría múltiples fees de $2,500 -- $20,000+ solo en "importación" para un sistema
+residencial modesto, casi seguro muy por encima de la realidad de un solo envío
+consolidado.
+
+**Pendiente, decisión de Pablo, nada de esto se implementó todavía en `app.py` ni se
+construyó la pestaña:**
+- ¿El fee de importación de $2,500 es por SKU o por proyecto/embarque completo? Cambia
+  el CAPEX total de forma significativa en sistemas con varios componentes chicos.
+- Corregir los dos bugs eléctricos de `dimensionador_sistema_eolico.py` (límite del
+  18K basado en corriente de batería, no en `Potencia_FV_Max_W`; filtro de BESS que no
+  filtra) antes de confiar en su salida.
+- Agregar los 4 inversores residenciales que sí tienen precio real (9K/12K/12K-LL/15K)
+  pero les falta ficha técnica completa (sólo tenemos precio de la cotización, no
+  datasheet).
+- Agregar la variante de 307V del BESS `L3-HVR-60KWH` (falta, ver arriba).
+- Conseguir una cotización de fábrica/mayorista real de EG4 (o de cualquiera de los
+  otros socios de 48V) para reemplazar el precio retail por uno de la misma calidad
+  que Sol-Ark.
+- Verificar `flowerturbines_specs.py`/`flowerturbines_costos.py` contra un datasheet o
+  cotización real de Flower Turbines -- todavía no se pudo, a diferencia de Sol-Ark.
+- Decidir la arquitectura de datos: ¿un solo `SPECS_TURBINAS` (el que ya usa `app.py`,
+  Hallazgo 32) o mantener el duplicado de `flowerturbines_specs.py` con su propio
+  esquema de claves?
+- Cómo tratar en la pestaña financiera los sistemas que necesiten 30K/60K (HV): sin
+  conversor DC-DC ni inversor eólico grid-tie precificados todavía, no hay CAPEX
+  confiable para esos casos (ver conversación, pendiente de decidir mostrar aviso vs.
+  estimar con una línea genérica).
+
+---
+
 ## 6. Pendientes activos / bloqueos
 
 - [x] ~~Conseguir A/k reales del Global Wind Atlas~~ — resuelto, y con datos más ricos de lo
