@@ -2245,6 +2245,52 @@ ningún lado, sobrevivió al rediseño a Plotly de hace unos commits).
 
 ---
 
+### Hallazgo 38 — El heatmap pasa a mostrar m/s reales directo (no un índice), y los gráficos exportan con fondo transparente
+
+Dos pedidos directos después de ver el heatmap nuevo del Hallazgo 37 en un screenshot real (donde
+no hay hover): "¿por qué el máximo es sólo 2 m/s?" -- la respuesta seguía sin verse porque el
+Hallazgo 37 sólo agregó los m/s reales al HOVER, y un screenshot o imagen exportada no tiene hover.
+El gráfico en sí seguía mostrando el índice crudo (máximo visual ~2, etiqueta "Índice de viento").
+
+**Arreglo real, no otro parche al hover:** `crear_heatmap_plotly()` ahora multiplica el índice por
+`media_anual` ANTES de graficar y usa ese resultado (m/s reales) como los valores de color del
+heatmap -- título "Velocidad media real del viento a 10m (mes × hora)", colorbar en "m/s" (rango
+real ~2-8 m/s con San José), hover con el m/s Y el índice entre paréntesis para quien lo quiera. El
+dato subyacente (`heatmap_json_desde_epw()`, el índice relativo) no cambió -- sigue siendo el mismo
+formato que usa `generar_clima_gwa()` en el código no conectado de Hallazgo 21-30 -- sólo cambió
+qué se grafica en `app.py`.
+
+**Aclaración de la otra pregunta del pedido ("¿es a 0m?"):** no, el heatmap (como toda la app desde
+Hallazgo 36) es siempre a 10m -- la altura de referencia meteorológica estándar del EPW (columna
+`WS10M`), la misma que ya se muestra en "Media anual real (10m): X m/s" en el cintillo verde de la
+pestaña. Ni 0m ni la altura de buje de la turbina (eso lo muestra el "Perfil logarítmico de viento"
+aparte, más abajo en la misma pestaña).
+
+**Fondo transparente en las exportaciones PNG:** se agregó `paper_bgcolor='rgba(0,0,0,0)'` +
+`plot_bgcolor='rgba(0,0,0,0)'` (y el `bgcolor` del área polar de la rosa) a los 5 gráficos Plotly de
+la app. Verificado descargando de verdad el PNG del heatmap con el botón de cámara del gráfico
+(Playwright) y leyendo los píxeles con Pillow: la imagen exportada es RGBA, con las esquinas en
+`(0,0,0,0)` (transparente total) y el área de datos opaca -- confirma que funciona, no sólo que se
+puso el parámetro. En pantalla no cambia nada (los gráficos ya viven sobre una tarjeta blanca en la
+UI), sólo afecta la imagen descargada.
+
+**Limpieza de paso:** se eliminaron 3 funciones matplotlib más que quedaron sin usar del rediseño a
+Plotly de hace unos commits -- `graficar_heatmap_clima()`, `graficar_curva_duracion()`,
+`graficar_perfil_viento()` (mismo patrón que `graficar_rosa_vientos()`, ya eliminada en Hallazgo
+37) -- y los imports `matplotlib.pyplot` y `plotly.express`, ninguno de los dos usado ya en
+`app.py`.
+
+**Pendiente, no resuelto en este hallazgo:** el "Perfil logarítmico de viento" de esta misma pestaña
+(`crear_perfil_viento_plotly()`) usa un terreno destino fijo ("suburban") sin importar el z0 que el
+usuario elija después en "Equipos y configuración" -- por eso su valor a 10m (~3 m/s) no coincide
+con la media real de la estación (4.03 m/s): ya está aplicando de entrada una rugosidad de destino
+que reduce la velocidad, antes de que el usuario haya elegido nada. No es un bug (`simular()`, el
+cálculo real de producción, sí usa el z0 que el usuario elige) -- es sólo que este gráfico de vista
+previa no lo refleja. Si genera confusión real, es un cambio chico (pasarle el z0 elegido en vez de
+un valor fijo).
+
+---
+
 ## 6. Pendientes activos / bloqueos
 
 - [x] ~~Conseguir A/k reales del Global Wind Atlas~~ — resuelto, y con datos más ricos de lo

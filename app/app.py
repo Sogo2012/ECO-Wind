@@ -50,10 +50,8 @@ import sys
 import tempfile
 
 import folium
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 import streamlit.components.v1 as components
@@ -206,34 +204,6 @@ def cargar_epw_subido(ruta):
 # --- Helpers de gráficos ---
 
 
-def graficar_heatmap_clima(heatmap_json):
-    grid = np.zeros((12, 24))
-    for r in heatmap_json:
-        grid[r["month"] - 1, r["hour"]] = r["value"]
-    fig, ax = plt.subplots(figsize=(8, 3.5))
-    im = ax.imshow(grid, aspect="auto", cmap="Greens", origin="lower")
-    ax.set_xlabel("Hora del día")
-    ax.set_yticks(range(12))
-    ax.set_yticklabels(MESES)
-    ax.set_title("Índice de viento relativo a la media anual (mes × hora)", color=AZUL)
-    fig.colorbar(im, ax=ax, label="Índice (1.0 = media anual)")
-    fig.tight_layout()
-    return fig
-
-
-def graficar_curva_duracion(serie_w):
-    ordenado = np.sort(serie_w.values)[::-1]
-    pct_horas = np.arange(1, len(ordenado) + 1) / len(ordenado) * 100
-    fig, ax = plt.subplots(figsize=(8, 3.5))
-    ax.fill_between(pct_horas, ordenado, color=VERDE, alpha=0.25)
-    ax.plot(pct_horas, ordenado, color=VERDE, linewidth=1.5)
-    ax.set_xlabel("% de las 8,760 horas del año (ordenadas de mayor a menor producción)")
-    ax.set_ylabel("Potencia (W, total del proyecto)")
-    ax.set_title("Curva de duración -- resolución horaria completa", color=AZUL)
-    fig.tight_layout()
-    return fig
-
-
 def crear_curva_duracion_plotly(serie_w):
     """Curva de duración interactiva con Plotly."""
     ordenado = np.sort(serie_w.values)[::-1]
@@ -259,6 +229,7 @@ def crear_curva_duracion_plotly(serie_w):
         font=dict(family="sans-serif", size=11),
         xaxis=dict(gridcolor='#E8E8E8'),
         yaxis=dict(gridcolor='#E8E8E8'),
+        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
     )
 
     return fig
@@ -287,6 +258,7 @@ def crear_produccion_mensual_plotly(kwh_mensual_total):
         font=dict(family="sans-serif", size=11),
         xaxis=dict(gridcolor='#E8E8E8'),
         yaxis=dict(gridcolor='#E8E8E8'),
+        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
     )
 
     return fig
@@ -326,20 +298,29 @@ def crear_rosa_vientos_plotly(rosa_detallada):
         polar=dict(
             radialaxis=dict(visible=True, gridcolor='#D8D8D8', ticksuffix='%'),
             angularaxis=dict(rotation=90, direction='clockwise', gridcolor='#D8D8D8'),
-            bgcolor='rgba(250, 250, 250, 0.7)',
+            bgcolor='rgba(0,0,0,0)',
         ),
         legend=dict(title="Velocidad", orientation="h", yanchor="bottom", y=-0.25, x=0.1),
         height=550, font=dict(family="sans-serif", size=10),
         margin=dict(l=60, r=60, t=60, b=90),
+        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
     )
     return fig
 
 
-def crear_heatmap_plotly(hm_json, media_anual=None):
-    """Heatmap interactivo (mes × hora). `media_anual` (m/s, WS10M real de la fuente
-    elegida) es opcional -- si se pasa, el hover muestra además la velocidad real
-    (índice × media_anual), para que no se confunda el índice adimensional (centrado en
-    1.0) con m/s -- ver avance-de-proyecto.md, aclaración pedida después de Hallazgo 36.
+def crear_heatmap_plotly(hm_json, media_anual):
+    """Heatmap interactivo (mes × hora) -- muestra velocidad REAL en m/s a 10m (altura
+    de referencia meteorológica del EPW, WS10M -- ni 0m ni la altura de buje de la
+    turbina, eso sale del perfil logarítmico de abajo).
+
+    `hm_json` (heatmap_json_desde_epw()) trae el patrón como ÍNDICE relativo a la media
+    anual (valor=1.0 en la media, 2.0 = el doble) -- formato compartido con
+    generar_clima_gwa() en engine/simulador_pista_a.py (que sí necesita el índice, para
+    escalarlo a distintas medias objetivo). Acá se multiplica por `media_anual` (m/s
+    real de la fuente elegida) ANTES de graficar, para mostrar velocidad real de una vez
+    -- versión anterior mostraba el índice crudo (máximo visual ~2) y sólo agregaba los
+    m/s en el hover; en un screenshot o print no hay hover, así que seguía sin
+    entenderse (aclaración pedida después de Hallazgo 37, ver avance-de-proyecto.md).
 
     El texto del hover se arma en Python (celda por celda), NO con `customdata` +
     `hovertemplate` -- se probó esa vía primero y el Plotly.js que trae Streamlit 1.35
@@ -347,31 +328,32 @@ def crear_heatmap_plotly(hm_json, media_anual=None):
     el hover mostraba literalmente el texto `%{customdata:.2f}` sin reemplazar), así que
     se arma el texto ya resuelto por celda -- funciona en cualquier versión."""
     meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
-    # Parsear formato: lista de dicts con {month, hour, value}
+    # Parsear formato: lista de dicts con {month, hour, value=índice relativo a la media anual}
     data = json.loads(hm_json) if isinstance(hm_json, str) else hm_json
-    grid = np.zeros((12, 24))
+    indice = np.zeros((12, 24))
     for item in data:
-        grid[item["month"] - 1, item["hour"]] = item["value"]
+        indice[item["month"] - 1, item["hour"]] = item["value"]
+    grid_ms = indice * media_anual
 
     texto = np.empty((12, 24), dtype=object)
     for m in range(12):
         for h in range(24):
-            idx = grid[m, h]
-            texto[m, h] = (f"<b>{meses[m]}</b><br>Hora: {h}:00<br>Índice: {idx:.2f}"
-                            + (f" ({idx * media_anual:.2f} m/s)" if media_anual is not None else ""))
+            texto[m, h] = (f"<b>{meses[m]}</b><br>Hora: {h}:00<br>"
+                            f"{grid_ms[m, h]:.2f} m/s (índice {indice[m, h]:.2f})")
 
     fig = go.Figure(data=go.Heatmap(
-        z=grid, x=list(range(24)), text=texto, hoverinfo='text',
+        z=grid_ms, x=list(range(24)), text=texto, hoverinfo='text',
         y=meses,
         colorscale='RdYlBu_r',
-        colorbar=dict(title='Índice de viento', thickness=15)
+        colorbar=dict(title='m/s', thickness=15)
     ))
     fig.update_layout(
-        title="Índice de viento relativo a la media anual (mes × hora)",
+        title="Velocidad media real del viento a 10m (mes × hora)",
         xaxis_title="Hora del día", yaxis_title="Mes",
         height=450, font=dict(family="sans-serif", size=10),
         margin=dict(l=80, r=100, t=50, b=60),
-        xaxis=dict(tickmode='linear', tick0=0, dtick=3)
+        xaxis=dict(tickmode='linear', tick0=0, dtick=3),
+        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
     )
     return fig
 
@@ -397,25 +379,9 @@ def crear_perfil_viento_plotly(velocidad_10m, z0_ref=0.3, altura_max=10):
         height=380, template='plotly_white',
         font=dict(family="sans-serif", size=10),
         margin=dict(l=80, r=60, t=50, b=60),
-        xaxis=dict(gridcolor='#E8E8E8'), yaxis=dict(gridcolor='#E8E8E8')
+        xaxis=dict(gridcolor='#E8E8E8'), yaxis=dict(gridcolor='#E8E8E8'),
+        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
     )
-    return fig
-
-
-def graficar_perfil_viento(velocidad_10m, z0_ref=0.1, altura_max=10):
-    """Perfil logarítmico de viento sensibilizado (como LB Wind Profile)."""
-    alturas = np.linspace(0.1, altura_max, 100)
-    velocidades = wind_at_height_potencia(
-        velocidad_10m, 10, alturas, terreno="country", terreno_met="country"
-    )
-    fig, ax = plt.subplots(figsize=(6, 5))
-    ax.plot(velocidades, alturas, color=VERDE, linewidth=2)
-    ax.fill_betweenx(alturas, 0, velocidades, color=VERDE, alpha=0.2)
-    ax.set_xlabel("Velocidad del viento (m/s)")
-    ax.set_ylabel("Altura sobre el terreno (m)")
-    ax.set_title("Perfil logarítmico de viento sensibilizado", color=AZUL)
-    ax.grid(True, alpha=0.3)
-    fig.tight_layout()
     return fig
 
 
