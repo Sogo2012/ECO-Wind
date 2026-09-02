@@ -153,15 +153,22 @@ def seleccionar_inversor_solark(potencia_pico_W, voltaje_sistema_V=VOLTAJE_TURBI
         return {
             "compatible": False,
             "razon": (
-                f"Ningún inversor Sol-Ark de {voltaje_sistema_V}V nominal (línea residencial, "
-                f"hoy sólo el 18K con datos completos) tiene capacidad de carga de batería "
-                f"suficiente para {potencia_pico_W}W pico. Requiere convertidor DC-DC, acople en "
+                f"Ningún inversor Sol-Ark de {voltaje_sistema_V}V nominal (línea residencial: "
+                f"9K/12K/12K-LL/15K/18K) tiene capacidad de carga de batería suficiente para "
+                f"{potencia_pico_W}W pico. Requiere convertidor DC-DC, acople en "
                 f"CA, o revisar si el arreglo calza con un PAQUETE_INDUSTRIAL_AL13 (precio cerrado)."
             ),
         }
 
     # El más chico que alcanza -- no sobredimensionar de más si hay una opción más ajustada
     fila = candidatos.sort_values("capacidad_bateria_max_W").iloc[0]
+    specs_verificadas = bool(fila.get("Specs_Verificadas", True))
+    razon = (f"Arreglo {potencia_pico_W}W cabe en capacidad de carga de batería del "
+             f"{fila['Modelo']} ({fila['capacidad_bateria_max_W']:.0f}W)")
+    if not specs_verificadas:
+        razon += (" -- OJO: este modelo todavía no tiene datasheet oficial verificado "
+                   "(Hallazgo 43), la corriente de carga de batería usada acá es una "
+                   "estimación, no un dato confirmado por Sol-Ark.")
     return {
         "compatible": True,
         "modelo": fila["Modelo"],
@@ -171,8 +178,8 @@ def seleccionar_inversor_solark(potencia_pico_W, voltaje_sistema_V=VOLTAJE_TURBI
         "voltaje_salida_ca_V": fila["Voltaje_Salida_CA"],
         "capacidad_bateria_max_W": float(fila["capacidad_bateria_max_W"]),
         "factor_sobredimensionamiento": float(fila["capacidad_bateria_max_W"] / potencia_pico_W),
-        "razon": f"Arreglo {potencia_pico_W}W cabe en capacidad de carga de batería del "
-                 f"{fila['Modelo']} ({fila['capacidad_bateria_max_W']:.0f}W)",
+        "specs_verificadas": specs_verificadas,
+        "razon": razon,
     }
 
 

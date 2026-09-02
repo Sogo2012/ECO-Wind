@@ -7,13 +7,25 @@ potencia validada (Hallazgo 12), es información complementaria para
 mostrarla junto al selector de modelo y, más adelante, en el PDF de
 cotización.
 
-COSTO REAL DE FÁBRICA (Hallazgo 40/41): `costo_usd` agregado a las 4 turbinas que
-tienen precio de lista real (Off-Grid, sin instalación ni transporte) -- viene de
-`engine/flowerturbines_costos.py`, que existía como archivo aparte con sus PROPIAS
-claves (nombres completos tipo "Small Tulip Wind Turbine (Off-Grid)", sin relación
-directa con las claves de esta app) -- se fusiona acá para no tener dos fuentes de
-verdad con esquemas de clave incompatibles. `None` en las 7 turbinas sin precio de
-lista todavía (large_tulip, al13_4m/6m/8m, survival_unit, los 3 ecoroof).
+COSTO DE FÁBRICA (Hallazgo 40/41/43): `costo_usd` con dos niveles de confianza
+distintos, marcados en `costo_usd_fuente` -- para no mezclar sin decirlo un precio
+verificado con uno que no lo es:
+
+- "verificado" (4 turbinas: small_tulip, medium_tulip, three_m_tulip, al13_2m):
+  viene de `flowerturbines_costos.py`, lista de precios oficial leída directo
+  (Hallazgo 40).
+- "no_verificado" (5 turbinas más: large_tulip, al13_6m, al13_8m, ecoroof_flat_3,
+  ecoroof_flat_5): precio que trajo la sesión "Eco Wind 2" en paralelo (Hallazgo 43),
+  presentado como "cotización oficial Costa Rica" pero sin PDF propio en este repo
+  para confirmarlo -- se usa igual (mejor tener el número marcado que no tenerlo).
+- `None` (al13_4m, survival_unit, ecoroof_slanted): sin ningún precio todavía.
+
+Hallazgo 43 -- por qué NO se usó el precio que "Eco Wind 2" trajo para los 4 ya
+verificados: comparado contra el precio verificado, la razón es exactamente
+1.052632 (= 1/0.95) en las 4 líneas, sin excepción. Ninguna cotización real de
+mercado cae en la misma razón exacta para 4 productos de precio tan distinto por
+casualidad -- son matemáticamente el mismo número con un +5.26% aplicado, no dos
+cotizaciones independientes. Se descartan esos 4 y se mantienen los verificados.
 
 DOS DESAJUSTES REALES encontrados al asociar el data frame de Pablo con
 las 8 claves que ya existen en la app -- documentados acá, no resueltos
@@ -88,6 +100,7 @@ SPECS_TURBINAS = {
         "vida_diseno_anos": 40,
         "cimentacion_requerida": "Dado concreto 0.5x0.5x0.5m o lastre Eco-Roof",
         "costo_usd": 1153.36,
+        "costo_usd_fuente": "verificado",
     },
     "survival_unit": {
         "nombre": "Survival Unit",
@@ -138,6 +151,7 @@ SPECS_TURBINAS = {
         "vida_diseno_anos": 40,
         "cimentacion_requerida": "Losa 2.1x2.1x0.25m o zapata 1.0x1.0x1.6m (12x M14)",
         "costo_usd": 9349.26,
+        "costo_usd_fuente": "verificado",
     },
     "three_m_tulip": {
         "nombre": "3-Meter Tulip Turbine",
@@ -163,6 +177,7 @@ SPECS_TURBINAS = {
         "vida_diseno_anos": 20,
         "cimentacion_requerida": "Base de concreto reforzada con pernos M14",
         "costo_usd": 12905.75,
+        "costo_usd_fuente": "verificado",
     },
     "large_tulip": {
         "nombre": "Large Tulip Turbine",
@@ -187,7 +202,8 @@ SPECS_TURBINAS = {
         "material_chasis": "Pedestal de acero galvanizado pesado",
         "vida_diseno_anos": 20,
         "cimentacion_requerida": "Zapata 2.5x2.5x0.9m o 2.5x4.0x0.5m",
-        "costo_usd": None,
+        "costo_usd": 24700.00,
+        "costo_usd_fuente": "no_verificado",
     },
     "al13_2m": {
         "nombre": "AL13 Power Tower (2 Mód)",
@@ -213,6 +229,7 @@ SPECS_TURBINAS = {
         "vida_diseno_anos": 20,
         "cimentacion_requerida": "Base de concreto 1.0x1.0x2.2m",
         "costo_usd": 8929.05,
+        "costo_usd_fuente": "verificado",
     },
     "al13_6m": {
         "nombre": "AL13 Power Tower (6 Mód)",
@@ -237,7 +254,8 @@ SPECS_TURBINAS = {
         "material_chasis": "Acero A36 + Poste estabilizador (70 kg)",
         "vida_diseno_anos": 20,
         "cimentacion_requerida": "Zapata 2.5x2.5x0.9m + Anclaje para poste",
-        "costo_usd": None,
+        "costo_usd": 20215.00,
+        "costo_usd_fuente": "no_verificado",
     },
     "al13_8m": {
         "nombre": "AL13 Power Tower (8 Mód)",
@@ -262,7 +280,8 @@ SPECS_TURBINAS = {
         "material_chasis": "Acero A36 + Poste estabilizador reforzado",
         "vida_diseno_anos": 20,
         "cimentacion_requerida": "Zapata 2.5x2.5x1.2m + Poste lateral a 1280 mm",
-        "costo_usd": None,
+        "costo_usd": 25545.00,
+        "costo_usd_fuente": "no_verificado",
     },
     "ecoroof_flat_3": {
         "nombre": "Eco-Roof Energy Hub (Flat - 3 Turbines)",
@@ -287,7 +306,8 @@ SPECS_TURBINAS = {
         "material_chasis": "Plataforma plana. Cajas contrapeso 300x315x150 mm",
         "vida_diseno_anos": 40,
         "cimentacion_requerida": "Instalación sin perforaciones (Efecto Bouquet integrado)",
-        "costo_usd": None,
+        "costo_usd": 9295.00,
+        "costo_usd_fuente": "no_verificado",
     },
     "ecoroof_flat_5": {
         "nombre": "Eco-Roof Energy Hub (Flat - 5 Turbines)",
@@ -312,7 +332,8 @@ SPECS_TURBINAS = {
         "material_chasis": "Sistema de balancín para nivelación simétrica",
         "vida_diseno_anos": 40,
         "cimentacion_requerida": "Instalación sin perforaciones",
-        "costo_usd": None,
+        "costo_usd": 12545.00,
+        "costo_usd_fuente": "no_verificado",
     },
     "ecoroof_slanted": {
         "nombre": "Eco-Roof Energy Hub (Slanted)",
