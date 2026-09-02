@@ -66,7 +66,7 @@ from engine.simulador_pista_a import (
 from engine.flower_turbines_curves import CURVE_COEFFICIENTS
 from engine.turbine_specs import SPECS_TURBINAS, RUTA_IMAGEN, LOGO_ECO, LOGO_FLOWER_TURBINES
 from engine.epw_real import (
-    SITIOS_EPW_REAL, cargar_epw_real, heatmap_json_desde_epw, rosa_frecuencia_desde_epw,
+    SITIOS_EPW_REAL, cargar_epw_real, heatmap_json_desde_epw, rosa_vientos_detallada_desde_epw,
     obtener_estaciones_cercanas, geocode_name, descargar_y_extraer_epw, sitio_precacheado_cercano,
 )
 
@@ -160,9 +160,9 @@ def _resultado_desde_epw(df_clima, meta):
     el usuario). Hallazgo 36: ya no existe una tercera ruta de "aproximación" -- toda
     esta app corre sobre EPW real, nunca sobre una fuente sensibilizada externamente."""
     hm_json = heatmap_json_desde_epw(df_clima)
-    rosa_freq = rosa_frecuencia_desde_epw(df_clima)
+    rosa_detallada = rosa_vientos_detallada_desde_epw(df_clima)
     return dict(df_clima=df_clima, media=float(df_clima["WS10M"].mean()), hm_json=hm_json,
-                rosa_freq=rosa_freq, elevacion_m=meta["elevacion_m"], error=None, meta=meta)
+                rosa_detallada=rosa_detallada, elevacion_m=meta["elevacion_m"], error=None, meta=meta)
 
 
 def cargar_estacion_elegida(row):
@@ -204,22 +204,6 @@ def cargar_epw_subido(ruta):
 
 
 # --- Helpers de gráficos ---
-
-def graficar_rosa_vientos(freq_por_sector):
-    fig = plt.figure(figsize=(4, 4))
-    ax = fig.add_subplot(111, polar=True)
-    ax.set_theta_zero_location("N")
-    ax.set_theta_direction(-1)
-    n = len(freq_por_sector)
-    angulos = np.linspace(0, 2 * np.pi, n, endpoint=False)
-    ancho = 2 * np.pi / n * 0.9
-    ax.bar(angulos, freq_por_sector, width=ancho, color=VERDE, edgecolor="white", linewidth=0.8)
-    ax.set_xticks(np.linspace(0, 2 * np.pi, 4, endpoint=False))
-    ax.set_xticklabels(["N", "E", "S", "O"])
-    ax.set_ylabel("")
-    ax.set_title("Frecuencia por dirección (%)", pad=15, color=AZUL)
-    fig.tight_layout()
-    return fig
 
 
 def graficar_heatmap_clima(heatmap_json):
@@ -308,53 +292,78 @@ def crear_produccion_mensual_plotly(kwh_mensual_total):
     return fig
 
 
-def crear_rosa_vientos_plotly(rosa_freq):
-    """Rosa de vientos interactiva con Plotly (paleta azul→rojo weather report)."""
-    sectores = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSO', 'SO', 'OSO']
-    min_freq = np.min(rosa_freq)
-    max_freq = np.max(rosa_freq)
+def crear_rosa_vientos_plotly(rosa_detallada):
+    """Rosa de vientos clásica -- dirección × velocidad apilada, mismo concepto que la
+    que arma `ladybug.windrose.WindRose` (la librería que usa la app de referencia
+    github.com/pollination-apps/weather-report, pedida explícitamente para que la rosa
+    se entienda: no un solo color por frecuencia total (versión vieja), sino un color
+    por rango de velocidad dentro de cada dirección -- así se ve, por ejemplo, si el
+    viento del NE es sobre todo flojo o sobre todo fuerte, no sólo que "sopla del NE".
 
-    # Paleta azul→rojo (weather report)
-    colores = []
-    for freq in rosa_freq:
-        norm = (freq - min_freq) / (max_freq - min_freq + 0.001)
-        # Interpolación: azul #4b6ba9 → rojo #ea2600
-        r = int(75 + (234 - 75) * norm)
-        g = int(107 + (38 - 107) * norm)
-        b = int(169 + (0 - 169) * norm)
-        colores.append(f'rgba({r},{g},{b},0.85)')
+    8 puntos de compás (N/NE/E/SE/S/SO/O/NO) -- ver docstring de
+    rosa_vientos_detallada_desde_epw() para por qué 8 y no 12 (con 12 sectores de 30°
+    las etiquetas de 16 puntos, tipo NNE/ENE, quedan mal puestas)."""
+    sectores = ['N', 'NE', 'E', 'SE', 'S', 'SO', 'O', 'NO'][:rosa_detallada["n_sectores"]]
+    matriz = np.array(rosa_detallada["matriz"])
+    bins_label = rosa_detallada["bins_label"]
+    pct_calma = rosa_detallada["pct_calma"]
 
-    fig = go.Figure(data=go.Barpolar(
-        r=rosa_freq, theta=sectores,
-        marker=dict(color=colores, line=dict(color='#888', width=1)),
-        hovertemplate='<b>%{theta}</b><br>Frecuencia: %{r:.1f}%<extra></extra>'
-    ))
+    # Paleta secuencial azul (flojo) -> rojo (fuerte), un color por bin de velocidad --
+    # mismos colores extremos que la paleta vieja, ahora uno por bin en vez de por sector.
+    paleta = ["#4b6ba9", "#7d9ee0", "#c9d8f0", "#f5c455", "#ea2600", "#a3243d"]
+
+    fig = go.Figure()
+    for i, etiqueta in enumerate(bins_label):
+        fig.add_trace(go.Barpolar(
+            r=matriz[i], theta=sectores, name=etiqueta,
+            marker=dict(color=paleta[i % len(paleta)], line=dict(color='white', width=0.5)),
+            hovertemplate=f'<b>%{{theta}}</b><br>{etiqueta}: %{{r:.1f}}% de las horas del año<extra></extra>',
+        ))
+
     fig.update_layout(
-        title="Rosa de vientos - Frecuencia por dirección (%)",
+        barmode='stack',
+        title=f"Rosa de vientos -- % de horas por dirección y velocidad (calma: {pct_calma:.0f}%)",
         polar=dict(
-            radialaxis=dict(visible=True, range=[0, max(rosa_freq) * 1.15], gridcolor='#D8D8D8'),
-            angularaxis=dict(gridcolor='#D8D8D8'),
-            bgcolor='rgba(250, 250, 250, 0.7)'
+            radialaxis=dict(visible=True, gridcolor='#D8D8D8', ticksuffix='%'),
+            angularaxis=dict(rotation=90, direction='clockwise', gridcolor='#D8D8D8'),
+            bgcolor='rgba(250, 250, 250, 0.7)',
         ),
-        height=500, font=dict(family="sans-serif", size=10),
-        margin=dict(l=60, r=60, t=50, b=50)
+        legend=dict(title="Velocidad", orientation="h", yanchor="bottom", y=-0.25, x=0.1),
+        height=550, font=dict(family="sans-serif", size=10),
+        margin=dict(l=60, r=60, t=60, b=90),
     )
     return fig
 
 
-def crear_heatmap_plotly(hm_json):
-    """Heatmap interactivo (mes × hora)."""
+def crear_heatmap_plotly(hm_json, media_anual=None):
+    """Heatmap interactivo (mes × hora). `media_anual` (m/s, WS10M real de la fuente
+    elegida) es opcional -- si se pasa, el hover muestra además la velocidad real
+    (índice × media_anual), para que no se confunda el índice adimensional (centrado en
+    1.0) con m/s -- ver avance-de-proyecto.md, aclaración pedida después de Hallazgo 36.
+
+    El texto del hover se arma en Python (celda por celda), NO con `customdata` +
+    `hovertemplate` -- se probó esa vía primero y el Plotly.js que trae Streamlit 1.35
+    NO interpola `%{customdata}` en heatmaps (se confirmó en vivo con la app corriendo:
+    el hover mostraba literalmente el texto `%{customdata:.2f}` sin reemplazar), así que
+    se arma el texto ya resuelto por celda -- funciona en cualquier versión."""
+    meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
     # Parsear formato: lista de dicts con {month, hour, value}
     data = json.loads(hm_json) if isinstance(hm_json, str) else hm_json
     grid = np.zeros((12, 24))
     for item in data:
         grid[item["month"] - 1, item["hour"]] = item["value"]
 
+    texto = np.empty((12, 24), dtype=object)
+    for m in range(12):
+        for h in range(24):
+            idx = grid[m, h]
+            texto[m, h] = (f"<b>{meses[m]}</b><br>Hora: {h}:00<br>Índice: {idx:.2f}"
+                            + (f" ({idx * media_anual:.2f} m/s)" if media_anual is not None else ""))
+
     fig = go.Figure(data=go.Heatmap(
-        z=grid, x=list(range(24)),
-        y=['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'],
+        z=grid, x=list(range(24)), text=texto, hoverinfo='text',
+        y=meses,
         colorscale='RdYlBu_r',
-        hovertemplate='<b>%{y}</b><br>Hora: %{x}:00<br>Índice: %{z:.2f}<extra></extra>',
         colorbar=dict(title='Índice de viento', thickness=15)
     ))
     fig.update_layout(
@@ -613,7 +622,7 @@ with tab_contexto:
         st.error(error_clima, icon="🚫")
     else:
         hm_json = resultado_clima["hm_json"]
-        rosa_freq = resultado_clima["rosa_freq"]
+        rosa_detallada = resultado_clima["rosa_detallada"]
         media_confirmada = resultado_clima["media"]
 
         if "meta" in resultado_clima:
@@ -625,9 +634,9 @@ with tab_contexto:
         st.divider()
         col_g1, col_g2 = st.columns(2)
         with col_g1:
-            st.plotly_chart(crear_rosa_vientos_plotly(rosa_freq), use_container_width=True)
+            st.plotly_chart(crear_rosa_vientos_plotly(rosa_detallada), use_container_width=True)
         with col_g2:
-            st.plotly_chart(crear_heatmap_plotly(hm_json), use_container_width=True)
+            st.plotly_chart(crear_heatmap_plotly(hm_json, media_anual=media_confirmada), use_container_width=True)
 
         st.divider()
         col_perfil = st.columns(1)[0]

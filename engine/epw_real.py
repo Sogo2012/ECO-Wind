@@ -152,6 +152,60 @@ def rosa_frecuencia_desde_epw(df_clima, n_sectores=12, vel_min_calma=0.3):
     return conteo.sort_index().tolist()
 
 
+def rosa_vientos_detallada_desde_epw(df_clima, n_sectores=8, bins_velocidad=(2, 4, 6, 8), vel_min_calma=0.5):
+    """
+    Rosa de vientos clásica (dirección × velocidad) -- mismo concepto que la que arma
+    `ladybug.windrose.WindRose` (la librería que usa la app de referencia
+    github.com/pollination-apps/weather-report): cada sector de dirección se reparte en
+    barras apiladas por rango de velocidad, en vez de un solo valor de frecuencia total
+    por dirección (eso es lo que hacía `rosa_frecuencia_desde_epw()`, más simple pero
+    confuso -- no distingue "mucho viento flojo" de "poco viento fuerte" en la misma
+    dirección). Se reimplementa acá con Plotly directo en vez de agregar `ladybug` como
+    dependencia nueva -- misma idea visual, sin el paquete completo.
+
+    n_sectores=8 (compás de 8 puntos: N/NE/E/SE/S/SO/O/NO) en vez de los 12 de
+    rosa_frecuencia_desde_epw() -- con 12 sectores de 30° no hay una etiqueta de compás
+    correcta para cada uno (NNE/ENE/etc. son puntos del compás de 16, a múltiplos de
+    22.5°, no de 30°); con 8 sectores de 45° las etiquetas sí son exactas.
+
+    bins_velocidad: límites superiores de cada bin de velocidad (m/s), abierto por
+    arriba en el último -- default (2,4,6,8) da los bins [0,2) [2,4) [4,6) [6,8) [8,inf).
+
+    vel_min_calma: por debajo de esto (m/s) la dirección no está definida de forma
+    confiable -- esas horas se excluyen de la matriz y se reportan aparte como
+    "pct_calma" (mismo criterio de calma que rosa_frecuencia_desde_epw(), default más
+    alto -- 0.5 en vez de 0.3 -- porque acá la calma se muestra explícita, no se pierde
+    silenciosa dentro del sector N como en la versión vieja).
+
+    Devuelve dict: {matriz: (n_bins × n_sectores) % de TODAS las horas del año (calma
+    incluida en el total), bins_label: etiquetas "a-b m/s", pct_calma, n_sectores}.
+    """
+    n_total = len(df_clima)
+    calma = df_clima["WS10M"] <= vel_min_calma
+    pct_calma = float(calma.mean() * 100)
+
+    df = df_clima[~calma]
+    ancho = 360.0 / n_sectores
+    bins_dir = np.arange(-ancho / 2, 360 - ancho / 2 + 0.01, ancho)
+    sector = pd.cut(df["WD10"] % 360, bins=bins_dir, labels=False, include_lowest=True)
+    sector = (sector.fillna(0) % n_sectores).astype(int)
+
+    limites = [0.0] + list(bins_velocidad) + [np.inf]
+    bins_label = [
+        f"{limites[i]:.0f}-{limites[i + 1]:.0f} m/s" if np.isfinite(limites[i + 1])
+        else f">{limites[i]:.0f} m/s"
+        for i in range(len(limites) - 1)
+    ]
+    bin_vel = pd.cut(df["WS10M"], bins=limites, labels=False, include_lowest=True)
+
+    matriz = np.zeros((len(bins_label), n_sectores))
+    for b in range(len(bins_label)):
+        for s in range(n_sectores):
+            matriz[b, s] = ((bin_vel == b) & (sector == s)).sum() / n_total * 100
+
+    return dict(matriz=matriz.tolist(), bins_label=bins_label, pct_calma=pct_calma, n_sectores=n_sectores)
+
+
 def _haversine_km(lat1, lon1, lat2, lon2):
     """Distancia geodésica en km entre dos puntos -- misma fórmula que
     weather_utils.py::_haversine() de DDP-lite/Skyplus."""
