@@ -2653,6 +2653,64 @@ EPW-only y todo el trabajo de UI (Hallazgo 36-39) llegó intacto a este punto.
 
 ---
 
+### Hallazgo 44 — Pablo consiguió los 5 datasheets reales de Sol-Ark: los 4 inversores residenciales quedan con specs verificadas, y una confirmación adicional del 18K
+
+Pablo subió 5 PDFs oficiales de Sol-Ark: PS-00034 Rev.3 (9K), SK150-0003 Rev.3 (12K
+estándar), PS-00060 v1.1 (12K-2P-LL), PS-00001 Rev.7 (15K), y PS-00044 Rev.2 (18K, para
+recontrastar el que ya se tenía). Se leyeron con `pymupdf` (los otros 4 se habían leído
+directo con el lector de PDF; el del 18K, de 17 páginas nominales pero 2 páginas de
+contenido real, necesitó extracción de texto porque `pdftoppm`/poppler-utils no está
+disponible en este sandbox — apt-get bloqueado por la política de red).
+
+**Se confirma que los datos que Hallazgo 43 había marcado `Specs_Verificadas=False`
+efectivamente estaban fabricados, con diferencias reales grandes** — no un simple
+redondeo:
+
+| Campo | 9K (fabricado → real) | 12K-LL (fab. → real) | 12K está. (fab. → real) | 15K (fab. → real) |
+|---|---|---|---|---|
+| Potencia FV máx. | 18,000 → **13,000W** | 24,000 → **19,200W** | 24,000 → **12,000W** | 30,000 → **23,400W** |
+| Corriente carga/descarga bat. | 200 → **185A** | 250 → **220A** | 250 → **185A** | 300 → **275A** |
+| Passthrough | 200 → 200A (ok) | 200 → **100A** | 200 → **63A** | 200 → 200A (ok) |
+| Dimensiones (mm) | 863x464x282 → **807x494x306** | 863x464x282 → **654x452x254** | 863x464x282 → **750x450x254** | 863x464x282 → **838x494x306** |
+| Peso | 55 → **61.2kg** | 58 → **29.5kg** | 58 → **35.4kg** | 60 → **61.2kg** |
+| Rango voltaje batería | 41-63V → **43-63V** | 41-63V → **43-59V** | 41-63V → **43-63V** | 41-63V → **43-59V** |
+
+Los 4 modelos son físicamente distintos entre sí en los datos reales (dimensiones,
+peso y corrientes todos diferentes) — confirma la sospecha de Hallazgo 43 de que el
+patrón de escalado lineal que tenían los datos fabricados no correspondía a 4
+productos reales medidos por separado. El **precio** de los 4 (único dato que
+Hallazgo 43 había aceptado) no cambió — sigue siendo el de la cotización real.
+
+**Otros hallazgos menores del lote de PDFs:**
+- El "12K" en realidad son DOS productos distintos con el mismo número: el "12K-2P-N"
+  estándar (SK150-0003) y el "12K-2P-LL" Limitless (PS-00060) — no una variante de
+  firmware del mismo hardware. Ya estaban separados como dos filas desde Hallazgo 43
+  (por precio), y ahora también tienen specs técnicas propias y distintas.
+- El "12K" estándar tiene una particularidad de nameplate real: su potencia nominal de
+  9,000W CA continua + 3,000W CC de baterías = 12,000W "total" -- no son 12,000W de
+  salida CA continua como en los otros modelos. Documentado en `Notas_Tecnicas`.
+  También es el único de los 4 que sólo admite batería de Litio (no Plomo-Ácido).
+- Se corrige de paso un error real que ya traía el 18K desde antes de este hallazgo
+  (no introducido por Hallazgo 43): `Stackable=False` contradecía al propio datasheet
+  PS-00044 Rev.2 ("Apilable en Paralelo: Yes; Max 12"). Corregido a `True`.
+
+**Verificado:** `py_compile` limpio, las 32 pruebas existentes siguen pasando,
+`dimensionador_sistema_eolico.py` y `sistema_eolico_completo.py` corren end-to-end y
+seleccionan correctamente el inversor más chico que alcanza según la nueva capacidad
+real de cada uno (ej.: un arreglo de 1,600W ahora resuelve con el 9K real, 8,880W de
+capacidad de batería, en vez de con datos fabricados).
+
+**Pendiente, no resuelto en este hallazgo:** la reconciliación del PDF del 18K arrastró
+una ambigüedad de extracción de texto (una tabla a 3 columnas hizo aparecer un valor
+suelto "275A" que no correspondía a ningún campo del 18K) — se resolvió por
+triangulación (5 valores del bloque de batería calzan exactamente con las 5 etiquetas
+en el orden correcto, dando 350A, que además coincide con el dato ya verificado antes)
+pero no se guardó el PDF renderizado a imagen para confirmarlo visualmente. Si en algún
+momento hay dudas sobre el 18K, vale la pena revisar esa página con un lector de PDF
+que sí renderice imagen (este sandbox no pudo, ver arriba).
+
+---
+
 ## 6. Pendientes activos / bloqueos
 
 - [x] ~~Conseguir A/k reales del Global Wind Atlas~~ — resuelto, y con datos más ricos de lo
@@ -2894,12 +2952,12 @@ EPW-only y todo el trabajo de UI (Hallazgo 36-39) llegó intacto a este punto.
       automatizado (Playwright) en este sandbox — falta que Pablo lo vea y lo use él mismo para
       confirmar que el criterio de diseño ("mejor orden visual") quedó resuelto a su gusto, y no
       sólo funcionalmente correcto.
-- [ ] **Nuevo, de Hallazgo 41/42/43:** conseguir datasheet técnico real (o respuesta de soporte
-      Sol-Ark verificable, no una respuesta de chat) para los 4 inversores residenciales de la
-      cotización (9K-2P, 12K-2P, 12K-2P-LL, 15K-2P) — hoy tienen precio confirmado pero specs
-      técnicas marcadas `Specs_Verificadas: False` en `solark_specs.py` (Hallazgo 43: dimensiones
-      idénticas al 18K y corriente de batería escalada linealmente, patrón de estimación, no de
-      datasheet real). Pregunta ya enviada a Pablo en texto copiable (Hallazgo 42).
+- [x] ~~Nuevo, de Hallazgo 41/42/43: conseguir datasheet técnico real para los 4 inversores
+      residenciales de la cotización (9K-2P, 12K-2P, 12K-2P-LL, 15K-2P)~~ — resuelto (Hallazgo
+      44): Pablo consiguió los 5 PDFs oficiales de Sol-Ark (incluyendo uno nuevo del 18K para
+      recontrastar); `solark_specs.py` reemplazado con los valores reales de cada datasheet,
+      confirmando que los datos fabricados (Hallazgo 43) tenían errores grandes, no sólo de
+      redondeo (ej.: potencia FV del 12K estándar 24,000W fabricado vs. 12,000W real).
 - [ ] **Nuevo, de Hallazgo 41:** conseguir cotización de fábrica/mayorista real de EG4 (hoy el
       costo base usado en `eg4_specs.py` es precio retail de distribuidor en EE.UU., no de
       fábrica como Sol-Ark/Flower Turbines) — afecta la confiabilidad del precio de venta
