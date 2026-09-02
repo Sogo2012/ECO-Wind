@@ -2770,6 +2770,54 @@ el de Cloud Run) durante el `docker build` diría si el problema está en otro l
 
 ---
 
+### Hallazgo 46 — El log de Cloud BUILD (no el de Cloud Run) revela el verdadero bloqueo: el heredoc de `config.toml` nunca llegó a construir la imagen
+
+Pablo pegó el log de Cloud **Build** (el paso de `docker build`, distinto del log de
+Cloud Run de Hallazgo 45) y ahí aparece el error real, uno anterior a todo lo demás:
+
+```
+Error response from daemon: dockerfile parse error line 31: unknown instruction: [SERVER]
+```
+
+La línea 31 es `[server]`, el encabezado de sección del `RUN cat > ~/.streamlit/config.toml
+<< 'EOF' ... EOF` (heredoc) que ya traía el Dockerfile desde antes de Hallazgo 45 (de
+hecho desde el commit `7b2f262`, y el fix `747382b` de la otra sesión sólo unificó
+ENTRYPOINT+CMD, no tocó este heredoc). **La imagen nunca llegó a construirse** en
+ningún deploy hasta ahora -- el `DEADLINE_EXCEEDED` de Hallazgo 45 y este error de
+parseo son dos síntomas de la misma raíz, pero el de Hallazgo 45 alcanzó a levantar
+*alguna* imagen vieja cacheada; este último ya ni eso.
+
+**Causa real:** un heredoc dentro de un Dockerfile (`<< 'EOF'`) es una función de
+BuildKit, no de Docker clásico -- necesita que el motor de Docker que ejecuta el build
+tenga BuildKit activo para interpretarlo como "contenido de archivo" en vez de leer
+cada línea como si fuera una instrucción de Dockerfile normal. El builder que usa Cloud
+Build (`gcr.io/cloud-builders/docker`) no lo tiene activo por defecto, y agregar
+`# syntax=docker/dockerfile:1` arriba del archivo (que sí estaba, desde el fix de la
+otra sesión) NO alcanza para forzarlo si el motor por debajo no corre con BuildKit --
+por eso Docker leyó `[server]` línea por línea y lo interpretó como una instrucción
+`[SERVER]` que no existe.
+
+**Corrección, sin heredoc (0% dependiente de BuildKit):** se crea `.streamlit/config.toml`
+como archivo normal del repositorio (mismo contenido que tenía el heredoc, sin el
+`port = 8080` hardcodeado -- el puerto real siempre lo define `$PORT` vía la bandera
+`--server.port` de la línea `CMD`, tenerlo también en el TOML sólo confundía) y el
+Dockerfile ahora sólo hace `COPY . .` (que ya trae el archivo, `.dockerignore` no lo
+excluye) -- Streamlit encuentra la configuración de proyecto sola en
+`<directorio de trabajo>/.streamlit/config.toml` sin necesitar ninguna instrucción
+extra. `COPY` es una instrucción clásica de Dockerfile, funciona igual con o sin
+BuildKit. Se quita también el `# syntax=docker/dockerfile:1` (ya no hace falta nada
+de BuildKit en este Dockerfile).
+
+**Verificado:** el TOML nuevo parsea limpio (`tomllib.load`), `streamlit run app/app.py`
+sigue arrancando y respondiendo 200 con la config nueva en su lugar. No se pudo correr
+`docker build` real en este sandbox (el daemon de Docker no está corriendo acá, sólo el
+binario) -- el Dockerfile resultante usa únicamente instrucciones clásicas
+(`FROM/WORKDIR/RUN/COPY/ENV/EXPOSE/HEALTHCHECK/CMD`), sin heredocs ni ninguna otra
+sintaxis que dependa de BuildKit, así que no hay ningún elemento nuevo que el builder
+de Cloud Build no sepa interpretar.
+
+---
+
 ## 6. Pendientes activos / bloqueos
 
 - [x] ~~Conseguir A/k reales del Global Wind Atlas~~ — resuelto, y con datos más ricos de lo
