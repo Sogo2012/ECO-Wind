@@ -42,8 +42,11 @@ steps:
       - "1"
       - "--timeout"
       - "3600s"
-      - "--set-env-vars"
-      - "PORT=8080"
+      # NOTA: NO agregar "--set-env-vars PORT=8080" ni ninguna variable
+      # llamada PORT. Cloud Run reserva ese nombre y lo asigna
+      # automáticamente a partir del flag --port de arriba; si se
+      # sobrescribe manualmente, el despliegue puede quedar en un estado
+      # inconsistente y el probe de salud falla con DEADLINE_EXCEEDED.
       # Descomentar y actualizar si usas Secret Manager:
       # - "--set-secrets"
       # - "GOOGLE_SHEETS_API_KEY=projects/$PROJECT_ID/secrets/google-sheets-api-key/versions/latest"

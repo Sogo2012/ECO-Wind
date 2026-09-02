@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -52,13 +53,22 @@ textColor = "#262730"
 font = "sans serif"
 EOF
 
-# Health check (opcional, pero útil para Cloud Run)
+# Variable de entorno PORT: valor por defecto para pruebas locales
+# (docker run sin --env PORT). Cloud Run la inyecta en tiempo de ejecución
+# con el puerto real de la revisión, sobrescribiendo este valor.
+ENV PORT=8080
+
+# Exponer puerto (documentación de la imagen; Cloud Run enruta al puerto
+# indicado por la variable $PORT, que coincide con --port en el despliegue)
+EXPOSE 8080
+
+# Health check (opcional, útil para pruebas locales con `docker run`;
+# Cloud Run usa su propio probe de arranque, no esta instrucción)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:${PORT:-8080}/_stcore/health || exit 1
 
-# Exponer puerto (para documentación, Cloud Run asigna el puerto dinámicamente)
-EXPOSE 8080
-
-# Script de entrada para manejo dinámico del puerto
-ENTRYPOINT ["sh", "-c"]
-CMD ["streamlit run app/app.py --server.port=${PORT:-8080} --server.address=0.0.0.0 --logger.level=warning"]
+# Comando de arranque en una sola instrucción CMD con forma "sh -c":
+# el shell expande ${PORT:-8080} en tiempo de ejecución (Cloud Run inyecta
+# PORT dinámicamente) y Streamlit escucha en 0.0.0.0 (todas las interfaces),
+# requisito indispensable para que el probe de salud de Cloud Run responda.
+CMD ["sh", "-c", "streamlit run app/app.py --server.port=${PORT:-8080} --server.address=0.0.0.0 --server.enableCORS=false --server.enableXsrfProtection=false --logger.level=warning"]
