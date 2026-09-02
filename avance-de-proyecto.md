@@ -3111,6 +3111,18 @@ Especificación Técnica → descarga de PDF) sin tracebacks.
 - El "modo unidad" (≤200kg) es un supuesto propio, no un techo real de ningún
   forwarder consultado.
 
+**Seguimiento del mismo día:** Pablo pidió una lista de precios en PDF para llevar a
+la reunión sin depender de la app en vivo. Se agrega `generar_pdf_lista_precios()` en
+`engine/pdf_reporte.py`: una tabla por modelo de turbina (costo de fábrica + flete
+estimado + margen, misma fórmula y mismas tarifas de flete que ya usa el resto de la
+app desde este Hallazgo), separando los 4 modelos con costo verificado de los 5 con
+costo NO verificado (con advertencia explícita de no repetirlos como precio firme). El
+flete por modelo asume pedir lo suficiente para llenar 1 pallet o 1 contenedor
+completo (lo que salga más barato por unidad) -- referencia de orden de magnitud, no
+el flete de un pedido puntual real (para eso, `calcular_flete_consolidado_usd()` con
+el peso real del proyecto, que es lo que usa el resto de la app). PDF entregado
+directo a Pablo, generado y verificado visualmente (`pymupdf`) antes de enviarlo.
+
 ---
 
 ## 6. Pendientes activos / bloqueos
