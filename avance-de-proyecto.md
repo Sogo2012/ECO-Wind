@@ -2049,6 +2049,406 @@ siempre, manejado con un `st.error` legible, sin crashear).
 
 ---
 
+### Hallazgo 35 — El ráster real de GWA (ya en el repo) confirma y agrava Hallazgo 26: en el Valle Central no sólo tiene sesgo, tiene ruido espacial más grande que la señal real, e invierte el orden Santamaría/La Sabana
+
+Pendiente directo de Hallazgo 31 ("correr `generar_clima_sensibilizado()` contra el ráster real de
+Costa Rica... no se pudo verificar en este sandbox, sólo con mock"). El archivo
+`datos_clima/gwa_costa_rica_10m.tif` se agregó el 1/sep (commit `2413ff6`, bajado con
+`notebooks/Descargar_GWA_Costa_Rica.ipynb` en un entorno con internet real). Esta vez sí hay ráster
+real en el sandbox -- se instaló `rasterio` y se leyó directo con `muestrear_velocidad_media()` y
+`generar_clima_sensibilizado()`, el código real de producción, no un mock.
+
+**Primero, confirmar que es el mismo dato de Hallazgo 26 (no una descarga corrompida):** muestreando
+el ráster en las coordenadas exactas que ya usa el código (`meta["lat"]/meta["lon"]` que lee cada
+EPW real, no las coordenadas redondeadas del catálogo global -- Finca Favorita en particular tiene
+una entrada con coordenada equivocada en `datos_clima/epw_catalog_global.json`, 9.8833/-83.9167,
+~140 km de la coordenada real de su propio EPW, 9.517/-82.65 -- bug menor aparte, no afecta a
+`generar_clima_sensibilizado()` porque ese usa `meta`, no el catálogo):
+
+| Sitio | Ráster (este archivo, hoy) | Ráster (Hallazgo 26, documentado) | Media real |
+|---|---|---|---|
+| Nicoya | 2.252 | 2.252 | 2.091 |
+| Liberia | 3.390 | 3.390 | 3.629 |
+| San José (Santamaría) | 2.088 | 2.088 | 3.669 |
+| Finca Favorita | 0.180 | 0.180 | 1.413 |
+
+Coincide exacto en los cuatro sitios -- es el mismo producto de GWA, el sesgo de -43.1% en San José
+y -87.2% en Finca Favorita que Hallazgo 26 dejó "pausado, decisión de Pablo" sigue ahí, confirmado
+con el archivo real, no es algo que se arregló solo al conseguir el .tif.
+
+**Pregunta A/B del pedido -- ¿el ráster ve la diferencia real entre Santamaría (3.67 m/s) y La
+Sabana (1.43 m/s), a 11 km?** Se muestreó La Sabana con su coordenada real del catálogo (9.9368,
+-84.1077): el ráster da **3.523 m/s** -- más alto que su propia lectura en Santamaría (2.088 m/s).
+El ráster no "no ve" la diferencia (eso sería el caso menos grave) -- la ve, pero **al revés**: para
+el ráster, La Sabana es más ventosa que Santamaría; en la realidad es lo opuesto por un factor de
+2.5x. Responde directo la pregunta del pedido: no es que el escalado esté roto (la razón se calcula
+y se aplica bien, ver Hallazgo 31) -- es que el dato de entrada, en este punto específico, no tiene
+la relación correcta ni siquiera en el orden relativo, no sólo en la magnitud absoluta.
+
+**Qué tan fino es el ruido -- mismo aeropuerto, tres coordenadas "oficiales" distintas:** Juan
+Santamaría tiene tres coordenadas publicadas en este repo, todas referidas al mismo aeropuerto
+(pista única, ~3 km de largo), separadas entre sí por 1.2-2.3 km -- la de `SITIOS_DISPONIBLES`
+(10.0034, -84.2033), la del catálogo global (9.9937, -84.2088) y la del encabezado del propio EPW
+(9.9892, -84.2183). El ráster da 2.088, 3.272 y 4.712 m/s respectivamente en esas tres -- **+126%
+entre la más baja y la más alta, dentro del mismo aeropuerto.** Para contexto de escala: un barrido
+sistemático de una grilla 25×25 sobre el Valle Central (lat 9.85-10.05°, lon -84.35 a -83.95°, ~20×40
+km) da media=1.94 m/s, **desvío estándar=1.52 m/s (78% de la media)**, mínimo=0.08, máximo=12.0 m/s.
+Ese nivel de varianza pixel a pixel, en un valle mayormente plano y habitado (no una cordillera), no
+es un gradiente físico real de viento -- es ruido del producto, consistente con (y peor de lo que
+sugería) el ±20-35% que Hallazgo 30 ya había estimado con los 12 sitios EEUU+CR.
+
+**Por qué la sensibilización da "1.6 m/s máximo" cerca de San José:** dentro del Valle Central, el
+único donante real disponible es siempre San José (Nicoya/Liberia quedan a ~130 km, Finca Favorita a
+~140 km, todos fuera de cualquier punto del valle) -- `vecino_mas_cercano()` elige bien, ése no es el
+problema. El problema es el factor: `factor_ajuste_gwa() = ráster(punto)/ráster(Santamaría=2.088)`,
+aplicado a la media real de Santamaría (3.669 m/s). Con la grilla de arriba, el factor resultante
+promedia 0.93 pero con desvío enorme (0.04 a 5.8x); la media_ajustada resultante tiene mediana=2.71
+m/s y en **39% de la grilla cae por debajo de 2.0 m/s**. Se corrió `generar_clima_sensibilizado()`
+real (no simulado) en 6 puntos del Valle Central (Santamaría exacto, La Sabana, Escazú, Heredia,
+Cartago, Alajuela): salió entre 1.58 y 4.07 m/s según el punto exacto -- no hay un techo fijo de 1.6,
+pero la mayoría de los puntos que un usuario probaría a mano en o cerca de San José caen en ese rango
+bajo, porque el ráster ahí está sesgado hacia abajo Y es ruidoso, las dos cosas a la vez.
+
+**Pregunta C, confirmada por lectura de código, no es un bug nuevo:** `_rosa_freq_donante()` y el
+docstring de `generar_clima_sensibilizado()` (Hallazgo 31) ya declaran esto como límite honesto: la
+rosa de vientos es siempre la del donante (San José en este caso) sin ningún ajuste geográfico -- no
+existe mecanismo de razón para dirección, sólo para magnitud. Confirma la preocupación C del pedido,
+pero no es algo que este hallazgo cambie: ya estaba documentado y aceptado como aproximación.
+
+**Lectura honesta:** el mecanismo de razón (Hallazgo 25/26) y la selección de donante (Hallazgo
+21/22) están haciendo lo que se diseñó que hicieran. Lo que falla es el ingrediente de entrada -- el
+ráster crudo de GWA a 10m, específicamente en Valle Central y costa Caribe (Hallazgo 26/29) -- que
+acá se confirma no sólo sesgado sino más ruidoso que la señal real que se le pide resolver (una
+diferencia de terreno a escala de km). "¿El ráster es inútil?" -- para esta zona puntual, con esta
+resolución/altura descargada, la evidencia de este hallazgo dice que sí, al menos para diferenciar
+puntos a esta escala; en Guanacaste (Nicoya/Liberia, +7.7%/-6.6%) el mismo ráster fue razonablemente
+confiable, así que "inútil" no es una conclusión pareja para todo el país.
+
+**Pendiente, decisión de Pablo (reabre el pendiente pausado de Hallazgo 26, con evidencia nueva y
+más fuerte):**
+- Aceptar la incertidumbre y comunicarla explícitamente en la UI cuando el punto sensibilizado caiga
+  en una zona ya conocida como no confiable (Valle Central, costa Caribe), en vez de mostrar un
+  número único sin advertencia.
+- Probar candidatos aún no probados de Hallazgo 26: otra altura del ráster (50/100m en vez de 10m),
+  u otro producto de GWA para el mismo punto (ver también la brecha ya conocida panel-web vs `.lib`
+  WAsP de Hallazgo 3).
+- Invertir en el downscaling topográfico real (TPI vía DEM, rugosidad vía ESA WorldCover) que
+  Hallazgo 28/30 ya identificaron como el camino más creíble para explicar el patrón de error, en
+  vez de seguir tratando cada sitio como un caso aislado.
+- Como paliativo de producto sin esperar lo anterior: restringir la sensibilización de punto exacto
+  a zonas donde el ráster ya se validó razonable (p.ej. Guanacaste) y, fuera de ellas, ofrecer sólo
+  la estación real más cercana (aunque esté a más de `UMBRAL_APROXIMACION_KM`) con su distancia real
+  mostrada, en vez de un número sensibilizado que puede estar invertido.
+
+---
+
+### Hallazgo 36 — Simplificación de producto: se descarta toda sensibilización espacial de magnitud (GWA/NASA POWER/ERA5/Köppen); la app corre 100% sobre EPW real, con upload manual agregado
+
+Decisión directa de Pablo tras Hallazgo 35: "nos olvidamos de todas las fuentes, solo vamos a usar
+EPW, el usuario escoge cuál estación referenciar... no tenemos tiempo para más investigaciones
+erráticas". Corta de raíz la línea de investigación de Hallazgo 21-30 (vecino más cercano + razón de
+magnitud vía GWA/NASA POWER/ERA5/Köppen) en vez de seguir afinándola -- consistente con Hallazgo 35,
+que ya había encontrado que el ráster crudo de GWA a 10m es más ruidoso que la señal real que debía
+resolver en el Valle Central.
+
+**Cambios reales en `app/app.py`:**
+- Eliminados: `cargar_aproximacion()`, `_resultado_san_jose()`, `_rosa_y_heatmap_san_jose()`,
+  `UMBRAL_APROXIMACION_KM`, el checkbox de Gower, el input manual de elevación para la aproximación,
+  y el bloque de UI que mostraba factor de ajuste/donante en la pestaña "Contexto climático". San
+  José deja de tener una ruta especial vía el export del panel de GWA (Hallazgo 3, `windSpeed.json` +
+  `heatmapData.json` + `.lib`) -- ahora usa su propio EPW real (`SITIOS_EPW_REAL["san_jose"]`, mismo
+  aeropuerto Juan Santamaría) exactamente igual que Nicoya/Liberia/Finca Favorita. Verificado con la
+  app corriendo de verdad (Streamlit + Playwright, no sólo lectura de código): la media anual pasa de
+  3.67 m/s (curva de GWA) a 4.03 m/s (EPW real, WMO 787620) -- ambas son datos reales del mismo sitio,
+  simplemente de dos fuentes distintas; se elige la fuente más simple y homogénea con el resto de la
+  app.
+- Agregado (no existía conectado a la UI, aunque `cargar_epw_subido()` ya estaba escrito): un
+  `st.file_uploader` en la pestaña "📍 Selección de clima" para subir un `.epw` propio -- para un
+  sitio sin estación real cercana, o para usar a propósito el EPW de otro lugar como referencia.
+  Mismo resultado unificado que elegir una estación de la lista (`_resultado_desde_epw()`), sin
+  ningún ajuste de magnitud.
+- La única sensibilización que queda es por ALTURA, no por ubicación: `wind_at_height()`
+  (`engine/simulador_pista_a.py`, Hallazgo 20) ya implementa el perfil logarítmico de
+  ladybug-tools/ladybug con dos rugosidades (referencia meteorológica vs. sitio destino) -- se
+  confirmó de nuevo, leyendo `ladybug/windprofile.py` real (`TERRAIN_PARAMETERS`, fórmula log y de
+  potencia), que la tabla `TERRENOS_ENERGYPLUS` y las fórmulas de `wind_at_height()` /
+  `wind_at_height_potencia()` ya en este repo coinciden exactas con el código fuente real de
+  ladybug-tools -- no hacía falta reescribir nada de esa parte, sólo mantenerla como el único
+  mecanismo de sensibilización de velocidad de la app.
+
+**Verificado end-to-end con Chromium real (Playwright), no sólo lectura de código:** búsqueda de
+estaciones → elegir San José de la lista (ahora vía su EPW real) → pestaña Contexto climático (rosa
++ heatmap + perfil de viento, sin ningún texto de "aproximación") → Equipos y configuración →
+Calcular → Resultados (245 kWh/año, 3 turbinas, corrección de densidad 8.5%) -- sin excepciones. Se
+probó también el flujo nuevo de upload manual (subiendo el mismo EPW de San José como archivo propio):
+"Sitio activo: EPW subido -- ...epw", mismo resultado que elegirlo de la lista.
+
+**Qué queda sin usar, no borrado:** `engine/gwa_raster.py`, `engine/formas_regionales.py`,
+`engine/era5_client.py`, `engine/open_meteo_client.py`, `engine/terrain_classification.py` (Gower/
+Köppen/WorldCover) y el ráster `datos_clima/gwa_costa_rica_10m.tif` quedan en el repo como historial
+de la investigación (Hallazgo 21-30, 35) pero ya no los importa `app.py`. Los scripts de validación
+que sí los usan (`validar_phase_b_clima.py`, `validar_phase_b_simple.py`, `test_phase_b.py`,
+`test_bug_media_san_jose.py`) tampoco se tocaron -- documentan una línea de investigación cerrada,
+no código de producción.
+
+**Pendiente:** decidir si vale la pena borrar ese código muerto ahora o dejarlo como referencia
+histórica; no bloquea nada del flujo actual.
+
+---
+
+### Hallazgo 37 — Aclaraciones de UI post-Hallazgo 36: el heatmap no mostraba m/s reales, y la rosa de vientos vieja no se entendía (12 sectores mal etiquetados, un solo color)
+
+Dos pedidos directos después de ver la app con datos reales de San José (EPW, Hallazgo 36):
+
+**1) El heatmap mes×hora mostraba un índice relativo, no velocidad -- se confundía con m/s.**
+El color va de 0 a ~2 porque `heatmap_json_desde_epw()` calcula `valor = media(mes,hora) /
+media_anual` (índice adimensional centrado en 1.0), no velocidad -- un valor de 2.0 significa
+"el doble de la media anual" (con San José a 4.03 m/s, eso es ~8 m/s reales), nunca "2 m/s". El
+gráfico no estaba mal, sólo el hover no aclaraba la conversión. Se agregó la velocidad real al
+hover de `crear_heatmap_plotly()` (`app/app.py`).
+
+**Bug real encontrado al implementarlo:** el primer intento usó `customdata` + `%{customdata:.2f}`
+en el `hovertemplate` (patrón estándar de Plotly) -- funcionaba perfecto en un HTML standalone
+generado con el paquete `plotly` de Python, pero **NO en la app real**: verificado con Streamlit
+corriendo + Chromium real (Playwright), el hover mostraba literalmente el texto sin resolver,
+`%{customdata:.2f}`, en vez del número. Causa real: la versión de Plotly.js que Streamlit 1.35
+trae empaquetada (independiente de la versión del paquete `pip install plotly`) no interpola
+`customdata` en trazas `Heatmap`. Arreglado armando el texto del hover ya resuelto en Python,
+celda por celda (`text=... , hoverinfo='text'`), sin depender de `customdata` -- funciona en
+cualquier versión. **Lección para cualquier gráfico Plotly futuro en esta app:** probar el hover
+en la app real (Streamlit + navegador), no sólo con `fig.write_html()` -- las dos rutas pueden
+usar versiones distintas de Plotly.js con soporte distinto de features.
+
+**2) La rosa de vientos no se entendía.** Pedido explícito: algo como la rosa de
+`github.com/pollination-apps/weather-report` (usa `ladybug.windrose.WindRose`). Dos problemas
+reales en la versión vieja: (a) 12 sectores de 30° etiquetados con nombres de compás de 16 puntos
+(NNE, ENE, SSO, OSO...), que sólo son correctos a múltiplos de 22.5° -- las etiquetas no
+correspondían a los ángulos reales; (b) un solo color por sector, codificando sólo frecuencia
+total de esa dirección, sin distinguir viento flojo de fuerte.
+
+Reemplazada por una rosa clásica dirección × velocidad (mismo concepto que
+`ladybug.windrose.WindRose`, reimplementado directo con Plotly -- `go.Barpolar` apilado por
+`barmode='stack'` -- en vez de agregar `ladybug` como dependencia nueva sólo para un gráfico):
+`engine/epw_real.py::rosa_vientos_detallada_desde_epw()` calcula, para 8 sectores de compás
+correctos (N/NE/E/SE/S/SO/O/NO, cada uno exacto a 45°) × 5 bins de velocidad (0-2, 2-4, 4-6, 6-8,
+>8 m/s), el % de horas del año en cada combinación, más el % de calma (≤0.5 m/s, sin dirección
+definida) reportado aparte en el título. Verificado con datos reales de San José: la matriz suma
+96.7% + 3.3% de calma = 100% exacto, y confirma un patrón físicamente coherente con la geografía
+real (el 50% de las horas del año el viento viene del Este -- consistente con el corredor de
+vientos alisios del Valle Central que ya se documentó en hallazgos anteriores), no un artefacto.
+
+**Verificado end-to-end con Streamlit + Playwright real** (San José, ambos gráficos): el heatmap
+muestra "Sep Hora: 14:00 Índice: 1.17 (4.72 m/s)"; la rosa nueva muestra N arriba, sentido horario,
+8 sectores correctos, leyenda "Velocidad: 0-2 m/s ... >8 m/s", sin ninguna excepción. De paso se
+eliminó `graficar_rosa_vientos()` (versión matplotlib vieja, dead code -- no se llamaba desde
+ningún lado, sobrevivió al rediseño a Plotly de hace unos commits).
+
+---
+
+### Hallazgo 38 — El heatmap pasa a mostrar m/s reales directo (no un índice), y los gráficos exportan con fondo transparente
+
+Dos pedidos directos después de ver el heatmap nuevo del Hallazgo 37 en un screenshot real (donde
+no hay hover): "¿por qué el máximo es sólo 2 m/s?" -- la respuesta seguía sin verse porque el
+Hallazgo 37 sólo agregó los m/s reales al HOVER, y un screenshot o imagen exportada no tiene hover.
+El gráfico en sí seguía mostrando el índice crudo (máximo visual ~2, etiqueta "Índice de viento").
+
+**Arreglo real, no otro parche al hover:** `crear_heatmap_plotly()` ahora multiplica el índice por
+`media_anual` ANTES de graficar y usa ese resultado (m/s reales) como los valores de color del
+heatmap -- título "Velocidad media real del viento a 10m (mes × hora)", colorbar en "m/s" (rango
+real ~2-8 m/s con San José), hover con el m/s Y el índice entre paréntesis para quien lo quiera. El
+dato subyacente (`heatmap_json_desde_epw()`, el índice relativo) no cambió -- sigue siendo el mismo
+formato que usa `generar_clima_gwa()` en el código no conectado de Hallazgo 21-30 -- sólo cambió
+qué se grafica en `app.py`.
+
+**Aclaración de la otra pregunta del pedido ("¿es a 0m?"):** no, el heatmap (como toda la app desde
+Hallazgo 36) es siempre a 10m -- la altura de referencia meteorológica estándar del EPW (columna
+`WS10M`), la misma que ya se muestra en "Media anual real (10m): X m/s" en el cintillo verde de la
+pestaña. Ni 0m ni la altura de buje de la turbina (eso lo muestra el "Perfil logarítmico de viento"
+aparte, más abajo en la misma pestaña).
+
+**Fondo transparente en las exportaciones PNG:** se agregó `paper_bgcolor='rgba(0,0,0,0)'` +
+`plot_bgcolor='rgba(0,0,0,0)'` (y el `bgcolor` del área polar de la rosa) a los 5 gráficos Plotly de
+la app. Verificado descargando de verdad el PNG del heatmap con el botón de cámara del gráfico
+(Playwright) y leyendo los píxeles con Pillow: la imagen exportada es RGBA, con las esquinas en
+`(0,0,0,0)` (transparente total) y el área de datos opaca -- confirma que funciona, no sólo que se
+puso el parámetro. En pantalla no cambia nada (los gráficos ya viven sobre una tarjeta blanca en la
+UI), sólo afecta la imagen descargada.
+
+**Limpieza de paso:** se eliminaron 3 funciones matplotlib más que quedaron sin usar del rediseño a
+Plotly de hace unos commits -- `graficar_heatmap_clima()`, `graficar_curva_duracion()`,
+`graficar_perfil_viento()` (mismo patrón que `graficar_rosa_vientos()`, ya eliminada en Hallazgo
+37) -- y los imports `matplotlib.pyplot` y `plotly.express`, ninguno de los dos usado ya en
+`app.py`.
+
+**Pendiente, no resuelto en este hallazgo:** el "Perfil logarítmico de viento" de esta misma pestaña
+(`crear_perfil_viento_plotly()`) usa un terreno destino fijo ("suburban") sin importar el z0 que el
+usuario elija después en "Equipos y configuración" -- por eso su valor a 10m (~3 m/s) no coincide
+con la media real de la estación (4.03 m/s): ya está aplicando de entrada una rugosidad de destino
+que reduce la velocidad, antes de que el usuario haya elegido nada. No es un bug (`simular()`, el
+cálculo real de producción, sí usa el z0 que el usuario elige) -- es sólo que este gráfico de vista
+previa no lo refleja. Si genera confusión real, es un cambio chico (pasarle el z0 elegido en vez de
+un valor fijo).
+
+---
+
+### Hallazgo 39 — Slider de altura de buje: el heatmap (y el perfil) ahora muestran la velocidad real a CUALQUIER altura, no sólo a los 10m del EPW; bug real de vectorización encontrado y corregido en `wind_at_height()`
+
+Pedido directo: "quiero ver cómo varía la velocidad del aire no sólo en el perfil sino también en el
+heatmap -- quiero que el heatmap cambie con la altura". Antes del Hallazgo 38, el heatmap sólo podía
+mostrar la velocidad a 10m (la altura de referencia del EPW); el perfil logarítmico de abajo era la
+única vista a otras alturas, y encima con dos problemas reales propios (ver más abajo).
+
+**Un solo slider, "Altura de buje a explorar (m)" (0.5-15m), mueve ahora los dos gráficos a la vez:**
+- El heatmap recalcula la velocidad real a esa altura con `wind_at_height()` -- la MISMA fórmula
+  logarítmica de dos rugosidades que `simular()` usa para el cálculo real de energía (Hallazgo 20),
+  no una aproximación aparte. Título y colorbar cambian con la altura (ej. "...a 3.0m").
+- El perfil logarítmico de abajo (ya existía) ahora marca con un punto rojo la velocidad exacta en
+  esa misma altura, para comparar visualmente los dos gráficos.
+- Los dos usan la MISMA rugosidad de destino (z0) que el usuario elige en "Equipos y configuración >
+  Parámetros avanzados" -- antes el perfil ignoraba por completo ese valor (ver bug de abajo).
+
+**Aclaración física importante, no una limitación del gráfico:** como `wind_at_height()` escala la
+velocidad por un factor que sólo depende de la altura (misma razón logarítmica para cualquier hora
+del año), mover el slider reescala el heatmap COMPLETO por una misma constante -- el patrón (qué
+horas/meses son más ventosos que otros) no cambia, sólo la escala de colores. Es el comportamiento
+correcto de este modelo de perfil de viento, no algo a corregir.
+
+**Bug real #1, encontrado al implementar esto, no antes:** `wind_at_height()` nunca soportó un
+arreglo de alturas -- sólo alturas escalares (un buje real) o arreglos de VELOCIDAD (las 8760 horas).
+El perfil logarítmico necesita evaluar 100 alturas a la vez para dibujar la curva completa, y el
+`if h_target <= z0:` de la función (comparación de Python normal, no vectorizada) reventaba con
+`ValueError: The truth value of an array with more than one element is ambiguous` en cuanto se le
+pasó un arreglo de alturas -- confirmado en vivo con Streamlit + Playwright, no en una prueba
+sintética. Arreglado vectorizando con `np.where()` en vez de un `if` de Python -- retrocompatible
+100% con el uso normal (altura escalar), ahora también acepta un arreglo de alturas.
+
+**Bug real #2, preexistente, encontrado al tocar `crear_perfil_viento_plotly()`:** el parámetro
+`z0_ref` de esa función sólo se usaba para el TÍTULO del gráfico ("z0=0.3 m") -- el cálculo en sí
+ignoraba `z0_ref` por completo y usaba siempre la ley de potencia con terreno fijo `"suburban"`
+(z0=0.5m según `TERRENOS_ENERGYPLUS`, NO 0.3m). El título mentía sobre qué rugosidad se estaba
+usando de verdad, y encima no era la que el usuario elegía en "Parámetros avanzados". Arreglado:
+ahora usa `wind_at_height()` (la misma ley logarítmica del cálculo real, no la de potencia -- esa
+queda sólo para el cross-check explícito de Hallazgo 20) con el `z0` que de verdad se le pasa.
+
+**Verificado end-to-end con Streamlit + Playwright real:** bajando el slider a 3m con San José (z0=0.3
+default), el heatmap muestra ~2-4.5 m/s (antes 2-8 m/s a 10m) y el perfil marca "2.02 m/s" en altura
+3m -- coincide exacto con `v_hub_medio` que ya calcula `simular()` para ese mismo caso (Hallazgo
+anterior sobre cómo se calcula el kWh). También se probó el caso límite (altura por debajo de z0,
+ej. z0=1.0 urbano denso + altura=1.0m): la app muestra un aviso explícito en vez de un heatmap
+degenerado en ceros o una excepción.
+
+---
+
+### Hallazgo 40 — Arranca la pestaña "Análisis Financiero": auditoría de lo que trajo la sesión "Eco Wind 2" (Flower Turbines + Sol-Ark), dos bugs eléctricos reales confirmados con datasheets, y un hueco de BESS 48V resuelto con dato de mercado (no de fábrica)
+
+Pablo pidió una nueva pestaña "Análisis Financiero" a partir de un plan externo
+(`PLAN_ANALISIS_FINANCIERO_ECO_WIND.md`) y de trabajo ya hecho en otra sesión ("Eco Wind
+2", PRs #12/#15 de la rama `claude/eco-wind-audit-velocidades-7fv1sy`, ya mergeadas):
+`engine/flowerturbines_specs.py`, `engine/flowerturbines_costos.py`,
+`engine/solark_specs.py`, `engine/dimensionador_sistema_eolico.py`. Ninguno de los
+cuatro está conectado a `app.py` todavía -- es 100% trabajo de integración nuevo, sin
+nada que romper.
+
+**Duplicación real encontrada:** `flowerturbines_specs.py` es un duplicado exacto de
+los datos que ya vivían en `engine/turbine_specs.py::SPECS_TURBINAS` (Hallazgo 32, ya
+usado por `app.py` para las fichas técnicas) -- mismos 11 modelos, mismos valores, pero
+con las filas indexadas por el nombre completo del modelo ("Small Tulip Turbine (1m)")
+en vez de las claves internas que ya usa la app (`small_tulip`). Dos fuentes de verdad
+para el mismo dato, con esquemas de clave incompatibles.
+
+**Dos bugs eléctricos reales confirmados con datasheets, no solo con la palabra de un
+"representante"** (ver más abajo la aclaración sobre la fiabilidad de esas respuestas):
+`dimensionador_sistema_eolico.py::seleccionar_inversor_solark()` usa
+`Potencia_FV_Max_W` (capacidad del puerto SOLAR/MPPT) como límite para dimensionar el
+arreglo eólico -- pero las turbinas Flower Turbines (salida regulada 48V CC) se
+conectan al puerto de BATERÍA, no al solar (confirmado por dos fuentes independientes,
+y es la única lectura que tiene sentido eléctrico: el MPPT de los inversores Sol-Ark
+tiene voltaje de arranque de 125-200V, muy por encima de 48V fijos). El límite correcto
+es la corriente máxima de carga de batería (`Corriente_Carga_Descarga_Max_A`) por el
+voltaje del bus -- para el 18K eso da **16,800W (350A×48V), menos de la mitad** de los
+32,400W que usa hoy el código. Segundo bug: `seleccionar_bess_solark()` filtra con un
+`or` que es cierto para las 3 baterías del catálogo sin importar el voltaje, así que en
+la práctica no filtra nada -- y ninguna de esas 3 baterías (Serie L3, 307-614V) es
+compatible con el bus de 48V de todos modos.
+
+**Verificado con datasheets reales (PS-00019 Rev.11 480V, PS-00020 Rev.13 208V, y
+cotización de fábrica Q1136780 Miami Greentech/Sol-Ark, 28/ago/2026), no solo con la
+respuesta en texto de "Sol-Ark":** los 6 precios ya cargados en `solark_specs.py`
+(18K/30K/60K inversores + 3 BESS Serie L3) coinciden EXACTOS con la cotización real, y
+todas las specs técnicas (voltajes, corrientes, dimensiones, peso) coinciden con los
+datasheets. Dos hallazgos nuevos de esa verificación: (1) la cotización trae 4
+inversores residenciales más baratos (9K $2,926.83, 12K $3,926.83, 12K-LL $3,657.32,
+15K $4,756.10) que no están cargados todavía -- justo la línea que SÍ es compatible en
+DC directo con el bus de 48V; (2) el SKU `L3-HVR-60KWH` es en realidad DOS baterías
+físicamente distintas según con qué inversor se empareje (307V con el 30K-208V, 614.4V
+con el 60K-480V, mismo precio) -- `solark_specs.py` sólo tiene cargada la variante de
+614.4V.
+
+**Aviso de calidad de fuente, aplicado con la misma vara a ambos "fabricantes":** las
+respuestas en texto atribuidas a "Sol-Ark" y "Flower Turbines" en esta conversación no
+son documentos oficiales -- la de "Flower Turbines" en particular traía pegado un
+reporte de estado de otra sesión de Claude Code (checkmarks y un link a PR), lo que
+indica que es una respuesta generada por IA simulando al fabricante, no una
+comunicación real. Se trató como hipótesis razonable pero no verificada, igual que se
+hizo con el "$11,200 de turbinas" inventado del plan original. La respuesta de Sol-Ark
+sí resultó consistente con los datasheets reales donde se pudo cruzar (naming
+18K-2P-N/LV, arquitectura de puertos) pero tampoco es un documento oficial -- por
+ejemplo, la lista de socios de batería de 48V que dio no menciona a EG4, que en la
+práctica real del mercado es uno de los socios más comunes de Sol-Ark (misma
+distribuidora en EE.UU., Signature Solar) -- una señal de que la lista podría no ser
+completa.
+
+**Hueco real resuelto (parcialmente): no existe una batería Sol-Ark de 48V.** Sol-Ark
+confirmó (de nuevo, sin datasheet propio, sólo por texto) que no fabrica batería de
+litio propia para la línea residencial de 48V -- su único producto de batería con
+marca propia (Serie L3) es exclusivamente de alta tensión. Se agregó
+`engine/eg4_specs.py` (EG4 LifePower4 5.12kWh y WallMount 14.3kWh, tercero, NO
+Sol-Ark) con datos reales del datasheet del fabricante + precio de mercado (el más
+bajo verificado entre varios distribuidores de EE.UU. en una búsqueda web del
+02/sep/2026) -- **diferencia importante declarada en el propio archivo:** este precio
+es RETAIL (ya con margen del distribuidor puesto), no una cotización de fábrica como
+la de Sol-Ark -- son datos de calidad distinta, no deben tratarse igual de firmes.
+
+**Se creó `engine/price_calculator.py`** con la fórmula de cadena de valor del plan
+(`Precio_Venta = (Costo_Base + $2,500) × 1.30`) en un solo lugar, para aplicarla igual
+a cualquier componente nuevo. Al aplicarla de verdad al módulo EG4 más chico (costo
+base $1,199) salió **$939/kWh** -- muy por encima de lo razonable para LiFePO4
+(~$300-500/kWh típico) porque el fee fijo de $2,500 de importación, pensado para un
+componente grande (turbina/inversor/banco completo), más que duplica el costo de un
+módulo de batería chico si se aplica por unidad. **Esto expone una pregunta real sobre
+la fórmula que el plan nunca probó con un componente barato: el fee de importación,
+¿es por SKU o por embarque/proyecto completo?** Con la lectura literal (por SKU), un
+proyecto típico de varias líneas (turbinas + inversor + varios módulos de batería)
+pagaría múltiples fees de $2,500 -- $20,000+ solo en "importación" para un sistema
+residencial modesto, casi seguro muy por encima de la realidad de un solo envío
+consolidado.
+
+**Pendiente, decisión de Pablo, nada de esto se implementó todavía en `app.py` ni se
+construyó la pestaña:**
+- ¿El fee de importación de $2,500 es por SKU o por proyecto/embarque completo? Cambia
+  el CAPEX total de forma significativa en sistemas con varios componentes chicos.
+- Corregir los dos bugs eléctricos de `dimensionador_sistema_eolico.py` (límite del
+  18K basado en corriente de batería, no en `Potencia_FV_Max_W`; filtro de BESS que no
+  filtra) antes de confiar en su salida.
+- Agregar los 4 inversores residenciales que sí tienen precio real (9K/12K/12K-LL/15K)
+  pero les falta ficha técnica completa (sólo tenemos precio de la cotización, no
+  datasheet).
+- Agregar la variante de 307V del BESS `L3-HVR-60KWH` (falta, ver arriba).
+- Conseguir una cotización de fábrica/mayorista real de EG4 (o de cualquiera de los
+  otros socios de 48V) para reemplazar el precio retail por uno de la misma calidad
+  que Sol-Ark.
+- Verificar `flowerturbines_specs.py`/`flowerturbines_costos.py` contra un datasheet o
+  cotización real de Flower Turbines -- todavía no se pudo, a diferencia de Sol-Ark.
+- Decidir la arquitectura de datos: ¿un solo `SPECS_TURBINAS` (el que ya usa `app.py`,
+  Hallazgo 32) o mantener el duplicado de `flowerturbines_specs.py` con su propio
+  esquema de claves?
+- Cómo tratar en la pestaña financiera los sistemas que necesiten 30K/60K (HV): sin
+  conversor DC-DC ni inversor eólico grid-tie precificados todavía, no hay CAPEX
+  confiable para esos casos (ver conversación, pendiente de decidir mostrar aviso vs.
+  estimar con una línea genérica).
+
+---
+
 ## 6. Pendientes activos / bloqueos
 
 - [x] ~~Conseguir A/k reales del Global Wind Atlas~~ — resuelto, y con datos más ricos de lo
@@ -2264,22 +2664,21 @@ siempre, manejado con un `st.error` legible, sin crashear).
       validación leave-one-out con `factor_ajuste_gwa()`~~ — resuelto (Hallazgo 26): resultado
       mixto, mucho mejor que NASA POWER pero no una victoria limpia (bien en Guanacaste, mal en San
       José/Finca Favorita). Ver el siguiente pendiente.
-- [ ] **Pausado, de Hallazgo 26 (decisión de Pablo):** investigar por qué el ráster crudo de GWA
-      (sin ningún ajuste) se aleja tanto de la realidad específicamente en San José (-43%) y Finca
-      Favorita (-87%) — el mecanismo de razón en sí funciona bien (Liberia mejoró sobre todo lo
-      anterior), el problema está en el dato crudo de esos dos sitios. Candidatos sin probar: otra
-      altura del ráster, otro producto de GWA, o una limitación real del downscaling en terreno de
-      valle/costa-boscoso. Pablo decidió seguir con ERA5 primero — esto queda como algo para afinar
-      más adelante si ERA5 (u otro método) también falla, no descartado.
-- [ ] **Nuevo, de Hallazgo 26/27:** correr la Parte 4 de `notebooks/sensibilizar_punto_exacto.ipynb`
-      en Colab para tener el número real de ERA5 — `engine/era5_client.py` (`factor_ajuste_era5()`)
-      construido y probado con un NetCDF sintético, pero necesita que Pablo tenga cuenta+token de
-      Copernicus CDS (paso nuevo, ni NASA POWER ni GWA lo pedían — ver instrucciones en la Parte 4
-      del notebook) antes de poder correr de verdad. Si ERA5 también falla, queda sin probar
-      Köppen/polígonos climáticos (Alternativa 2 original, nunca investigada).
-- [ ] **Nuevo, de Hallazgo 31:** correr `generar_clima_sensibilizado()` contra el ráster real de
-      Costa Rica en un entorno con internet real — en este sandbox sólo se verificó el ensamblaje
-      con `factor_ajuste_gwa()` mockeado, no el número final para un punto sin estación cercana.
+- [x] ~~Reabierto por Hallazgo 35: investigar por qué el ráster crudo de GWA se aleja tanto de la
+      realidad en San José (-43%) y Finca Favorita (-87%), e invierte el orden Santamaría/La
+      Sabana~~ — **cerrado por decisión de producto (Hallazgo 36), no resuelto técnicamente:** Pablo
+      decidió abandonar toda sensibilización espacial de magnitud (GWA/NASA POWER/ERA5/Köppen) en vez
+      de seguir afinándola. La app ahora corre 100% sobre EPW real (estación de la lista o subida por
+      el usuario); el código de esta línea de investigación queda en el repo sin usar, no borrado.
+- [x] ~~Nuevo, de Hallazgo 26/27: correr la Parte 4 de
+      `notebooks/sensibilizar_punto_exacto.ipynb` en Colab para tener el número real de ERA5~~ —
+      cerrado sin correr, por decisión de producto (Hallazgo 36): se abandonó toda la línea de ajuste
+      espacial por fuente externa (GWA/NASA POWER/ERA5/Köppen), no sólo ERA5.
+- [x] ~~Nuevo, de Hallazgo 31: correr `generar_clima_sensibilizado()` contra el ráster real de
+      Costa Rica~~ — resuelto (Hallazgo 35): el ráster real ya está en el repo, se corrió con el
+      código de producción real (no mock) contra varios puntos del Valle Central y contra los 4
+      sitios ya conocidos. El número final confirma el problema que Hallazgo 26 ya sospechaba, no lo
+      descarta.
 - [ ] **Nuevo, de Hallazgo 32:** conseguir specs de `al13_4m` (falta en el DataFrame de Pablo) y
       decidir si vale la pena construir curvas de potencia para Survival Unit y las 3 variantes de
       EcoRoof Energy Hub (hoy tienen ficha técnica mostrable pero no son simulables).

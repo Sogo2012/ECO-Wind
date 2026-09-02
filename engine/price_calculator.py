@@ -247,3 +247,15 @@ def estimar_ahorro_anual(
         "ahorro_mensual_promedio_usd": round(ahorro_anual / 12, 2),
         "ahorro_diario_promedio_usd": round(ahorro_anual / 365, 2),
     }
+
+
+def calcular_precio_venta(costo_base_usd, costo_importacion_usd=IMPORT_COST_USD,
+                           margen_pct=MARGIN_PCT*100):
+    """
+    Precio_Venta = (Costo_Base + Costo_Importacion) x (1 + Margen/100)
+
+    Wrapper compatible con la versión anterior de PR #18.
+    costo_base_usd: costo de fábrica o de lista del componente (turbina, inversor o
+    BESS), SIN importación ni margen todavía.
+    """
+    return (costo_base_usd + costo_importacion_usd) * (1 + margen_pct / 100)

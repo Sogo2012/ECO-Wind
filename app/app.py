@@ -6,52 +6,52 @@ engine/flower_turbines_curves.py, Hallazgo 12), extendido con clima
 multi-sitio, corrección de densidad, multi-clúster y gráficos (Hallazgo 17
 -- ver avance-de-proyecto.md).
 
-ALCANCE HONESTO:
+ALCANCE HONESTO (Hallazgo 36 -- simplificación deliberada de Pablo, ver
+avance-de-proyecto.md: "nos olvidamos de todas las fuentes, solo vamos a
+usar EPW"):
 - Un solo flujo de clima, homologado con DDP-lite/Skyplus (Hallazgo 19,
   v3): buscás tu sitio por nombre, coordenada o clic en el mapa, la app te
   muestra las estaciones climáticas REALES más cercanas (catálogo de
   climate.onebuilding.org, 5,276 estaciones, 20 países -- sin acotar a
   Costa Rica), y elegís una. No hay "modos" que elegir de antemano.
 - San José, Nicoya, Liberia y Finca Favorita (Limón) ya están validados
-  localmente (San José vía export del panel de Global Wind Atlas -- curva
-  de excedencia + patrón diurno reales -- los otros 3 vía EPW real de
-  climate.onebuilding.org, Hallazgo 18): si la búsqueda te devuelve una de
-  estas 4 estaciones, la app sirve ese dato local en vez de descargar de
-  nuevo lo mismo -- invisible para vos, sigue siendo "elegí una estación
-  real de la lista" (ver engine/epw_real.py::sitio_precacheado_cercano()).
-- Si la estación real más cercana a tu punto queda a más de
-  UMBRAL_APROXIMACION_KM, la app ofrece AL LADO (mismo flujo, no una
-  pantalla aparte) una sensibilización del punto exacto (Hallazgo 21-30,
-  engine/formas_regionales.py::generar_clima_sensibilizado()): forma
-  (estacionalidad, ciclo diurno) del vecino real más cercano entre los
-  sitios conocidos (no siempre San José) + magnitud ajustada con la razón
-  entre dos lecturas del ráster de GWA en ese punto y en la ubicación del
-  donante -- GWA es la fuente de ajuste validada como mejor contra NASA
-  POWER y ERA5/CDS en los 4 sitios reales de Costa Rica (Hallazgo 25/26/28).
-  La dirección del viento (rosa) sigue siendo la del donante sin ajuste --
-  no existe un mecanismo de razón para dirección, sólo para magnitud. El
-  ráster no se pudo descargar en este entorno de desarrollo
-  (globalwindatlas.info bloqueado, Hallazgo 2) -- si no existe el archivo,
-  la opción simplemente no aparece, en vez de fallar oscuro.
-- ¿Tenés el EPW real de tu sitio? Subilo directo -- opción secundaria
-  discreta (mismo patrón que DDP-lite/Skyplus), no compite con la
-  búsqueda de arriba.
-- Elevación: de la estación real (encabezado del EPW, o AIP/DGAC para San
-  José) siempre que hay una estación real elegida; sólo se pide manual
-  cuando se usa la aproximación (el ráster no trae elevación -- búsqueda
-  automática por DEM pendiente, Hallazgo 17).
+  localmente con su propio EPW real (Hallazgo 18): si la búsqueda te
+  devuelve una de estas 4 estaciones, la app sirve ese archivo local en
+  vez de descargar de nuevo lo mismo -- invisible para vos, sigue siendo
+  "elegí una estación real de la lista" (ver
+  engine/epw_real.py::sitio_precacheado_cercano()).
+- ¿Tu sitio no tiene una estación real cerca, o ya tenés el EPW de otro
+  lugar que querés usar como referencia? Subilo directo -- misma pestaña,
+  opción secundaria (mismo patrón que DDP-lite/Skyplus). No hay
+  sensibilización espacial de magnitud por ninguna fuente externa (GWA,
+  NASA POWER, ERA5, Köppen): esas vías se investigaron a fondo (Hallazgo
+  21-30) y se descartaron por decisión de producto -- el ráster crudo de
+  GWA a 10m resultó más ruidoso que la señal real que debía resolver
+  (Hallazgo 35). Con datos limitados de verdad, un EPW real elegido a
+  conciencia por el usuario es más confiable que un ajuste automático
+  sobre una fuente que ya demostró fallar en Costa Rica.
+- Lo único que SÍ se sensibiliza, y con una fuente propia: la velocidad
+  del EPW (medida a 10m) se lleva a la altura real de buje de cada turbina
+  con el perfil logarítmico de viento de ladybug-tools/ladybug
+  (`engine/simulador_pista_a.py::wind_at_height()`, Hallazgo 20 -- fórmula
+  y tabla de terrenos verificadas contra el código fuente real de
+  ladybug.windprofile). Terreno de referencia meteorológica fijo en
+  "country" (aeropuerto/EPW, z0=0.1m); terreno del sitio destino
+  seleccionable por el usuario (Equipos y configuración > Parámetros
+  avanzados).
+- Elevación: siempre del encabezado del EPW real elegido o subido -- nunca
+  tecleada a mano.
 - Sin PDF, sin registro de leads todavía.
 - Corre local; despliegue a Cloud Run sigue pendiente.
 """
+import json
 import os
 import sys
 import tempfile
 
 import folium
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 import streamlit.components.v1 as components
@@ -59,24 +59,15 @@ import streamlit.components.v1 as components
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.simulador_pista_a import (
-    SITIOS_DISPONIBLES, cargar_gwa_json, generar_clima_gwa, cargar_wind_rose_lib,
-    simular, comparar_metodo_ingenuo_vs_horario, wind_at_height_potencia,
+    simular, comparar_metodo_ingenuo_vs_horario, wind_at_height, wind_at_height_potencia,
+    Z0_DEFAULT, Z0_MET_DEFAULT,
 )
 from engine.flower_turbines_curves import CURVE_COEFFICIENTS
-from engine.gwa_raster import RUTA_RASTER_CR_DEFAULT
-from engine.formas_regionales import generar_clima_sensibilizado
 from engine.turbine_specs import SPECS_TURBINAS, RUTA_IMAGEN, LOGO_ECO, LOGO_FLOWER_TURBINES
 from engine.epw_real import (
-    SITIOS_EPW_REAL, cargar_epw_real, heatmap_json_desde_epw, rosa_frecuencia_desde_epw,
+    SITIOS_EPW_REAL, cargar_epw_real, heatmap_json_desde_epw, rosa_vientos_detallada_desde_epw,
     obtener_estaciones_cercanas, geocode_name, descargar_y_extraer_epw, sitio_precacheado_cercano,
 )
-
-# Hallazgo 19 (v3): a partir de qué distancia a la estación real más cercana la app ofrece
-# la sensibilización del punto exacto (Hallazgo 21-30) como alternativa. Es una decisión de
-# producto, no un valor medido -- Costa Rica es topográficamente compartimentada (cordilleras
-# separan microclimas a distancias cortas), así que 40 km ya es generoso, no conservador.
-# Documentado explícitamente para que Pablo lo ajuste si no es el número correcto.
-UMBRAL_APROXIMACION_KM = 40.0
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -158,40 +149,19 @@ if "seccion_activa" not in st.session_state:
     st.session_state.seccion_activa = "clima"
 if "calculo_listo" not in st.session_state:
     st.session_state.calculo_listo = False
-if "usar_gower" not in st.session_state:
-    st.session_state.usar_gower = False
 
 
 # --- Helpers de clima/geometría ---
 
-def _rosa_y_heatmap_san_jose():
-    sitio = SITIOS_DISPONIBLES["san_jose_juan_santamaria"]
-    ws_json, hm_json = cargar_gwa_json(os.path.join(BASE_DIR, sitio["carpeta_gwa"]))
-    ruta_lib = os.path.join(BASE_DIR, sitio["carpeta_gwa"], "gwc_point_1_10m.lib")
-    rosa_freq = cargar_wind_rose_lib(ruta_lib)["freq"]
-    return ws_json, hm_json, rosa_freq
-
-
 def _resultado_desde_epw(df_clima, meta):
-    """Arma el dict unificado (mismo formato para las 3 rutas que terminan en un EPW
-    real: precacheado, recién descargado, o subido por el usuario)."""
+    """Arma el dict unificado (mismo formato para las 2 rutas que terminan en un EPW
+    real: estación de la lista -- precacheada o recién descargada -- y EPW subido por
+    el usuario). Hallazgo 36: ya no existe una tercera ruta de "aproximación" -- toda
+    esta app corre sobre EPW real, nunca sobre una fuente sensibilizada externamente."""
     hm_json = heatmap_json_desde_epw(df_clima)
-    rosa_freq = rosa_frecuencia_desde_epw(df_clima)
+    rosa_detallada = rosa_vientos_detallada_desde_epw(df_clima)
     return dict(df_clima=df_clima, media=float(df_clima["WS10M"].mean()), hm_json=hm_json,
-                rosa_freq=rosa_freq, es_aproximacion=False, elevacion_m=meta["elevacion_m"],
-                error=None, meta=meta)
-
-
-def _resultado_san_jose():
-    """San José usa el export real de GWA (curva de excedencia + patrón mes×hora propios,
-    Hallazgo 3) en vez de un EPW -- es el único de los 4 sitios precacheados así."""
-    sitio = SITIOS_DISPONIBLES["san_jose_juan_santamaria"]
-    ws_json, hm_json, rosa_freq = _rosa_y_heatmap_san_jose()
-    df_clima, media = generar_clima_gwa(ws_json, hm_json)
-    meta = dict(estacion="San José (Juan Santamaría)", pais="Costa Rica", wmo="787620",
-                lat=sitio["lat"], lon=sitio["lon"], elevacion_m=sitio["elevacion_m"])
-    return dict(df_clima=df_clima, media=media, hm_json=hm_json, rosa_freq=rosa_freq,
-                es_aproximacion=False, elevacion_m=sitio["elevacion_m"], error=None, meta=meta)
+                rosa_detallada=rosa_detallada, elevacion_m=meta["elevacion_m"], error=None, meta=meta)
 
 
 def cargar_estacion_elegida(row):
@@ -199,14 +169,11 @@ def cargar_estacion_elegida(row):
     Hallazgo 19 (v3): un solo camino para "el usuario eligió una estación real de la
     lista" -- mismo patrón que DDP-lite/Skyplus (obtener_estaciones_cercanas() +
     descargar_y_extraer_epw()). Si la estación elegida coincide (por proximidad, no por
-    texto) con uno de los 4 sitios que ya tenemos validados localmente (San José vía GWA,
-    Nicoya/Liberia/Finca Favorita vía EPW real, Hallazgo 18), sirve ese dato local en vez
-    de descargar de nuevo lo mismo -- invisible para el usuario, sigue siendo "elegí una
-    estación real y ya".
+    texto) con uno de los 4 sitios que ya tenemos con su EPW real ya descargado
+    (Hallazgo 18/36), sirve ese archivo local en vez de descargar de nuevo lo mismo --
+    invisible para el usuario, sigue siendo "elegí una estación real y ya".
     """
     clave = sitio_precacheado_cercano(row["lat"], row["lon"]) if pd.notna(row.get("lat")) else None
-    if clave == "san_jose":
-        return _resultado_san_jose()
     if clave in SITIOS_EPW_REAL:
         df_clima, meta = cargar_epw_real(SITIOS_EPW_REAL[clave]["ruta_epw"])
         return _resultado_desde_epw(df_clima, meta)
@@ -222,9 +189,12 @@ def cargar_estacion_elegida(row):
 
 
 def cargar_epw_subido(ruta):
-    """EPW propio subido por el usuario -- opción secundaria discreta (mismo patrón que
-    DDP-lite/Skyplus), no un modo aparte: llega al mismo resultado unificado que elegir
-    una estación de la lista."""
+    """EPW propio subido por el usuario (Hallazgo 36) -- para un sitio sin estación real
+    cercana, o para usar a propósito el EPW de otro lugar como referencia. Llega al mismo
+    resultado unificado que elegir una estación de la lista, sin ningún ajuste de
+    magnitud: la velocidad que trae el EPW es la que se usa, tal cual, a su altura de
+    referencia (10m) -- sólo se sensibiliza por ALTURA (wind_at_height(), Hallazgo 20),
+    nunca por ubicación."""
     try:
         df_clima, meta = cargar_epw_real(ruta)
     except (FileNotFoundError, ValueError, KeyError) as e:
@@ -232,83 +202,7 @@ def cargar_epw_subido(ruta):
     return _resultado_desde_epw(df_clima, meta)
 
 
-def cargar_aproximacion(lat, lon, elevacion_m, usar_gower=False):
-    """
-    Sensibilización real del punto exacto (Hallazgo 21-30, engine/formas_regionales.py::
-    generar_clima_sensibilizado()) -- desde Hallazgo 19 (v3) YA NO es un modo que el
-    usuario elige de entrada: la app la ofrece sola, dentro del mismo flujo de búsqueda,
-    sólo cuando la estación real más cercana queda a más de UMBRAL_APROXIMACION_KM (ver
-    arriba). Reemplaza el mecanismo viejo (generar_clima_sitio_nuevo(), siempre forma de
-    San José + valor crudo del ráster) por el validado con datos reales: vecino más
-    cercano real para la FORMA (no siempre San José) + razón GWA(punto exacto)/GWA(donante)
-    para la MAGNITUD -- GWA le ganó a NASA POWER y a ERA5/CDS en los 4 sitios reales de
-    Costa Rica (Hallazgo 25/26/28). La rosa de vientos (dirección) sigue siendo la del
-    donante sin ajuste -- no existe un mecanismo de razón para dirección, sólo para
-    magnitud (límite honesto, ver docstring de generar_clima_sensibilizado()).
-
-    Phase B (Layer 2 fix): Si usar_gower=True, usa Gower distance para seleccionar la estación
-    donante considerando clima (Köppen) + elevación + distancia. Si usar_gower=False, usa el
-    método clásico de distancia Haversine pura.
-    """
-    if not os.path.exists(RUTA_RASTER_CR_DEFAULT):
-        return dict(error=(
-            f"No existe el ráster de Costa Rica ({os.path.basename(RUTA_RASTER_CR_DEFAULT)}). "
-            "Hay que descargarlo primero desde un entorno con internet real (Colab) -- "
-            "ver engine/gwa_raster.py, descargar_raster_costa_rica()."
-        ))
-    try:
-        resultado = generar_clima_sensibilizado(lat, lon, usar_gower=usar_gower)
-    except (FileNotFoundError, ValueError, KeyError) as e:
-        return dict(error=str(e))
-    resultado["elevacion_m"] = elevacion_m
-    return resultado
-
-
 # --- Helpers de gráficos ---
-
-def graficar_rosa_vientos(freq_por_sector):
-    fig = plt.figure(figsize=(4, 4))
-    ax = fig.add_subplot(111, polar=True)
-    ax.set_theta_zero_location("N")
-    ax.set_theta_direction(-1)
-    n = len(freq_por_sector)
-    angulos = np.linspace(0, 2 * np.pi, n, endpoint=False)
-    ancho = 2 * np.pi / n * 0.9
-    ax.bar(angulos, freq_por_sector, width=ancho, color=VERDE, edgecolor="white", linewidth=0.8)
-    ax.set_xticks(np.linspace(0, 2 * np.pi, 4, endpoint=False))
-    ax.set_xticklabels(["N", "E", "S", "O"])
-    ax.set_ylabel("")
-    ax.set_title("Frecuencia por dirección (%)", pad=15, color=AZUL)
-    fig.tight_layout()
-    return fig
-
-
-def graficar_heatmap_clima(heatmap_json):
-    grid = np.zeros((12, 24))
-    for r in heatmap_json:
-        grid[r["month"] - 1, r["hour"]] = r["value"]
-    fig, ax = plt.subplots(figsize=(8, 3.5))
-    im = ax.imshow(grid, aspect="auto", cmap="Greens", origin="lower")
-    ax.set_xlabel("Hora del día")
-    ax.set_yticks(range(12))
-    ax.set_yticklabels(MESES)
-    ax.set_title("Índice de viento relativo a la media anual (mes × hora)", color=AZUL)
-    fig.colorbar(im, ax=ax, label="Índice (1.0 = media anual)")
-    fig.tight_layout()
-    return fig
-
-
-def graficar_curva_duracion(serie_w):
-    ordenado = np.sort(serie_w.values)[::-1]
-    pct_horas = np.arange(1, len(ordenado) + 1) / len(ordenado) * 100
-    fig, ax = plt.subplots(figsize=(8, 3.5))
-    ax.fill_between(pct_horas, ordenado, color=VERDE, alpha=0.25)
-    ax.plot(pct_horas, ordenado, color=VERDE, linewidth=1.5)
-    ax.set_xlabel("% de las 8,760 horas del año (ordenadas de mayor a menor producción)")
-    ax.set_ylabel("Potencia (W, total del proyecto)")
-    ax.set_title("Curva de duración -- resolución horaria completa", color=AZUL)
-    fig.tight_layout()
-    return fig
 
 
 def crear_curva_duracion_plotly(serie_w):
@@ -336,6 +230,7 @@ def crear_curva_duracion_plotly(serie_w):
         font=dict(family="sans-serif", size=11),
         xaxis=dict(gridcolor='#E8E8E8'),
         yaxis=dict(gridcolor='#E8E8E8'),
+        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
     )
 
     return fig
@@ -364,25 +259,168 @@ def crear_produccion_mensual_plotly(kwh_mensual_total):
         font=dict(family="sans-serif", size=11),
         xaxis=dict(gridcolor='#E8E8E8'),
         yaxis=dict(gridcolor='#E8E8E8'),
+        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
     )
 
     return fig
 
 
-def graficar_perfil_viento(velocidad_10m, z0_ref=0.1, altura_max=10):
-    """Perfil logarítmico de viento sensibilizado (como LB Wind Profile)."""
-    alturas = np.linspace(0.1, altura_max, 100)
-    velocidades = wind_at_height_potencia(
-        velocidad_10m, 10, alturas, terreno="country", terreno_met="country"
+def crear_rosa_vientos_plotly(rosa_detallada):
+    """Rosa de vientos clásica -- dirección × velocidad apilada, mismo concepto que la
+    que arma `ladybug.windrose.WindRose` (la librería que usa la app de referencia
+    github.com/pollination-apps/weather-report, pedida explícitamente para que la rosa
+    se entienda: no un solo color por frecuencia total (versión vieja), sino un color
+    por rango de velocidad dentro de cada dirección -- así se ve, por ejemplo, si el
+    viento del NE es sobre todo flojo o sobre todo fuerte, no sólo que "sopla del NE".
+
+    8 puntos de compás (N/NE/E/SE/S/SO/O/NO) -- ver docstring de
+    rosa_vientos_detallada_desde_epw() para por qué 8 y no 12 (con 12 sectores de 30°
+    las etiquetas de 16 puntos, tipo NNE/ENE, quedan mal puestas)."""
+    sectores = ['N', 'NE', 'E', 'SE', 'S', 'SO', 'O', 'NO'][:rosa_detallada["n_sectores"]]
+    matriz = np.array(rosa_detallada["matriz"])
+    bins_label = rosa_detallada["bins_label"]
+    pct_calma = rosa_detallada["pct_calma"]
+
+    # Paleta secuencial azul (flojo) -> rojo (fuerte), un color por bin de velocidad --
+    # mismos colores extremos que la paleta vieja, ahora uno por bin en vez de por sector.
+    paleta = ["#4b6ba9", "#7d9ee0", "#c9d8f0", "#f5c455", "#ea2600", "#a3243d"]
+
+    fig = go.Figure()
+    for i, etiqueta in enumerate(bins_label):
+        fig.add_trace(go.Barpolar(
+            r=matriz[i], theta=sectores, name=etiqueta,
+            marker=dict(color=paleta[i % len(paleta)], line=dict(color='white', width=0.5)),
+            hovertemplate=f'<b>%{{theta}}</b><br>{etiqueta}: %{{r:.1f}}% de las horas del año<extra></extra>',
+        ))
+
+    fig.update_layout(
+        barmode='stack',
+        title=f"Rosa de vientos -- % de horas por dirección y velocidad (calma: {pct_calma:.0f}%)",
+        polar=dict(
+            radialaxis=dict(visible=True, gridcolor='#D8D8D8', ticksuffix='%'),
+            angularaxis=dict(rotation=90, direction='clockwise', gridcolor='#D8D8D8'),
+            bgcolor='rgba(0,0,0,0)',
+        ),
+        legend=dict(title="Velocidad", orientation="h", yanchor="bottom", y=-0.25, x=0.1),
+        height=550, font=dict(family="sans-serif", size=10),
+        margin=dict(l=60, r=60, t=60, b=90),
+        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
     )
-    fig, ax = plt.subplots(figsize=(6, 5))
-    ax.plot(velocidades, alturas, color=VERDE, linewidth=2)
-    ax.fill_betweenx(alturas, 0, velocidades, color=VERDE, alpha=0.2)
-    ax.set_xlabel("Velocidad del viento (m/s)")
-    ax.set_ylabel("Altura sobre el terreno (m)")
-    ax.set_title("Perfil logarítmico de viento sensibilizado", color=AZUL)
-    ax.grid(True, alpha=0.3)
-    fig.tight_layout()
+    return fig
+
+
+def crear_heatmap_plotly(hm_json, media_anual, altura_m=10.0, z0=Z0_DEFAULT, z0_met=Z0_MET_DEFAULT):
+    """Heatmap interactivo (mes × hora) -- velocidad REAL en m/s, a la altura `altura_m`
+    (default 10m, la altura de referencia meteorológica del EPW, WS10M).
+
+    `hm_json` (heatmap_json_desde_epw()) trae el patrón como ÍNDICE relativo a la media
+    anual A 10M (valor=1.0 en la media, 2.0 = el doble) -- formato compartido con
+    generar_clima_gwa() en engine/simulador_pista_a.py (que sí necesita el índice, para
+    escalarlo a distintas medias objetivo). Acá se multiplica por `media_anual` para
+    tener la velocidad real a 10m, y LUEGO se lleva a `altura_m` con el mismo perfil
+    logarítmico de dos rugosidades que usa `simular()` para el cálculo de energía real
+    (`wind_at_height()`, Hallazgo 20) -- así el heatmap muestra la misma velocidad de
+    buje que de verdad entra a la curva de potencia, no sólo la de 10m.
+
+    Como `wind_at_height()` escala la velocidad por un factor que sólo depende de la
+    altura (no del valor de v en sí -- es la misma razón logarítmica para cualquier
+    hora), cambiar `altura_m` reescala el heatmap COMPLETO por una misma constante: el
+    patrón (qué horas/meses son más ventosos que otros) no cambia, sólo la escala de
+    colores -- es el resultado esperado de este modelo, no una limitación del gráfico.
+
+    Si `altura_m` queda por debajo de `z0` (subcapa de rugosidad, perfil no confiable),
+    devuelve (None, aviso) en vez de una figura -- mismo criterio que wind_at_height().
+
+    El texto del hover se arma en Python (celda por celda), NO con `customdata` +
+    `hovertemplate` -- se probó esa vía primero y el Plotly.js que trae Streamlit 1.35
+    NO interpola `%{customdata}` en heatmaps (se confirmó en vivo con la app corriendo:
+    el hover mostraba literalmente el texto `%{customdata:.2f}` sin reemplazar), así que
+    se arma el texto ya resuelto por celda -- funciona en cualquier versión."""
+    if altura_m <= z0:
+        return None, (f"Altura elegida ({altura_m:.1f}m) por debajo de la rugosidad del "
+                       f"terreno destino (z0={z0}m) -- el perfil logarítmico no es "
+                       f"físicamente confiable ahí, mismo criterio que wind_at_height().")
+
+    meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
+    # Parsear formato: lista de dicts con {month, hour, value=índice relativo a la media anual a 10m}
+    data = json.loads(hm_json) if isinstance(hm_json, str) else hm_json
+    indice = np.zeros((12, 24))
+    for item in data:
+        indice[item["month"] - 1, item["hour"]] = item["value"]
+    grid_10m = indice * media_anual
+    grid_ms = wind_at_height(grid_10m, 10, altura_m, z0=z0, z0_met=z0_met)
+
+    texto = np.empty((12, 24), dtype=object)
+    for m in range(12):
+        for h in range(24):
+            texto[m, h] = (f"<b>{meses[m]}</b><br>Hora: {h}:00<br>"
+                            f"{grid_ms[m, h]:.2f} m/s a {altura_m:.1f}m "
+                            f"(índice {indice[m, h]:.2f})")
+
+    fig = go.Figure(data=go.Heatmap(
+        z=grid_ms, x=list(range(24)), text=texto, hoverinfo='text',
+        y=meses,
+        colorscale='RdYlBu_r',
+        colorbar=dict(title='m/s', thickness=15)
+    ))
+    fig.update_layout(
+        title=f"Velocidad media real del viento a {altura_m:.1f}m (mes × hora)",
+        xaxis_title="Hora del día", yaxis_title="Mes",
+        height=450, font=dict(family="sans-serif", size=10),
+        margin=dict(l=80, r=100, t=50, b=60),
+        xaxis=dict(tickmode='linear', tick0=0, dtick=3),
+        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+    )
+    return fig, None
+
+
+def crear_perfil_viento_plotly(velocidad_10m, z0=Z0_DEFAULT, z0_met=Z0_MET_DEFAULT,
+                                altura_max=10, altura_marcada=None):
+    """Perfil logarítmico interactivo con Plotly (paleta azul) -- MISMA fórmula y
+    rugosidades que `simular()` usa para el cálculo real de energía
+    (`wind_at_height()`, log law con z0 de destino y z0_met de referencia
+    meteorológica, Hallazgo 20).
+
+    BUG REAL corregido acá: la versión anterior recibía un `z0_ref` que sólo se
+    mostraba en el título -- el cálculo en sí ignoraba ese valor y usaba SIEMPRE la ley
+    de potencia con terreno "suburban" fijo (z0=0.5m según TERRENOS_ENERGYPLUS), sin
+    importar lo que dijera el título (que por default decía "z0=0.3 m", un valor
+    DISTINTO al que realmente se estaba usando). Ahora `z0` se usa de verdad, con la
+    misma ley logarítmica que ya usa el cálculo de producción -- no la ley de potencia
+    (esa queda sólo para el cross-check explícito de Hallazgo 20 en Resultados).
+
+    `altura_marcada`: si se da, agrega un punto + anotación en esa altura exacta (para
+    que se vea el mismo valor que muestra el heatmap a esa altura, con el mismo z0)."""
+    alturas = np.linspace(0.1, altura_max, 100)
+    velocidades = wind_at_height(velocidad_10m, 10, alturas, z0=z0, z0_met=z0_met)
+    AZUL_CLARO = '#4b6ba9'
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=velocidades, y=alturas,
+        fill='tonextx',
+        fillcolor='rgba(75, 107, 169, 0.15)',
+        line=dict(color=AZUL_CLARO, width=2.5),
+        hovertemplate='<b>%{y:.2f}m</b><br>Viento: %{x:.2f} m/s<extra></extra>',
+        showlegend=False,
+    ))
+    if altura_marcada is not None:
+        v_marcada = float(wind_at_height(velocidad_10m, 10, altura_marcada, z0=z0, z0_met=z0_met))
+        fig.add_trace(go.Scatter(
+            x=[v_marcada], y=[altura_marcada], mode='markers+text',
+            marker=dict(color='#ea2600', size=10),
+            text=[f"{v_marcada:.2f} m/s"], textposition='top center',
+            hovertemplate=f'<b>{altura_marcada:.2f}m</b><br>Viento: {v_marcada:.2f} m/s<extra></extra>',
+            showlegend=False,
+        ))
+    fig.update_layout(
+        title=f"Perfil logarítmico de viento (z0 destino={z0} m)",
+        xaxis_title="Velocidad (m/s)", yaxis_title="Altura (m)",
+        height=380, template='plotly_white',
+        font=dict(family="sans-serif", size=10),
+        margin=dict(l=80, r=60, t=50, b=60),
+        xaxis=dict(gridcolor='#E8E8E8'), yaxis=dict(gridcolor='#E8E8E8'),
+        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+    )
     return fig
 
 
@@ -460,7 +498,7 @@ with st.sidebar:
     st.markdown(f"""
     <div style="font-size:0.62rem; color:{GRIS}; line-height:1.6;">
         Motor: flower_turbines_curves.py (Hallazgo 12)<br>
-        Clima: Global Wind Atlas + EPW real (Hallazgo 21-30)<br>
+        Clima: EPW real, estación elegida o subida (Hallazgo 36)<br>
         ECO Consultor · Fase 2 -- avance-de-proyecto.md
     </div>
     """, unsafe_allow_html=True)
@@ -478,7 +516,7 @@ tab_clima, tab_contexto, tab_config, tab_resultados = st.tabs([
 ])
 
 with tab_clima:
-    st.caption("Pega las coordenadas de tu sitio (ej: 9.999665, -84.123064). El sistema busca automáticamente la estación climática más cercana y sensibiliza los datos.")
+    st.caption("Pega las coordenadas de tu sitio (ej: 9.999665, -84.123064). El sistema busca las estaciones climáticas reales más cercanas -- elegí una de la lista, o subí directo el EPW que quieras usar como referencia.")
 
     def _buscar_y_guardar(_lat, _lon):
         with st.spinner("Buscando estaciones cercanas..."):
@@ -545,42 +583,36 @@ with tab_clima:
                         st.session_state.sitio_nombre_activo = _row["name"]
                         st.rerun()
 
-        # Aproximación automática si estación está muy lejos
         _dist_min = float(_df_cerc["distancia_km"].min())
-        _dentro_de_cr = (8.0 <= st.session_state.sitio_lat <= 11.3
-                          and -86.0 <= st.session_state.sitio_lon <= -82.5)
-        if _dist_min > UMBRAL_APROXIMACION_KM and _dentro_de_cr and os.path.exists(RUTA_RASTER_CR_DEFAULT):
-            st.warning(f"⚠️ La estación real más cercana está a {_dist_min:.0f} km. ¿Usar una aproximación sensibilizada para este punto exacto?")
+        if _dist_min > 40.0:
+            st.caption(
+                f"ℹ️ La estación real más cercana está a {_dist_min:.0f} km -- si tenés el EPW real "
+                "de un sitio más representativo (propio o de otro lugar), subilo abajo en vez de "
+                "usar una estación tan lejana."
+            )
 
-            # Phase B: Opción de método de selección de estación (Haversine vs Gower)
-            col_metodo = st.columns([1])
-            with col_metodo[0]:
-                st.session_state.usar_gower = st.checkbox(
-                    "🔬 Usar método avanzado (Gower distance)",
-                    value=st.session_state.usar_gower,
-                    help="Selecciona la estación donante considerando clima (Köppen) + elevación + distancia. "
-                         "Más preciso en zonas de frontera climática. Por defecto: método clásico (distancia pura).",
-                )
+    st.divider()
 
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                _elev_aprox = st.number_input(
-                    "Elevación (m)", value=800.0, min_value=0.0, max_value=3800.0, step=50.0,
-                    key="sitio_elev_aprox"
-                )
-            with col2:
-                if st.button("Usar aprox."):
-                    _res_aprox = cargar_aproximacion(
-                        st.session_state.sitio_lat, st.session_state.sitio_lon, _elev_aprox,
-                        usar_gower=st.session_state.usar_gower)
-                    if _res_aprox.get("error"):
-                        st.error(_res_aprox["error"])
-                    else:
-                        st.session_state.sitio_activo = _res_aprox
-                        metodo_usado = "Gower" if st.session_state.usar_gower else "Haversine"
-                        st.session_state.sitio_nombre_activo = (
-                            f"Aproximación ({metodo_usado}) -- {_res_aprox['donante_nombre']} ({_res_aprox['distancia_km']:.0f} km)")
-                        st.rerun()
+    # EPW propio del usuario (Hallazgo 36) -- para un sitio sin estación real cercana, o para
+    # usar a propósito el EPW de otro lugar como referencia. Reemplaza el mecanismo viejo de
+    # "aproximación sensibilizada" (GWA/ERA5/NASA POWER, Hallazgo 21-30): esas fuentes se
+    # descartaron por decisión de producto (Hallazgo 35) -- un EPW real elegido a conciencia es
+    # más confiable que un ajuste automático sobre datos que ya demostraron fallar en Costa Rica.
+    st.caption("**¿Tenés el EPW real de tu sitio (o de otro lugar que quieras usar como referencia)?**")
+    _epw_subido = st.file_uploader("Subir archivo .epw", type=["epw"], key="epw_subido_uploader")
+    if _epw_subido is not None:
+        if st.button("Usar este EPW"):
+            with tempfile.NamedTemporaryFile(suffix=".epw", delete=False) as _tmp:
+                _tmp.write(_epw_subido.getvalue())
+                _ruta_tmp = _tmp.name
+            _res_subido = cargar_epw_subido(_ruta_tmp)
+            os.remove(_ruta_tmp)
+            if _res_subido.get("error"):
+                st.error(_res_subido["error"])
+            else:
+                st.session_state.sitio_activo = _res_subido
+                st.session_state.sitio_nombre_activo = f"EPW subido -- {_epw_subido.name}"
+                st.rerun()
 
 
 # --- Tab: Contexto climático -- rosa de vientos + heatmap, sin depender de "Calcular" ---
@@ -595,8 +627,7 @@ with tab_contexto:
         st.error(error_clima, icon="🚫")
     else:
         hm_json = resultado_clima["hm_json"]
-        rosa_freq = resultado_clima["rosa_freq"]
-        es_aproximacion = resultado_clima["es_aproximacion"]
+        rosa_detallada = resultado_clima["rosa_detallada"]
         media_confirmada = resultado_clima["media"]
 
         if "meta" in resultado_clima:
@@ -604,53 +635,44 @@ with tab_contexto:
             st.success(f"Estación real: {_meta['estacion']} ({_meta['pais']}, WMO {_meta['wmo']}) -- "
                        f"lat={_meta['lat']:.4f}, lon={_meta['lon']:.4f}, elevación={_meta['elevacion_m']:.0f}m. "
                        f"Media anual real (10m): {media_confirmada:.2f} m/s.", icon="✅")
-        if es_aproximacion:
-            _donante = resultado_clima.get("donante_nombre", "estación desconocida")
-            _dist = resultado_clima.get("distancia_km")
-            _factor = resultado_clima.get("factor_ajuste")
-            _metodo = resultado_clima.get("metodo_seleccion", "haversine_km")
-
-            # Determinar si se usó Gower o Haversine
-            if _metodo == "gower_distance":
-                metodo_display = "🔬 Gower Distance (clima-aware)"
-                metodo_desc = "Considera Köppen (clima) + elevación + distancia"
-            else:
-                metodo_display = "📍 Haversine (distancia pura)"
-                metodo_desc = "Basado en distancia geográfica euclidiana"
-
-            st.info(
-                f"Media sensibilizada para este punto exacto "
-                f"({st.session_state.sitio_lat:.4f},{st.session_state.sitio_lon:.4f}): "
-                f"**{media_confirmada:.2f} m/s** -- media real de {_donante}"
-                + (f" ({_dist:.2f} {('Gower dist' if _metodo == 'gower_distance' else 'km')})" if _dist is not None else "")
-                + (f" × factor de ajuste GWA {_factor:.3f}" if _factor is not None else ""),
-                icon="ℹ️",
-            )
-
-            # Mostrar método de selección (Phase B)
-            col_metodo1, col_metodo2 = st.columns([2, 2])
-            with col_metodo1:
-                st.metric("Método de selección", metodo_display)
-            with col_metodo2:
-                st.caption(metodo_desc)
-
-            st.caption(
-                f"Forma (estacionalidad, ciclo diurno) y rosa de vientos: prestadas de {_donante} "
-                "-- la magnitud sí se ajustó al punto exacto (Hallazgo 25/26/28), la dirección no "
-                "tiene todavía un mecanismo de ajuste, sigue siendo la del donante tal cual."
-            )
 
         st.divider()
+
+        # Altura de buje a explorar (Hallazgo 39): un solo slider mueve tanto el heatmap
+        # como el perfil de abajo, con la MISMA rugosidad de destino que se usa en el
+        # cálculo real de energía (Equipos y configuración > Parámetros avanzados) --
+        # si esa pestaña todavía no se visitó en esta sesión, cae al default de simular().
+        z0_actual = st.session_state.get("z0_avanzado", Z0_DEFAULT)
+        _altura_explorar = st.slider(
+            "Altura de buje a explorar (m)", 0.5, 15.0, 10.0, 0.5, key="altura_explorar_slider",
+            help="Mueve esta altura para ver cómo cambia la velocidad real del viento (heatmap y "
+                 "perfil de abajo) entre la altura de referencia del EPW (10m) y la altura real de "
+                 "buje de tu turbina -- misma fórmula y rugosidad que usa el cálculo de energía.",
+        )
+        st.caption(
+            f"Rugosidad de destino usada abajo: z0={z0_actual} m -- configurable en "
+            f"\"⚙️ Equipos y configuración\" > Parámetros avanzados."
+        )
+
         col_g1, col_g2 = st.columns(2)
         with col_g1:
-            st.pyplot(graficar_rosa_vientos(rosa_freq))
+            st.plotly_chart(crear_rosa_vientos_plotly(rosa_detallada), use_container_width=True)
         with col_g2:
-            st.pyplot(graficar_heatmap_clima(hm_json))
+            _fig_heatmap, _aviso_heatmap = crear_heatmap_plotly(
+                hm_json, media_anual=media_confirmada, altura_m=_altura_explorar, z0=z0_actual)
+            if _aviso_heatmap:
+                st.warning(_aviso_heatmap, icon="⚠️")
+            else:
+                st.plotly_chart(_fig_heatmap, use_container_width=True)
 
         st.divider()
-        st.subheader("Perfil de viento sensibilizado (0-10m)")
-        _altura_perfil = st.slider("Altura máxima a mostrar", 1.0, 15.0, 10.0, 0.5, key="altura_perfil_slider")
-        st.pyplot(graficar_perfil_viento(media_confirmada, altura_max=_altura_perfil))
+        col_perfil = st.columns(1)[0]
+        with col_perfil:
+            _altura_max_perfil = max(_altura_explorar * 1.15, 10.0)
+            st.plotly_chart(
+                crear_perfil_viento_plotly(media_confirmada, z0=z0_actual,
+                                            altura_max=_altura_max_perfil, altura_marcada=_altura_explorar),
+                use_container_width=True)
 
 
 # --- Tab: Equipos y configuración -- turbinas, clústers, parámetros avanzados ---
@@ -749,7 +771,7 @@ with tab_resultados:
 
         if resultado_clima is None:
             st.error(
-                "Elegí primero una estación (o una aproximación) en la pestaña \"📍 Selección de clima\".",
+                "Elegí primero una estación (o subí un EPW) en la pestaña \"📍 Selección de clima\".",
                 icon="🚫",
             )
         elif error:
@@ -792,7 +814,7 @@ with tab_resultados:
                 _v_pot = wind_at_height_potencia(
                     media_confirmada, 10, _r0["altura_buje"], terreno="suburban", terreno_met="country")
                 st.write(
-                    f"El viento de referencia (10m, aeropuerto/GWA/EPW) y el sitio real donde va la "
+                    f"El viento de referencia (10m, aeropuerto/EPW) y el sitio real donde va la "
                     f"turbina casi nunca tienen la misma rugosidad -- hasta Hallazgo 20 esta app usaba "
                     f"un solo z0 para los dos, lo que sobreestimaba la velocidad en buje 16-24% (según "
                     f"el método) en el caso de San José, y como P∝v³ eso es ~1.6-1.9x de más en energía. "
@@ -828,8 +850,8 @@ with tab_resultados:
 
             st.caption(
                 "Motor: `flower_turbines_curves.py` (validado Hallazgo 12) + corrección de densidad de aire "
-                "por elevación (Hallazgo 17). Fuente climática: Global Wind Atlas -- NO NASA POWER "
-                "(subestima ~3x en Costa Rica, Hallazgo 1)."
+                "por elevación (Hallazgo 17). Fuente climática: EPW real, estación elegida o subida por "
+                "el usuario (Hallazgo 36) -- sin sensibilización espacial por GWA/NASA POWER/ERA5."
             )
     else:
         st.info("Configurá el proyecto en la pestaña \"⚙️ Equipos y configuración\" y presioná "
