@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -20,38 +19,14 @@ RUN pip install --no-cache-dir \
     google-auth \
     google-cloud-storage
 
-# Copiar código
+# Copiar código -- incluye .streamlit/config.toml (archivo normal del repo, ya no un
+# heredoc "RUN cat > ... << EOF"): ese heredoc necesita BuildKit para que Docker lo
+# interprete como contenido de archivo y no como instrucciones de Dockerfile línea por
+# línea -- el builder que usa Cloud Build ("gcr.io/cloud-builders/docker") no lo trae
+# activado por más que el Dockerfile declare "# syntax=docker/dockerfile:1", y eso
+# rompía el build con "unknown instruction: [SERVER]" (leía "[server]" del TOML como si
+# fuera una instrucción de Dockerfile). Un COPY normal no depende de BuildKit.
 COPY . .
-
-# Crear directorio de configuración de Streamlit
-RUN mkdir -p ~/.streamlit
-
-# Crear archivo de configuración de Streamlit optimizado para Cloud Run
-RUN cat > ~/.streamlit/config.toml << 'EOF'
-[server]
-port = 8080
-headless = true
-enableXsrfProtection = false
-enableCORS = false
-allowRunOnSave = false
-
-[browser]
-gatherUsageStats = false
-serverAddress = "0.0.0.0"
-
-[client]
-showErrorDetails = false
-
-[logger]
-level = "info"
-
-[theme]
-primaryColor = "#003C52"
-backgroundColor = "#E8F0F3"
-secondaryBackgroundColor = "#F0F2F6"
-textColor = "#262730"
-font = "sans serif"
-EOF
 
 # Variable de entorno PORT: valor por defecto para pruebas locales
 # (docker run sin --env PORT). Cloud Run la inyecta en tiempo de ejecución
