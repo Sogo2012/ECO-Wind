@@ -43,6 +43,7 @@ ALCANCE HONESTO:
 - Sin PDF, sin registro de leads todavía.
 - Corre local; despliegue a Cloud Run sigue pendiente.
 """
+import json
 import os
 import sys
 import tempfile
@@ -405,15 +406,18 @@ def crear_rosa_vientos_plotly(rosa_freq):
 
 def crear_heatmap_plotly(hm_json):
     """Heatmap interactivo (mes × hora)."""
-    import json
+    # Parsear formato: lista de dicts con {month, hour, value}
     data = json.loads(hm_json) if isinstance(hm_json, str) else hm_json
-    array = np.array(data).reshape(12, 24)
+    grid = np.zeros((12, 24))
+    for item in data:
+        grid[item["month"] - 1, item["hour"]] = item["value"]
+
     fig = go.Figure(data=go.Heatmap(
-        z=array, x=list(range(24)),
+        z=grid, x=list(range(24)),
         y=['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'],
         colorscale='RdYlBu_r',
         hovertemplate='<b>%{y}</b><br>Hora: %{x}:00<br>Índice: %{z:.2f}<extra></extra>',
-        colorbar=dict(title='Índice', thickness=15)
+        colorbar=dict(title='Índice de viento', thickness=15)
     ))
     fig.update_layout(
         title="Índice de viento relativo a la media anual (mes × hora)",
