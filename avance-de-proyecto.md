@@ -2864,6 +2864,61 @@ el mecanismo interno.
 
 ---
 
+### Hallazgo 48 — Se conecta por fin la pestaña "💰 Análisis Financiero" a `app.py`, y se encuentran 2 bugs reales probando en vivo con Playwright
+
+Toda la capa de datos/lógica de Hallazgo 40-47 (`price_calculator.py`, `eg4_specs.py`,
+`dimensionador_sistema_eolico.py`, `financial_engine_eolico.py`,
+`sistema_eolico_completo.py`, `turbine_specs.py`/`solark_specs.py` unificados) llevaba
+horas lista pero sin ninguna pantalla que la mostrara -- Pablo corrió la app localmente
+con Docker y no encontró nada nuevo, lo cual expuso que nunca se había comunicado con
+suficiente claridad que ese trabajo era sólo "backend". Se agrega la 5ta pestaña.
+
+**Qué hace la pestaña:** reutiliza los clústers ya configurados en "⚙️ Equipos y
+configuración" y recalcula el kWh/año (mismo cálculo que "📈 Resultados", Hallazgo
+12/17, para no depender de que esa pestaña ya se haya visitado). Pide 3 parámetros
+financieros arriba (consumo diario, horas de autonomía, tarifa eléctrica) + un radio
+Standalone/Hybrid, y dentro de "Parámetros avanzados": % de instalación, vida útil,
+tasa de descuento, y el modo de importación (`por_sku`/`por_proyecto`, parametrizado
+desde Hallazgo 41, ahora por fin expuesto en la UI). Llama a
+`analizar_sistema_eolico_completo()` y muestra CAPEX/Payback/ROI/Viabilidad, la
+arquitectura elegida (inversor + BESS, con aviso si el inversor todavía no tiene specs
+verificadas -- Hallazgo 43/44), el desglose de costos, y las recomendaciones.
+
+**2 bugs reales encontrados probando en vivo con Playwright (subiendo el EPW real de
+San José y recorriendo los 4 combos Standalone/Hybrid × por_sku/por_proyecto) --
+ninguno se habría visto sólo revisando el código:**
+
+1. **Texto roto por `$` sin escapar.** Un `st.caption()` con dos signos `$` en el mismo
+   texto (`"...ahorro: $X/año vs. mantenimiento: $Y/año..."`) se renderizaba con partes
+   en una tipografía itálica rara y el texto cortado -- Streamlit interpreta un PAR de
+   `$...$` en cualquier texto markdown (`st.caption`, `st.write`, `st.warning`, etc.)
+   como fórmula LaTeX, no como texto literal. Corregido escapando a `\$`. Ni
+   `st.metric()` ni las tablas de pandas (`st.dataframe`) tienen este problema -- sólo
+   texto libre con 2+ signos `$` en la misma llamada.
+2. **BESS cobraba un fee de importación fantasma en modo Hybrid.** Al armar el
+   desglose de costos por categoría (turbinas/inversor/BESS) para pasarlo a
+   `calcular_precio_venta_proyecto()`, en modo Hybrid (sin BESS) se pasaba el costo del
+   BESS como `$0` en vez de excluir la línea -- y la fórmula igual le sumaba el fee de
+   importación completo a esa línea ($0 + $2,500 fee) × margen = **$3,250 cobrados por
+   "importar nada"**. Se corrige excluyendo la línea de BESS por completo del cálculo
+   cuando el sistema es Hybrid, en vez de pasarla como cero (`sistema_eolico_completo.py`).
+   Verificado numéricamente antes y después del fix, y visualmente con Playwright en
+   los 4 combos.
+
+**Verificado:** `py_compile` limpio, las 32 pruebas existentes pasan, flujo completo
+probado en vivo con Playwright (subir EPW real → configurar 3 turbinas → calcular
+producción → pestaña financiera → los 4 combos Standalone/Hybrid × por_sku/por_proyecto,
+con capturas de pantalla comparadas) -- los números cierran matemáticamente en los 4
+casos (verificado a mano la diferencia exacta entre por_sku y por_proyecto).
+
+**Pendiente, no resuelto en este hallazgo:** con los parámetros por default (tarifa
+$0.15/kWh, arreglo pequeño en San José) el resultado da "NO VIABLE" -- el mantenimiento
+anual (2% del CAPEX) supera el ahorro eléctrico. Es un resultado honesto del motor, no
+un bug, pero valdría la pena en algún momento sensibilizar ese 2% con un dato real de
+mantenimiento en vez del valor por default de `financial_engine_eolico.py`.
+
+---
+
 ## 6. Pendientes activos / bloqueos
 
 - [x] ~~Conseguir A/k reales del Global Wind Atlas~~ — resuelto, y con datos más ricos de lo
@@ -3119,11 +3174,15 @@ el mecanismo interno.
       respuesta de chat) los precios de Flower Turbines marcados `costo_usd_fuente:
       "no_verificado"` en `turbine_specs.py` (large_tulip, al13_6m, al13_8m, ecoroof_flat_3,
       ecoroof_flat_5) y el paquete industrial AL13 de 30kW/60kW en `dimensionador_sistema_eolico.py`.
-- [ ] **Nuevo, de Hallazgo 40/41/42/43:** construir la pestaña "Análisis Financiero" en `app.py` —
-      todo el trabajo hecho hasta ahora (`price_calculator.py`, `eg4_specs.py`,
-      `sistema_eolico_completo.py`, `financial_engine_eolico.py`,
-      `dimensionador_sistema_eolico.py`, unificación de `turbine_specs.py`) es capa de datos/
-      lógica de backend; nada está conectado todavía a la interfaz de Streamlit.
+- [x] ~~Nuevo, de Hallazgo 40/41/42/43: construir la pestaña "Análisis Financiero" en
+      `app.py`~~ — resuelto (Hallazgo 48): conectada, con 2 bugs reales encontrados y
+      corregidos probando en vivo con Playwright (texto roto por `$` sin escapar en
+      markdown; BESS cobrando un fee de importación fantasma en modo Hybrid).
+- [ ] **Nuevo, de Hallazgo 48:** sensibilizar el % de mantenimiento anual por default de
+      `financial_engine_eolico.py` (2%) con un dato real — hoy, con parámetros por default,
+      el resultado da "NO VIABLE" porque el mantenimiento supera el ahorro eléctrico
+      estimado; es un resultado honesto del motor, pero el 2% en sí no viene de una fuente
+      verificada todavía.
 - [ ] **Nuevo, de Hallazgo 47:** definir la tipografía de marca de ECO Consultor (y, si aplica,
       la familia de iconos) para importarla en la app — hoy usa la fuente genérica del sistema;
       es una decisión de marca, no algo que se pueda resolver sin que Pablo/ECO Consultor la dé.
