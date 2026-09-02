@@ -48,6 +48,7 @@ import json
 import os
 import sys
 import tempfile
+from datetime import date
 
 import folium
 import numpy as np
@@ -69,14 +70,22 @@ from engine.epw_real import (
     obtener_estaciones_cercanas, geocode_name, descargar_y_extraer_epw, sitio_precacheado_cercano,
 )
 from engine.sistema_eolico_completo import analizar_sistema_eolico_completo
+from engine.dimensionador_sistema_eolico import dimensionar_sistema_eolico_completo, VOLTAJE_TURBINAS_V
 from engine.price_calculator import MODO_IMPORTACION_DEFAULT
+from engine.solark_specs import get_solark_df
+from engine.eg4_specs import get_eg4_df
+from engine.pdf_reporte import generar_pdf_especificacion
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# --- Paleta corporativa ECO (plan-tecnico-eco-wind.md, seccion 5) ---
-AZUL = "#003C52"
-VERDE = "#4A7C2F"
-GRIS = "#4A5568"
+# --- Paleta corporativa ECO -- colores EXACTOS de libro_de_marca_de_Eco_consultor.pdf
+# (Hallazgo 49), reemplazando los valores aproximados que traía la app desde antes
+# (AZUL era #003C52, el real es #173D4A; VERDE era #4A7C2F, el real es #66913E; GRIS
+# era #4A5568, el real es #414549). Significado de cada color según el manual: azul =
+# "conservación del ambiente", verde = "confort y ahorro energético", gris = "obra gris".
+AZUL = "#173D4A"    # Pantone 309 C
+VERDE = "#66913E"   # Pantone 575 C
+GRIS = "#414549"    # Pantone 432 C
 FONDO = "#E8F0F3"
 
 # --- Paleta de clima (10 colores para heatmaps y visualizaciones) ---
@@ -117,7 +126,15 @@ st.set_page_config(page_title="ECO | Wind — Simulador", page_icon=LOGO_ECO, la
 # marca) que Streamlit no cubre con su sistema de theme, así que sí necesitan CSS.
 st.markdown(f"""
 <style>
-    h1, h2, h3 {{ color: {AZUL}; }}
+    /* Tipografía corporativa (libro_de_marca_de_Eco_consultor.pdf, Hallazgo 49): la
+       fuente de marca es "Gotham", que es de pago y no está en Google Fonts -- se usa
+       Montserrat como sustituto libre estándar (geometría muy similar, elección común
+       para reemplazar Gotham). "Dosis" sí es la real y sí está en Google Fonts -- el
+       manual la reserva para texto de descripción, no para títulos. */
+    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;700&family=Dosis:wght@400;500;700&display=swap');
+    html, body, [class*="css"] {{ font-family: 'Montserrat', sans-serif; }}
+    .eco-brand-sub, .eco-sidebar-section, [data-testid="stCaptionContainer"] {{ font-family: 'Dosis', sans-serif; }}
+    h1, h2, h3 {{ color: {AZUL}; font-family: 'Montserrat', sans-serif; font-weight: 700; }}
     .stButton>button, button[kind="primary"], button[kind="primaryFormSubmit"] {{
         background-color: {VERDE} !important; color: white !important; border: none !important;
     }}
@@ -132,7 +149,7 @@ st.markdown(f"""
     }}
     [data-testid="stSidebar"] .stButton>button:hover {{ background-color: {FONDO} !important; color: {AZUL} !important; }}
     .eco-brand {{ background: {AZUL}; margin: -1rem -1rem 1rem -1rem; padding: 0; border-bottom: 3px solid {VERDE}; }}
-    .eco-brand-logos {{ background: #FFFFFF; padding: 12px 16px 8px 16px; display: flex; gap: 10px; align-items: center; justify-content: space-between; }}
+    .eco-brand-logos {{ background: #FFFFFF; padding: 16px; display: flex; align-items: center; justify-content: center; }}
     .eco-brand-text {{ padding: 8px 16px 12px 16px; }}
     .eco-brand-title {{ font-size: 1.05rem; font-weight: 700; color: white; }}
     .eco-brand-sub {{ font-size: 0.68rem; color: rgba(255,255,255,0.75); margin-top: 2px; }}
@@ -476,15 +493,16 @@ def crear_mapa_estaciones(lat_sitio, lon_sitio, df_estaciones=None):
 # tabs, no botones de navegación que compiten por espacio.
 
 with st.sidebar:
-    _logos_html = "".join([
-        _img_base64(LOGO_ECO, 90) if os.path.exists(LOGO_ECO) else "",
-        _img_base64(LOGO_FLOWER_TURBINES, 90) if os.path.exists(LOGO_FLOWER_TURBINES) else "",
-    ])
+    # Sólo el logo de ECO en el header (antes compartía espacio con el de Flower
+    # Turbines y ambos quedaban chicos) -- Flower Turbines es un proveedor de equipos,
+    # no la marca de la aplicación; se sigue identificando por nombre en las fichas
+    # técnicas de cada turbina (pestaña "Especificación Técnica").
+    _logo_eco_html = _img_base64(LOGO_ECO, 170) if os.path.exists(LOGO_ECO) else ""
     st.markdown(f"""
     <div class="eco-brand">
-        <div class="eco-brand-logos">{_logos_html}</div>
+        <div class="eco-brand-logos">{_logo_eco_html}</div>
         <div class="eco-brand-text">
-            <div class="eco-brand-title">🌬️ ECO | Wind</div>
+            <div class="eco-brand-title">ECO | Wind</div>
             <div class="eco-brand-sub">Simulador de microgeneración eólica</div>
         </div>
     </div>
@@ -492,13 +510,13 @@ with st.sidebar:
 
     st.markdown('<div class="eco-sidebar-section">Elegido hasta ahora</div>', unsafe_allow_html=True)
     if st.session_state.get("sitio_activo"):
-        st.success(f"📍 {st.session_state.get('sitio_nombre_activo')}")
+        st.success(f"{st.session_state.get('sitio_nombre_activo')}")
     else:
         st.caption("Sin sitio seleccionado todavía.")
     _n_turbinas = sum(c["N"] for c in st.session_state.clusters)
-    st.caption(f"⚙️ {len(st.session_state.clusters)} clúster(es), {_n_turbinas} turbina(s) en total.")
+    st.caption(f"{len(st.session_state.clusters)} clúster(es), {_n_turbinas} turbina(s) en total.")
     if st.session_state.get("calculo_listo"):
-        st.caption("✅ Cálculo de producción listo.")
+        st.caption("Cálculo de producción listo.")
 
     st.divider()
     st.markdown(f"""
@@ -514,12 +532,13 @@ with st.sidebar:
 # Clona la estructura real de Skyplus: 4 tabs navegables en la parte superior,
 # cada uno con su contenido y controles. El sidebar es limpio (solo marca + resumen).
 
-tab_clima, tab_contexto, tab_config, tab_resultados, tab_financiero = st.tabs([
-    "📍 Selección de clima",
-    "📊 Contexto climático",
-    "⚙️ Equipos y configuración",
-    "📈 Resultados",
-    "💰 Análisis Financiero",
+tab_clima, tab_contexto, tab_config, tab_resultados, tab_financiero, tab_especificacion = st.tabs([
+    "Selección de clima",
+    "Contexto climático",
+    "Equipos y configuración",
+    "Resultados",
+    "Análisis Financiero",
+    "Especificación Técnica",
 ])
 
 with tab_clima:
@@ -543,7 +562,7 @@ with tab_clima:
         )
     with col2:
         st.write("")  # Espaciador
-        if st.button("🔍 Buscar"):
+        if st.button("Buscar"):
             if _coords_input:
                 try:
                     partes = [p.strip() for p in _coords_input.split(",")]
@@ -559,13 +578,13 @@ with tab_clima:
 
     # Mostrar sitio activo si existe
     if st.session_state.sitio_activo:
-        st.success(f"✅ Sitio activo: **{st.session_state.sitio_nombre_activo}**")
+        st.success(f"Sitio activo: **{st.session_state.sitio_nombre_activo}**")
 
     st.divider()
 
     # Mapa interactivo del sitio y estaciones
     if st.session_state.sitio_cercanas is not None and not st.session_state.sitio_cercanas.empty:
-        st.subheader("📍 Mapa interactivo")
+        st.subheader("Mapa interactivo")
         mapa = crear_mapa_estaciones(st.session_state.sitio_lat, st.session_state.sitio_lon, st.session_state.sitio_cercanas)
         mapa_html = mapa._repr_html_()
         components.html(mapa_html, height=500, scrolling=False)
@@ -593,7 +612,7 @@ with tab_clima:
         _dist_min = float(_df_cerc["distancia_km"].min())
         if _dist_min > 40.0:
             st.caption(
-                f"ℹ️ La estación real más cercana está a {_dist_min:.0f} km -- si tenés el EPW real "
+                f"La estación real más cercana está a {_dist_min:.0f} km -- si tenés el EPW real "
                 "de un sitio más representativo (propio o de otro lugar), subilo abajo en vez de "
                 "usar una estación tan lejana."
             )
@@ -629,9 +648,9 @@ with tab_contexto:
     error_clima = None if resultado_clima is None else resultado_clima.get("error")
 
     if resultado_clima is None:
-        st.info("Elegí primero un sitio en la pestaña \"📍 Selección de clima\" para ver su contexto climático.")
+        st.info("Elegí primero un sitio en la pestaña \"Selección de clima\" para ver su contexto climático.")
     elif error_clima:
-        st.error(error_clima, icon="🚫")
+        st.error(error_clima)
     else:
         hm_json = resultado_clima["hm_json"]
         rosa_detallada = resultado_clima["rosa_detallada"]
@@ -641,7 +660,7 @@ with tab_contexto:
             _meta = resultado_clima["meta"]
             st.success(f"Estación real: {_meta['estacion']} ({_meta['pais']}, WMO {_meta['wmo']}) -- "
                        f"lat={_meta['lat']:.4f}, lon={_meta['lon']:.4f}, elevación={_meta['elevacion_m']:.0f}m. "
-                       f"Media anual real (10m): {media_confirmada:.2f} m/s.", icon="✅")
+                       f"Media anual real (10m): {media_confirmada:.2f} m/s.")
 
         st.divider()
 
@@ -658,7 +677,7 @@ with tab_contexto:
         )
         st.caption(
             f"Rugosidad de destino usada abajo: z0={z0_actual} m -- configurable en "
-            f"\"⚙️ Equipos y configuración\" > Parámetros avanzados."
+            f"\"Equipos y configuración\" > Parámetros avanzados."
         )
 
         col_g1, col_g2 = st.columns(2)
@@ -668,7 +687,7 @@ with tab_contexto:
             _fig_heatmap, _aviso_heatmap = crear_heatmap_plotly(
                 hm_json, media_anual=media_confirmada, altura_m=_altura_explorar, z0=z0_actual)
             if _aviso_heatmap:
-                st.warning(_aviso_heatmap, icon="⚠️")
+                st.warning(_aviso_heatmap)
             else:
                 st.plotly_chart(_fig_heatmap, use_container_width=True)
 
@@ -754,7 +773,7 @@ with tab_config:
     st.divider()
 
     if not st.session_state.get("sitio_activo"):
-        st.warning("Elegí un sitio en la pestaña \"📍 Selección de clima\" antes de calcular.", icon="⚠️")
+        st.warning("Elegí un sitio en la pestaña \"Selección de clima\" antes de calcular.")
 
     if st.button("Calcular producción del proyecto", type="primary"):
         st.session_state.calculo_listo = True
@@ -767,7 +786,7 @@ with tab_config:
 with tab_resultados:
     st.caption(
         "Producción de energía del proyecto -- el cálculo financiero (CAPEX, tarifa eléctrica, "
-        "payback) está en la pestaña \"💰 Análisis Financiero\"."
+        "payback) está en la pestaña \"Análisis Financiero\"."
     )
 
     if st.session_state.get("calculo_listo"):
@@ -778,11 +797,10 @@ with tab_resultados:
 
         if resultado_clima is None:
             st.error(
-                "Elegí primero una estación (o subí un EPW) en la pestaña \"📍 Selección de clima\".",
-                icon="🚫",
+                "Elegí primero una estación (o subí un EPW) en la pestaña \"Selección de clima\".",
             )
         elif error:
-            st.error(error, icon="🚫")
+            st.error(error)
         else:
             df_clima = resultado_clima["df_clima"]
             elevacion_m = resultado_clima["elevacion_m"]
@@ -861,7 +879,7 @@ with tab_resultados:
                 "el usuario (Hallazgo 36) -- sin sensibilización espacial por GWA/NASA POWER/ERA5."
             )
     else:
-        st.info("Configurá el proyecto en la pestaña \"⚙️ Equipos y configuración\" y presioná "
+        st.info("Configurá el proyecto en la pestaña \"Equipos y configuración\" y presioná "
                  "**Calcular producción del proyecto**.")
 
 
@@ -870,12 +888,12 @@ with tab_resultados:
 with tab_financiero:
     st.caption(
         "Estimación de CAPEX, inversor y banco de baterías recomendados (Sol-Ark + EG4), y retorno "
-        "de inversión -- usa las turbinas ya configuradas en \"⚙️ Equipos y configuración\" y la "
-        "producción ya calculada en \"📈 Resultados\"."
+        "de inversión -- usa las turbinas ya configuradas en \"Equipos y configuración\" y la "
+        "producción ya calculada en \"Resultados\"."
     )
 
     if not st.session_state.get("calculo_listo"):
-        st.info("Configurá el proyecto en la pestaña \"⚙️ Equipos y configuración\" y presioná "
+        st.info("Configurá el proyecto en la pestaña \"Equipos y configuración\" y presioná "
                  "**Calcular producción del proyecto** primero.")
     else:
         resultado_clima = st.session_state.sitio_activo
@@ -883,18 +901,17 @@ with tab_financiero:
 
         if resultado_clima is None:
             st.error(
-                "Elegí primero una estación (o subí un EPW) en la pestaña \"📍 Selección de clima\".",
-                icon="🚫",
+                "Elegí primero una estación (o subí un EPW) en la pestaña \"Selección de clima\".",
             )
         elif error:
-            st.error(error, icon="🚫")
+            st.error(error)
         else:
             df_clima = resultado_clima["df_clima"]
             elevacion_m = resultado_clima["elevacion_m"]
             z0 = st.session_state.z0_avanzado
             metodo_bouquet = st.session_state.metodo_bouquet_radio
 
-            # Mismo cálculo de kWh/año que "📈 Resultados" (Hallazgo 12/17), recalculado acá
+            # Mismo cálculo de kWh/año que "Resultados" (Hallazgo 12/17), recalculado acá
             # para no depender de que el usuario haya visitado esa pestaña en esta sesión.
             kwh_anual_total = sum(
                 simular(df_clima, altura_buje=c["altura_buje"], modelo=c["modelo"], N=int(c["N"]),
@@ -911,10 +928,12 @@ with tab_financiero:
                 consumo_diario_kWh = st.number_input(
                     "Consumo diario del sitio (kWh/día)", min_value=0.1, value=20.0, step=1.0,
                     help="Dimensiona el banco de baterías (BESS) según las horas de autonomía deseadas.",
+                    key="fin_consumo_diario",
                 )
             with col_f2:
                 horas_autonomia = st.number_input(
-                    "Horas de autonomía deseadas", min_value=1, max_value=48, value=12, step=1)
+                    "Horas de autonomía deseadas", min_value=1, max_value=48, value=12, step=1,
+                    key="fin_horas_autonomia")
             with col_f3:
                 tarifa_kwh_USD = st.number_input(
                     "Tarifa eléctrica ($/kWh)", min_value=0.01, value=0.15, step=0.01, format="%.2f")
@@ -927,14 +946,21 @@ with tab_financiero:
             sistema_tipo = "Standalone" if sistema_tipo_label.startswith("Standalone") else "Hybrid"
 
             with st.expander("Parámetros avanzados"):
-                col_a1, col_a2, col_a3 = st.columns(3)
+                col_a1, col_a2, col_a3, col_a4 = st.columns(4)
                 with col_a1:
                     costo_instalacion_pct = st.slider(
                         "Costo de instalación (% de equipos)", 0, 100, 35, step=5) / 100
                 with col_a2:
+                    costo_mantenimiento_pct_anual = st.slider(
+                        "Mantenimiento anual (% del CAPEX)", 0.0, 5.0, 2.0, step=0.5,
+                        help="Es el parámetro que más pesa en si un proyecto sale viable o no -- "
+                             "hoy no viene de un dato real de mantenimiento verificado, se deja "
+                             "ajustable para poder sensibilizarlo en vivo.",
+                    ) / 100
+                with col_a3:
                     vida_util_anos = st.number_input(
                         "Vida útil del proyecto (años)", min_value=1, value=40, step=1)
-                with col_a3:
+                with col_a4:
                     tasa_descuento_pct = st.number_input(
                         "Tasa de descuento para NPV (%)", min_value=0.0, value=8.0, step=0.5)
                 modo_importacion = st.radio(
@@ -954,6 +980,7 @@ with tab_financiero:
                 tarifa_kwh_USD=tarifa_kwh_USD,
                 sistema_tipo=sistema_tipo,
                 costo_instalacion_pct=costo_instalacion_pct,
+                costo_mantenimiento_pct_anual=costo_mantenimiento_pct_anual,
                 vida_util_anos=int(vida_util_anos),
                 tasa_descuento_pct=tasa_descuento_pct,
                 modo_importacion=modo_importacion,
@@ -964,7 +991,7 @@ with tab_financiero:
             inversor = arquitectura["inversor_seleccionado"]
 
             if analisis.get("pendiente_ingenieria_o_costo"):
-                st.warning(analisis["nota_pendiente"], icon="⚠️")
+                st.warning(analisis["nota_pendiente"])
                 costo_turbinas = arquitectura["arreglo_turbinas"]["costo_total_usd"]
                 if costo_turbinas is not None:
                     st.metric("Costo de fábrica -- sólo turbinas (sin inversor/BESS todavía)",
@@ -974,10 +1001,21 @@ with tab_financiero:
                     st.warning(
                         f"El inversor seleccionado ({inversor['modelo']}) todavía no tiene datasheet "
                         "oficial verificado -- la corriente de carga de batería usada es una estimación "
-                        "(ver Hallazgo 43 en avance-de-proyecto.md).", icon="⚠️",
+                        "(ver Hallazgo 43 en avance-de-proyecto.md).",
                     )
 
                 fin = analisis["analisis_financiero"]
+
+                # Fila 1: qué genera el sistema en electricidad -- respuesta directa a
+                # "esos kWh cuántos dólares representan" (ahorro de electricidad NO
+                # comprada a la red, no el valor de venta del kWh al mercado).
+                b1, b2, b3 = st.columns(3)
+                b1.metric("Energía anual generada", f"{kwh_anual_total:,.0f} kWh/año")
+                b2.metric("Ahorro anual (electricidad no comprada)",
+                          f"${fin['ahorro_anual_USD']:,.0f}/año")
+                b3.metric("Mantenimiento anual estimado", f"${fin['mantenimiento_anual_USD']:,.0f}/año")
+
+                st.markdown("**Retorno de la inversión**")
                 c1, c2, c3, c4 = st.columns(4)
                 c1.metric("CAPEX total", f"${fin['capex']:,.0f}")
                 c2.metric("Payback",
@@ -991,9 +1029,17 @@ with tab_financiero:
                     # st.caption() arman un par que Streamlit interpreta como LaTeX ($...$) y
                     # rompe el texto -- se escapan con "\$" para que se muestren literales.
                     st.caption(
-                        "⚠ El ahorro anual estimado en electricidad no alcanza a cubrir el mantenimiento "
+                        "El ahorro anual estimado en electricidad no alcanza a cubrir el mantenimiento "
                         f"anual (ahorro: \\${fin['ahorro_anual_USD']:,.0f}/año vs. mantenimiento: "
                         f"\\${fin['mantenimiento_anual_USD']:,.0f}/año) -- por eso Payback/ROI/NPV muestran N/A."
+                    )
+                    st.info(
+                        "El costo de fábrica de las turbinas domina el CAPEX (ver desglose abajo) -- con "
+                        "arreglos chicos y la tarifa eléctrica ingresada, este tipo de proyecto suele NO "
+                        "competir por ahorro puro de factura eléctrica. Si el objetivo del cliente es "
+                        "respaldo/resiliencia energética (no depender 100% de la red) en vez de recuperar "
+                        "la inversión sólo con el ahorro de electricidad, ese es el valor que hay que "
+                        "presentar -- este cálculo no lo cuantifica en dólares todavía."
                     )
 
                 st.markdown("**Arquitectura del sistema**")
@@ -1036,6 +1082,244 @@ with tab_financiero:
                     "fábrica/cotización real. BESS EG4 (48V): precio retail, no de fábrica -- ver "
                     "`eg4_specs.py`."
                 )
+
+
+# --- Tab: Especificación Técnica (Hallazgo 49) -- datos generales + ficha de cada equipo,
+# pensada para imprimir/exportar y llevar a una reunión con el cliente ---
+
+with tab_especificacion:
+    st.caption(
+        "Datos generales del sistema y ficha técnica de fábrica de cada equipo que lo compone "
+        "-- turbinas, inversor y banco de baterías. Usa las turbinas ya configuradas en "
+        "\"Equipos y configuración\" y la producción ya calculada en \"Resultados\"."
+    )
+
+    if not st.session_state.get("calculo_listo"):
+        st.info("Configurá el proyecto en la pestaña \"Equipos y configuración\" y presioná "
+                 "Calcular producción del proyecto primero.")
+    else:
+        resultado_clima = st.session_state.sitio_activo
+        error = None if resultado_clima is None else resultado_clima.get("error")
+
+        if resultado_clima is None:
+            st.error("Elegí primero una estación (o subí un EPW) en la pestaña \"Selección de clima\".")
+        elif error:
+            st.error(error)
+        else:
+            df_clima = resultado_clima["df_clima"]
+            elevacion_m = resultado_clima["elevacion_m"]
+            z0 = st.session_state.z0_avanzado
+            metodo_bouquet = st.session_state.metodo_bouquet_radio
+
+            kwh_anual_total = sum(
+                simular(df_clima, altura_buje=c["altura_buje"], modelo=c["modelo"], N=int(c["N"]),
+                        elevacion_m=elevacion_m, z0=z0, metodo_bouquet=metodo_bouquet)["kwh_anual"]
+                for c in st.session_state.clusters
+            )
+            turbinas_seleccionadas = [
+                c["modelo"] for c in st.session_state.clusters for _ in range(int(c["N"]))
+            ]
+            potencia_pico_W = sum(
+                SPECS_TURBINAS[c["modelo"]]["potencia_nominal_w"] * int(c["N"])
+                for c in st.session_state.clusters
+            )
+
+            # Reusa consumo/autonomía ya definidos en "Análisis Financiero" (mismo sistema,
+            # sin volver a preguntarlos) -- si esa pestaña no se visitó todavía en esta
+            # sesión, usa valores por default razonables sólo para poder mostrar inversor/BESS.
+            _consumo_spec = st.session_state.get("fin_consumo_diario", 20.0)
+            _horas_spec = st.session_state.get("fin_horas_autonomia", 12)
+
+            arquitectura_spec = dimensionar_sistema_eolico_completo(
+                turbinas_seleccionadas=turbinas_seleccionadas,
+                consumo_diario_kWh=_consumo_spec,
+                horas_autonomia=int(_horas_spec),
+                energia_anual_kWh=kwh_anual_total,
+            )
+
+            # Algunas filas de solark_specs.py / eg4_specs.py no traen todos los campos
+            # todavía (ej. garantía de los inversores comerciales 30K/60K, o dimensiones del
+            # EG4 WallMount Indoor) -- pandas los deja en NaN. Sin este helper, la tabla le
+            # muestra "nan" al cliente en un reporte que se supone profesional (Hallazgo 49).
+            def _ndv(valor, sufijo="", formato=None, prefijo=""):
+                if pd.isna(valor):
+                    return "No verificado todavía"
+                return f"{prefijo}{valor:{formato}}{sufijo}" if formato else f"{prefijo}{valor}{sufijo}"
+
+            def _ndv_rango(v_min, v_max, sufijo=""):
+                if pd.isna(v_min) or pd.isna(v_max):
+                    return "No verificado todavía"
+                return f"{v_min}-{v_max}{sufijo}"
+
+            def _ndv_dims(alto, ancho, profundo, sufijo=""):
+                if pd.isna(alto) or pd.isna(ancho) or pd.isna(profundo):
+                    return "No verificado todavía"
+                return f"{alto} x {ancho} x {profundo}{sufijo}"
+
+            # Va acumulando los mismos datos que se muestran en pantalla para poder
+            # generar el PDF al final sin tener que volver a calcular nada (Hallazgo 49).
+            _datos_pdf = {
+                "sitio_nombre": st.session_state.get("sitio_nombre_activo") or "--",
+                "potencia_pico_kw": potencia_pico_W / 1000,
+                "energia_anual_kwh": kwh_anual_total,
+                "elevacion_m": elevacion_m,
+                "voltaje_bus_v": VOLTAJE_TURBINAS_V,
+                "turbinas": [],
+                "inversor": None,
+                "inversor_no_compatible_msg": None,
+                "bess": [],
+            }
+
+            st.markdown("### Datos generales del sistema")
+            g1, g2, g3, g4 = st.columns(4)
+            g1.metric("Sitio", st.session_state.get("sitio_nombre_activo") or "--")
+            g2.metric("Potencia pico instalada", f"{potencia_pico_W / 1000:.2f} kW")
+            g3.metric("Energía anual estimada", f"{kwh_anual_total:,.0f} kWh/año")
+            g4.metric("Elevación del sitio", f"{elevacion_m:.0f} m")
+            st.write(
+                f"**Arquitectura eléctrica:** bus de corriente continua a {VOLTAJE_TURBINAS_V}V -- "
+                "cada turbina entrega su salida a través de un controlador individual de fábrica; "
+                "todos los controladores se conectan en paralelo al mismo bus, que alimenta "
+                "directamente el puerto de batería del inversor (no el puerto solar/MPPT)."
+            )
+
+            st.divider()
+            st.markdown("### Turbinas eólicas")
+            _cantidad_por_modelo = {}
+            for c in st.session_state.clusters:
+                _cantidad_por_modelo[c["modelo"]] = _cantidad_por_modelo.get(c["modelo"], 0) + int(c["N"])
+
+            for _clave, _cantidad in _cantidad_por_modelo.items():
+                _specs = SPECS_TURBINAS[_clave]
+                with st.container(border=True):
+                    col_img, col_specs = st.columns([1, 3])
+                    with col_img:
+                        _ruta_img = RUTA_IMAGEN.get(_clave)
+                        if _ruta_img and os.path.exists(_ruta_img):
+                            st.image(_ruta_img, use_column_width=True)
+                    with col_specs:
+                        st.markdown(f"**{_specs['nombre']}** -- cantidad: {_cantidad}")
+                        st.caption(f"Fabricante: Flower Turbines -- N° de parte: {_specs['numero_parte']}")
+                        _costo = _specs.get("costo_usd")
+                        _filas_turbina = [
+                            ("Potencia nominal", f"{_specs['potencia_nominal_w']} W"),
+                            ("Velocidad a potencia nominal", f"{_specs['viento_potencia_nominal_ms']} m/s"),
+                            ("Velocidad de arranque (cut-in)", f"{_specs['velocidad_cutin_ms']} m/s"),
+                            ("Velocidad de supervivencia", f"{_specs['velocidad_supervivencia_ms']} m/s"),
+                            ("Tipo de rotor", _specs["tipo_rotor"]),
+                            ("Tipo de generador", _specs["tipo_generador"]),
+                            ("Diámetro del rotor", f"{_specs['diametro_rotor_m']} m"),
+                            ("Altura de pala", f"{_specs['altura_pala_m']} m"),
+                            ("Peso", f"{_specs['peso_total_kg']} kg"),
+                            ("Vida de diseño", f"{_specs['vida_diseno_anos']} años"),
+                            ("Cimentación requerida", _specs["cimentacion_requerida"]),
+                            ("Costo de fábrica (unitario)",
+                             f"${_costo:,.2f}" if _costo is not None else "No verificado todavía"),
+                        ]
+                        st.dataframe(
+                            pd.DataFrame([{"Especificación": f, "Valor": v} for f, v in _filas_turbina]),
+                            hide_index=True, use_container_width=True,
+                        )
+                        _datos_pdf["turbinas"].append({
+                            "nombre": _specs["nombre"], "cantidad": _cantidad,
+                            "numero_parte": _specs["numero_parte"], "filas": _filas_turbina,
+                        })
+
+            st.divider()
+            st.markdown("### Inversor")
+            _inversor_spec = arquitectura_spec["inversor_seleccionado"]
+            if not _inversor_spec.get("compatible"):
+                _msg_inv_no_compat = (
+                    arquitectura_spec.get("nota_pendiente")
+                    or _inversor_spec.get("razon")
+                    or "No se encontró un inversor residencial compatible con este arreglo."
+                )
+                st.warning(_msg_inv_no_compat)
+                _datos_pdf["inversor_no_compatible_msg"] = _msg_inv_no_compat
+            else:
+                if not _inversor_spec.get("specs_verificadas", True):
+                    st.warning(
+                        f"El inversor seleccionado ({_inversor_spec['modelo']}) todavía no tiene "
+                        "datasheet oficial verificado -- ver Hallazgo 43 en avance-de-proyecto.md."
+                    )
+                _fila_inv = get_solark_df().query("Modelo == @_inversor_spec['modelo']")
+                if not _fila_inv.empty:
+                    _inv = _fila_inv.iloc[0]
+                    st.markdown(f"**Sol-Ark {_inv['Modelo']}**")
+                    st.caption("Fabricante: Sol-Ark LLC")
+                    # Algunas filas de solark_specs.py no tienen todos los campos (ej. garantía de
+                    # los modelos comerciales 30K/60K) -- pandas los deja en NaN. _ndv() evita
+                    # mostrarle "nan" al cliente en un reporte que se supone profesional.
+                    _filas_inv = [
+                        ("Potencia FV máxima", _ndv(_inv["Potencia_FV_Max_W"], " W", ",.0f")),
+                        ("Potencia CA continua", _ndv(_inv["Potencia_Salida_CA_Continua_W"], " W", ",.0f")),
+                        ("Voltaje CA de salida", _ndv(_inv["Voltaje_Salida_CA"])),
+                        ("Voltaje nominal de batería", _ndv(_inv["Voltaje_Nominal_CC_V"], " V")),
+                        ("Rango operativo de batería", _ndv_rango(_inv["Voltaje_Operativo_CC_Min_V"], _inv["Voltaje_Operativo_CC_Max_V"], " V")),
+                        ("Corriente máx. de carga/descarga", _ndv(_inv["Corriente_Carga_Descarga_Max_A"], " A")),
+                        ("Corriente máx. de passthrough", _ndv(_inv["Corriente_Passthrough_A"], " A")),
+                        ("Dimensiones (Al x An x Pr)", _ndv_dims(_inv["Altura_mm"], _inv["Ancho_mm"], _inv["Profundidad_mm"], " mm")),
+                        ("Peso", _ndv(_inv["Peso_kg"], " kg")),
+                        ("Garantía", _ndv(_inv["Garantia_Anos"], " años")),
+                        ("Costo de fábrica/cotización", _ndv(_inv["Costo_USD"], formato=",.2f", prefijo="$")),
+                    ]
+                    st.dataframe(
+                        pd.DataFrame([{"Especificación": f, "Valor": v} for f, v in _filas_inv]),
+                        hide_index=True, use_container_width=True,
+                    )
+                    _datos_pdf["inversor"] = {
+                        "nombre": f"Sol-Ark {_inv['Modelo']}", "fabricante": "Sol-Ark LLC",
+                        "filas": _filas_inv,
+                    }
+
+            st.divider()
+            st.markdown("### Banco de baterías (BESS)")
+            _bess_spec = arquitectura_spec.get("bess_seleccionado")
+            if not _bess_spec:
+                st.write("No aplica -- no se pudo dimensionar el inversor todavía.")
+            else:
+                _df_eg4 = get_eg4_df()
+                for _modulo in _bess_spec["bess_seleccionados"]:
+                    _fila_bess = _df_eg4.query("Modelo == @_modulo['modelo']")
+                    if _fila_bess.empty:
+                        continue
+                    _b = _fila_bess.iloc[0]
+                    st.markdown(f"**{_b['Modelo']}**")
+                    st.caption(f"Fabricante: {_b['Fabricante']}")
+                    _filas_bess = [
+                        ("Capacidad", f"{_ndv(_b['Capacidad_kWh'])} kWh ({_ndv(_b['Capacidad_Ah'])} Ah)"),
+                        ("Voltaje nominal", _ndv(_b["Voltaje_Nominal_CC_V"], " V")),
+                        ("Corriente máx. BMS", _ndv(_b["Corriente_BMS_Max_A"], " A")),
+                        ("Ciclos a 80% DoD", _ndv(_b["Ciclos_80pct_DoD"], formato=",")),
+                        ("Dimensiones (Al x An x Pr)", _ndv_dims(_b["Altura_cm"], _b["Ancho_cm"], _b["Profundidad_cm"], " cm")),
+                        ("Peso", _ndv(_b["Peso_kg"], " kg")),
+                        ("Garantía", _ndv(_b["Garantia_Anos"], " años")),
+                        ("Costo (retail, no de fábrica)", _ndv(_b["Costo_USD"], formato=",.2f", prefijo="$")),
+                    ]
+                    st.dataframe(
+                        pd.DataFrame([{"Especificación": f, "Valor": v} for f, v in _filas_bess]),
+                        hide_index=True, use_container_width=True,
+                    )
+                    _datos_pdf["bess"].append({
+                        "nombre": _b["Modelo"], "fabricante": _b["Fabricante"], "filas": _filas_bess,
+                    })
+
+            st.caption(
+                "Fuente de los datos: fichas técnicas oficiales de fábrica (Flower Turbines, "
+                "Sol-Ark) y datasheets de distribuidor (EG4) -- ver `turbine_specs.py`, "
+                "`solark_specs.py`, `eg4_specs.py` en el repositorio para el detalle de cada dato "
+                "y su procedencia."
+            )
+
+            st.divider()
+            _pdf_bytes = generar_pdf_especificacion(_datos_pdf, logo_path=LOGO_ECO if os.path.exists(LOGO_ECO) else None)
+            st.download_button(
+                "Descargar ficha técnica en PDF",
+                data=_pdf_bytes,
+                file_name=f"ECO-Wind_especificacion_tecnica_{date.today().isoformat()}.pdf",
+                mime="application/pdf",
+                type="primary",
+            )
 
 st.divider()
 st.caption(

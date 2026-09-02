@@ -5,6 +5,7 @@ folium>=0.12.0
 streamlit-folium>=0.6.0
 plotly>=5.0.0
 geopy>=2.4.0
+reportlab>=4.0.0
 # Google Cloud integrations
 google-cloud-secret-manager>=2.16.0
 google-auth>=2.25.0

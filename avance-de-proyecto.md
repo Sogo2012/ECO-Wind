@@ -2919,6 +2919,118 @@ mantenimiento en vez del valor por default de `financial_engine_eolico.py`.
 
 ---
 
+### Hallazgo 49 — Reunión con cliente al día siguiente: 6ta pestaña "Especificación Técnica" + PDF corporativo, identidad de marca real (libro de marca), y se confirma que "NO VIABLE" es economía real, no un bug del 2% de mantenimiento
+
+Pablo compartió el libro de marca oficial de ECO Consultor (`libro_de_marca_de_Eco_consultor.pdf`)
+y pidió, para una reunión con cliente al día siguiente: (1) una 6ta pestaña con la ficha
+técnica completa de cada equipo del sistema, exportable a PDF con el tono corporativo de
+ECO; (2) quitar todos los emojis y darle más protagonismo al logo de ECO (quitando el
+co-branding con Flower Turbines, decisión de producto de Pablo, no del libro de marca);
+(3) resolver una queja concreta sobre la pestaña financiera: no se veía en grande cuánto
+dinero (no kWh) ahorra el sistema, y el texto de recomendaciones no aclaraba si "990
+kWh/kW/año" era de una turbina o del arreglo completo.
+
+**1. Identidad de marca real (del libro de marca, no aproximada).** Los 3 colores
+corporativos son Pantone 309 C `#173D4A` (azul), Pantone 575 C `#66913E` (verde) y
+Pantone 432 C `#414549` (gris) -- los que usaba la app hasta ahora (`#003C52`, `#4A7C2F`,
+`#4A5568`) eran aproximaciones a ojo. Actualizados en `app.py` y `.streamlit/config.toml`.
+La tipografía de marca es Gotham (de pago, no está en Google Fonts -- se usa Montserrat
+como sustituto estándar) + Dosis para texto secundario/"descripción" (ésta sí es real y
+gratuita) -- cargadas vía `@import` de Google Fonts en el CSS de `app.py`, porque el
+`[theme]` de Streamlit en `config.toml` sólo acepta `sans serif`/`serif`/`monospace`, no
+un nombre de fuente propio. Cierra el pendiente de Hallazgo 47 sobre tipografía.
+
+**2. Emojis eliminados y logo de ECO con más protagonismo.** Se quitaron todos los emojis
+de `app.py` (títulos de pestaña, mensajes, headers) vía reemplazo directo de los
+caracteres Unicode, verificado después con un escaneo por rango Unicode que confirmó cero
+emojis restantes (se conservó "✕", el símbolo de la "x" para borrar un clúster, por ser
+tipográfico funcional, no decorativo). El logo de Flower Turbines se quita del header
+(decisión de Pablo: "puede eliminar el logo de Flower turbines y dar mas protagonismo a
+l logo de eco") y el logo de ECO pasa de 90px a 170px, solo, centrado.
+
+**3. Pestaña financiera: 2 correcciones de presentación (no de cálculo).** El dato ya
+existía (`fin['ahorro_anual_USD']`) pero estaba en una nota chica -- se agregó un
+`st.metric()` grande y prominente para "Ahorro anual (electricidad no comprada)" junto a
+la energía anual generada y el mantenimiento anual estimado, antes del bloque de
+CAPEX/Payback/ROI. El texto de "Productividad kWh/kW/año" se reescribió explícito: **"no
+es de una sola turbina, es el total del arreglo"** -- se verificó en el código
+(`productividad = energia_anual_kwh / (potencia_pico_w / 1000)`) que el cálculo YA usaba
+los valores totales del sistema; el problema real era que el texto no lo aclaraba y
+generaba la duda razonable de Pablo.
+
+**4. Se sensibilizó el % de mantenimiento (Hallazgo 48) y se investigó a fondo el "NO
+VIABLE".** `FinancialEngineEolico` ya soportaba `costo_mantenimiento_pct_anual` como
+parámetro, pero `analizar_sistema_eolico_completo()` nunca lo exponía -- quedaba
+hardcodeado en 2%. Se agrega como parámetro de punta a punta (motor → función → slider en
+"Parámetros avanzados", 0-5%). Con eso ya sensibilizable, se probó bajarlo hasta 0% con
+un arreglo real (5× three_m_tulip, costo de fábrica real $12,905.75/turbina) en San José:
+**el payback seguía siendo ≈171 años.** Conclusión honesta, no un bug: para arreglos
+chicos, el costo de fábrica de las turbinas domina tanto el CAPEX que ni eliminando el
+mantenimiento el sistema compite por ahorro puro de factura eléctrica -- se agregó un
+`st.info()` en la pestaña financiera que se lo dice así de claro a Pablo, con la
+sugerencia de presentar el valor como respaldo/resiliencia energética en vez de ahorro
+puro (ese valor todavía no se cuantifica en dólares en esta app).
+
+**5. Pestaña "Especificación Técnica" (nueva, 6ta pestaña).** Reutiliza los clústers de
+"Equipos y configuración" y el consumo/horas de autonomía ya cargados en "Análisis
+Financiero" (vía `st.session_state`, claves `fin_consumo_diario`/`fin_horas_autonomia`,
+con default de 20 kWh/día y 12h si esa pestaña no se visitó todavía). Llama a
+`dimensionar_sistema_eolico_completo()` y muestra: datos generales (sitio, potencia pico,
+energía anual, elevación, arquitectura del bus DC a 48V), una ficha por cada modelo de
+turbina distinto (imagen + tabla completa de specs, vía `SPECS_TURBINAS`), la ficha del
+inversor (tabla completa vía `get_solark_df().query(...)`) y la de cada módulo BESS (vía
+`get_eg4_df().query(...)`).
+
+**3 bugs reales encontrados probando en vivo con Playwright (no se habrían visto solo
+revisando el código):**
+
+1. **`st.image(..., use_container_width=True)` no existe en Streamlit 1.35.0** (la
+   versión fijada en `requirements.txt`) -- ese parámetro se agregó en una versión más
+   nueva de Streamlit. Tiraba `TypeError: ImageMixin.image() got an unexpected keyword
+   argument 'use_container_width'` y rompía toda la pestaña. Corregido a
+   `use_column_width=True`, el mismo patrón que ya usaba el resto de `app.py`.
+2. **Datos "nan" mostrados crudos al cliente.** Algunas filas de `solark_specs.py` (ej.
+   los inversores comerciales 30K/60K, sin `Garantia_Anos` todavía) y de `eg4_specs.py`
+   (el EG4 WallMount Indoor, sin `Corriente_BMS_Max_A`/`Ciclos_80pct_DoD`/dimensiones/peso
+   todavía) tienen campos sin dato -- pandas los deja en `NaN`, y la tabla se los mostraba
+   tal cual ("nan A", "nan kg") en un reporte que se supone profesional. Se agregaron 3
+   helpers (`_ndv`, `_ndv_rango`, `_ndv_dims`) que muestran "No verificado todavía" en su
+   lugar, mismo criterio que ya se usaba para `costo_usd=None` en `turbine_specs.py`.
+3. **El PDF desbordaba el margen con un nombre de sitio largo.** El nombre de un EPW
+   subido por el usuario (ej. `CRI_AL_San.Jose-Santamaria.Intl.AP.787620_TMYx.2007-
+   2021.epw`) es una cadena sin espacios -- en la tabla del PDF (`reportlab`) el texto
+   plano no envuelve dentro de la columna y se salía de la página. Corregido envolviendo
+   cada celda en un `Paragraph` con `wordWrap="CJK"` (que sí rompe una palabra larga sin
+   espacios), en vez de texto plano.
+
+**6. Exportación a PDF corporativo (`engine/pdf_reporte.py`, nuevo).** Usa `reportlab`
+(agregado a `requirements.txt`) -- puro Python, sin binarios del sistema, mismo criterio
+que el resto de las dependencias. El PDF usa los 3 colores exactos de marca, el logo de
+ECO al inicio, y el mismo contenido que la pestaña (datos generales + fichas de turbinas,
+inversor y BESS). **Limitación conocida, no resuelta:** usa las tipografías estándar de
+reportlab (Helvetica), no Montserrat/Dosis -- para eso se necesitaría el archivo `.ttf`
+real de esas fuentes (Montserrat es gratis y se puede bajar de Google Fonts; Dosis
+también), que hoy no está en el repositorio. Los colores sí son los de marca exactos. Se
+agrega un botón "Descargar ficha técnica en PDF" (`st.download_button`) al final de la
+pestaña.
+
+**Verificado:** `py_compile` limpio en los 3 archivos tocados, las 32 pruebas existentes
+siguen pasando, flujo completo probado en vivo con Playwright (subir el EPW real de San
+José → configurar clústers → calcular → recorrer las 6 pestañas → descargar el PDF real
+generado por el botón y confirmarlo visualmente página por página) -- sin tracebacks ni
+"nan" visibles en ningún punto del flujo.
+
+**Pendiente, no resuelto en este hallazgo:**
+- Fuente real de marca (Montserrat/Dosis) en el PDF -- hoy usa Helvetica, sólo los
+  colores son de marca.
+- Cuantificar en dólares el valor de respaldo/resiliencia energética (mencionado en el
+  punto 4) -- hoy es una recomendación en texto, no un número.
+- Si la pestaña "Análisis Financiero" nunca se visitó en la sesión, "Especificación
+  Técnica" arma el inversor/BESS con un consumo/autonomía por default (20 kWh/día, 12h)
+  sin avisarle al usuario que son valores por default y no los que él configuró.
+
+---
+
 ## 6. Pendientes activos / bloqueos
 
 - [x] ~~Conseguir A/k reales del Global Wind Atlas~~ — resuelto, y con datos más ricos de lo
@@ -3178,14 +3290,21 @@ mantenimiento en vez del valor por default de `financial_engine_eolico.py`.
       `app.py`~~ — resuelto (Hallazgo 48): conectada, con 2 bugs reales encontrados y
       corregidos probando en vivo con Playwright (texto roto por `$` sin escapar en
       markdown; BESS cobrando un fee de importación fantasma en modo Hybrid).
-- [ ] **Nuevo, de Hallazgo 48:** sensibilizar el % de mantenimiento anual por default de
-      `financial_engine_eolico.py` (2%) con un dato real — hoy, con parámetros por default,
-      el resultado da "NO VIABLE" porque el mantenimiento supera el ahorro eléctrico
-      estimado; es un resultado honesto del motor, pero el 2% en sí no viene de una fuente
-      verificada todavía.
-- [ ] **Nuevo, de Hallazgo 47:** definir la tipografía de marca de ECO Consultor (y, si aplica,
-      la familia de iconos) para importarla en la app — hoy usa la fuente genérica del sistema;
-      es una decisión de marca, no algo que se pueda resolver sin que Pablo/ECO Consultor la dé.
+- [x] ~~Nuevo, de Hallazgo 48: sensibilizar el % de mantenimiento anual por default de
+      `financial_engine_eolico.py` (2%)~~ — resuelto (Hallazgo 49): expuesto como slider
+      0-5% en "Parámetros avanzados". Probado hasta 0% con un arreglo real: el "NO VIABLE"
+      se sostiene (payback ≈171 años) — confirma que el 2% no era la causa, es el costo de
+      fábrica de las turbinas vs. el ahorro eléctrico de arreglos chicos.
+- [x] ~~Nuevo, de Hallazgo 47: definir la tipografía de marca de ECO Consultor~~ — resuelto
+      (Hallazgo 49): Montserrat + Dosis, confirmadas en el libro de marca oficial, cargadas
+      vía Google Fonts. Pendiente nuevo: el PDF exportado todavía usa Helvetica (ver
+      Hallazgo 49) por no tener el `.ttf` real en el repositorio.
+- [ ] **Nuevo, de Hallazgo 49:** embeber la fuente real de marca (Montserrat/Dosis, `.ttf`)
+      en el PDF de `engine/pdf_reporte.py` — hoy usa Helvetica estándar, sólo los colores
+      son de marca.
+- [ ] **Nuevo, de Hallazgo 49:** cuantificar en dólares el valor de respaldo/resiliencia
+      energética que se le sugiere a Pablo presentar cuando el sistema da "NO VIABLE" por
+      ahorro puro — hoy es sólo una recomendación en texto en la pestaña financiera.
 
 ## 7. Cómo navegar el repositorio en este punto
 
