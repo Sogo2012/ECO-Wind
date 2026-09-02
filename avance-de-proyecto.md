@@ -2818,6 +2818,52 @@ de Cloud Build no sepa interpretar.
 
 ---
 
+### Hallazgo 47 — Revisión de identidad visual (Antigravity/Gemini): favicon y fondo forzado corregidos, un hallazgo de la otra IA estaba desactualizado
+
+Pablo le pidió a otra herramienta de IA (Antigravity, sobre Gemini, sacando su propio
+clon del repositorio) que auditara `app.py` contra unos lineamientos de identidad
+corporativa de ECO Consultor. Reportó 4 incumplimientos. Se verificó cada uno contra el
+estado real del repo (no se aceptó el reporte a ciegas, mismo criterio de todo este
+proyecto) antes de tocar nada:
+
+- **Favicon con emoji** (`page_icon="🌬️"`) -- confirmado real. Corregido a
+  `page_icon=LOGO_ECO` (`Recursos Visuales/eco_logo.png`, 800x800 con transparencia, ya
+  importado en `app.py` desde Hallazgo 32) -- verificado con Playwright que el navegador
+  ahora sirve ese PNG como favicon real, no el emoji.
+- **Fondo forzado que rompe modo oscuro** (`.stApp {{ background-color: {FONDO}; }}`
+  inyectado a mano) -- confirmado real. Se quita esa única regla; el fondo ahora lo
+  aplica Streamlit de forma nativa desde `.streamlit/config.toml::theme.backgroundColor`
+  (que ya existe desde Hallazgo 46, aunque se agregó por una razón distinta -- arreglar
+  el build de Docker, no este tema de diseño). Verificado con Playwright: el color de
+  fondo del `body` sigue siendo exactamente `#E8F0F3`, mismo resultado visual, screenshot
+  comparado sin ninguna diferencia -- sólo cambió QUIÉN lo aplica (Streamlit vs. CSS a
+  mano con `!important`).
+- **Sin tipografía propia** -- confirmado real, sin resolver todavía: no hay una fuente
+  de marca definida por Pablo/ECO Consultor para importar (queda pendiente, es una
+  decisión de marca, no algo que se pueda inventar).
+- **`.streamlit/config.toml` no existe** -- este hallazgo de Antigravity estaba
+  DESACTUALIZADO: el archivo ya existe en el repo desde Hallazgo 46 (el clon que usó
+  Antigravity debe haber sido de antes de ese merge). Aclarado con Pablo antes de actuar
+  sobre el resto del reporte, para no perseguir un problema que ya no existía.
+
+El resto de estilos en el bloque CSS (header de marca, botones del menú lateral,
+etiquetas de sección) NO se tocan -- son componentes propios de la app que el sistema
+de `theme` de Streamlit no cubre (sólo controla primaryColor/backgroundColor/
+secondaryBackgroundColor/textColor/font, nada de clases custom), así que sí necesitan
+CSS igual que antes; no había nada más redundante con `config.toml` que quitar.
+
+**Pendiente, explícitamente no resuelto:** el documento de "Lineamientos de Identidad
+Corporativa" que propuso Antigravity como mejora deja huecos a propósito (nombre de
+fuente, familia de iconos) que son decisiones de marca de ECO Consultor, no técnicas --
+no se completan por cuenta propia.
+
+**Verificado:** `py_compile` limpio, las 32 pruebas existentes pasan, `streamlit run
+app/app.py` arranca y responde 200; captura de pantalla con Playwright confirma que la
+apariencia visual es idéntica a antes del cambio (logos, colores, layout), sólo cambia
+el mecanismo interno.
+
+---
+
 ## 6. Pendientes activos / bloqueos
 
 - [x] ~~Conseguir A/k reales del Global Wind Atlas~~ — resuelto, y con datos más ricos de lo
@@ -3078,6 +3124,9 @@ de Cloud Build no sepa interpretar.
       `sistema_eolico_completo.py`, `financial_engine_eolico.py`,
       `dimensionador_sistema_eolico.py`, unificación de `turbine_specs.py`) es capa de datos/
       lógica de backend; nada está conectado todavía a la interfaz de Streamlit.
+- [ ] **Nuevo, de Hallazgo 47:** definir la tipografía de marca de ECO Consultor (y, si aplica,
+      la familia de iconos) para importarla en la app — hoy usa la fuente genérica del sistema;
+      es una decisión de marca, no algo que se pueda resolver sin que Pablo/ECO Consultor la dé.
 
 ## 7. Cómo navegar el repositorio en este punto
 
