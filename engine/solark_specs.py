@@ -13,6 +13,17 @@ Voltajes soportados:
 - Comercial: 300V CC, 120/208V CA (trifásico) - Modelo 30K
 - Industrial: 600V CC, 277/480V CA (trifásico) - Modelo 60K
 - BESS: 410V-614V CC (interior/exterior con climatización)
+
+ADVERTENCIA DE FUENTE (Hallazgo 43) -- los 4 modelos LATAM (9K, 12K, 12K-2P-LL, 15K)
+tienen `Specs_Verificadas=False`: sólo el PRECIO viene de una cotización real
+(QuotesReport, mismo documento que el 18K/30K/60K). Los campos técnicos (peso,
+dimensiones, y sobre todo `Corriente_Carga_Descarga_Max_A` -- el dato del que
+depende `seleccionar_inversor_solark()`) NO vienen de un datasheet real todavía:
+las 4 filas comparten exactamente las mismas dimensiones que el 18K (863x464x282mm)
+y el peso/corriente de batería escalan en pasos perfectamente lineales desde el
+18K real -- patrón típico de una estimación, no de 4 productos físicos distintos
+medidos por separado. Usar con esa reserva hasta tener el datasheet oficial de
+Sol-Ark para estos 4 modelos.
 """
 import pandas as pd
 
@@ -20,6 +31,7 @@ SOLARK_SPECS = [
     {
         "Modelo": "9K-2P-LV (Residencial LATAM)",
         "Tipo_Equipo": "Inversor/Cargador",
+        "Specs_Verificadas": False,  # Hallazgo 43 -- ver docstring del módulo
         "Costo_USD": 2926.83,
         "Potencia_FV_Max_W": 18000,
         "Entrada_FV_Corriente_A": 36,
@@ -50,6 +62,7 @@ SOLARK_SPECS = [
     {
         "Modelo": "12K-2P-LL (Residencial LATAM Limitless)",
         "Tipo_Equipo": "Inversor/Cargador",
+        "Specs_Verificadas": False,  # Hallazgo 43 -- ver docstring del módulo
         "Costo_USD": 3657.32,
         "Potencia_FV_Max_W": 24000,
         "Entrada_FV_Corriente_A": 36,
@@ -80,6 +93,7 @@ SOLARK_SPECS = [
     {
         "Modelo": "12K-2P (Residencial LATAM)",
         "Tipo_Equipo": "Inversor/Cargador",
+        "Specs_Verificadas": False,  # Hallazgo 43 -- ver docstring del módulo
         "Costo_USD": 3926.83,
         "Potencia_FV_Max_W": 24000,
         "Entrada_FV_Corriente_A": 36,
@@ -110,6 +124,7 @@ SOLARK_SPECS = [
     {
         "Modelo": "15K-2P (Residencial LATAM)",
         "Tipo_Equipo": "Inversor/Cargador",
+        "Specs_Verificadas": False,  # Hallazgo 43 -- ver docstring del módulo
         "Costo_USD": 4756.10,
         "Potencia_FV_Max_W": 30000,
         "Entrada_FV_Corriente_A": 36,
@@ -282,7 +297,12 @@ SOLARK_SPECS = [
         "Notas_Tecnicas": "Celda Prismática LiFePO4; Interior IP20; Supresión de fuego integrada en packs"
     },
     {
-        "Modelo": "L3-HVR-60KWH (BESS Exterior)",
+        # Renombrado (Hallazgo 42): "L3-HVR-60KWH" es el mismo SKU/precio para DOS
+        # configuraciones de voltaje distintas, según con qué inversor se empareje --
+        # confirmado comparando los dos datasheets reales (PS-00019 Rev.11 480V y
+        # PS-00020 Rev.13 208V). Esta fila es la variante de 614.4V (con el 60K); la
+        # de 307V (con el 30K) es la fila siguiente -- antes sólo estaba esta.
+        "Modelo": "L3-HVR-60KWH (BESS Exterior, 614.4V con 60K-3P-480V)",
         "Tipo_Equipo": "Banco de Baterías (LiFePO4)",
         "Costo_USD": 34424.44,
         "Capacidad_kWh": 61.44,
@@ -306,6 +326,37 @@ SOLARK_SPECS = [
         "Climatizacion": "Aire acondicionado integrado",
         "Control_Temperatura": True,
         "Notas_Tecnicas": "Celda Prismática LiFePO4; Exterior IP55; Aire acondicionado integrado para control temp."
+    },
+    {
+        # Variante de 307V (Hallazgo 42) -- mismo SKU y precio que la de arriba, pero
+        # empareja con el Sol-Ark 30K-3P-208V en vez del 60K-3P-480V. Datos extraídos
+        # directo de PS-00020 Rev.13 (208V), columna "Outdoor" -- no es una estimación.
+        "Modelo": "L3-HVR-60KWH (BESS Exterior, 307V con 30K-3P-208V)",
+        "Tipo_Equipo": "Banco de Baterías (LiFePO4)",
+        "Costo_USD": 34424.44,
+        "Capacidad_kWh": 61.44,
+        "Capacidad_Usable_kWh": 55.30,
+        "Potencia_Inversor_Compatible_W": 30000,
+        "Tipo_Celda": "Prismática LiFePO4",
+        "Ubicacion_Instalacion": "Exterior",
+        "IP_Rating": "IP55",
+        "Voltaje_Nominal_CC_V": 307,
+        "Voltaje_Operativo_CC_Min_V": 294,
+        "Voltaje_Operativo_CC_Max_V": 336,
+        "Corriente_Carga_Max_A": 100,
+        "Corriente_Descarga_Max_A": 100,
+        "Corriente_Recomendada_A": 100,
+        "Corriente_Passthrough_A": 200,
+        "Altura_cm": 76,
+        "Ancho_cm": 107,
+        "Profundidad_cm": 226,
+        "Peso_kg": 628.00,
+        "Supresion_Fuego": True,
+        "Climatizacion": "Aire acondicionado integrado",
+        "Control_Temperatura": True,
+        "Notas_Tecnicas": "Celda Prismática LiFePO4; Exterior IP55; config. de pack 6s6p (vs. 12s1p de la "
+                          "variante 614.4V) -- mismo módulo base de 5.12kWh/51.2V, mismo peso de fábrica "
+                          "distinto (628kg vs 950kg) según el propio datasheet, no es un error de transcripción."
     }
 ]
 

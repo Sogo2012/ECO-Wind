@@ -9,10 +9,8 @@ from engine.dimensionador_sistema_eolico import dimensionar_sistema_eolico_compl
 from engine.financial_engine_eolico import FinancialEngineEolico
 from engine.price_calculator import (
     calcular_precio_final,
-    calcular_bom_sistema_completo,
     calcular_precio_kwh_instalado,
 )
-from engine.flowerturbines_specs import get_flowerturbines_df
 
 
 def analizar_sistema_eolico_completo(
@@ -36,7 +34,11 @@ def analizar_sistema_eolico_completo(
     4. Indicadores de viabilidad económica
 
     Args:
-        turbinas_seleccionadas  : Lista de modelos de turbinas (ej: ['FT 1.15M', 'FT 2M'])
+        turbinas_seleccionadas  : Lista de CLAVES CANÓNICAS de turbinas -- las mismas
+                                  que usa el resto de la app (ver
+                                  engine/turbine_specs.py::SPECS_TURBINAS), p. ej.
+                                  ['small_tulip', 'medium_tulip'], NO nombres
+                                  completos de modelo.
         consumo_diario_kWh      : Consumo diario del usuario (kWh/día)
         energia_anual_kWh       : Energía anual generada por simulación (kWh/año)
         horas_autonomia         : Horas de respaldo para BESS (default 12)
@@ -47,10 +49,17 @@ def analizar_sistema_eolico_completo(
         tasa_descuento_pct      : Tasa descuento para NPV (default 8%)
 
     Returns:
-        dict con análisis técnico-financiero completo
+        dict con análisis técnico-financiero completo. Si el arreglo no tiene
+        inversor Sol-Ark compatible en DC directo, o si falta el costo de fábrica de
+        alguna turbina seleccionada, el análisis financiero NO se calcula (no hay
+        CAPEX real con el que hacerlo) -- se devuelve la arquitectura técnica ya
+        calculada más `pendiente_ingenieria_o_costo=True` y una nota explícita, en
+        vez de adivinar un número o lanzar una excepción.
     """
 
-    # PASO 1: Dimensionamiento técnico
+    # PASO 1: Dimensionamiento técnico (incluye costo de turbinas -- ver
+    # calcular_costo_arreglo_turbinas() en dimensionador_sistema_eolico.py, misma
+    # fuente de verdad que el resto de la app, turbine_specs.py::SPECS_TURBINAS)
     arquitectura = dimensionar_sistema_eolico_completo(
         turbinas_seleccionadas=turbinas_seleccionadas,
         consumo_diario_kWh=consumo_diario_kWh,
@@ -58,26 +67,31 @@ def analizar_sistema_eolico_completo(
         energia_anual_kWh=energia_anual_kWh,
     )
 
-    # PASO 2: Extraer costos base de equipos
-    costo_inversor_base = arquitectura["inversor_seleccionado"]["costo_USD"]
-    costo_bess_base = arquitectura["bess_seleccionado"]["costo_total_USD"]
     potencia_pico = arquitectura["arreglo_turbinas"]["potencia_pico_total_W"]
     n_turbinas = arquitectura["arreglo_turbinas"]["cantidad"]
+    costo_turbinas_total = arquitectura["arreglo_turbinas"]["costo_total_usd"]
 
-    # Calcular costo total de turbinas (precio base × cantidad)
-    # Obtener precio unitario de turbinas desde specs
-    df_specs = get_flowerturbines_df()
-    costo_turbinas_total = 0.0
+    if not arquitectura["inversor_seleccionado"]["compatible"] or costo_turbinas_total is None:
+        return {
+            "resumen_ejecutivo": {
+                "sistema_tipo": sistema_tipo,
+                "potencia_pico_kw": round(potencia_pico / 1000, 2),
+                "cantidad_turbinas": n_turbinas,
+                "energia_anual_kwh": round(energia_anual_kWh, 0),
+                "consumo_diario_kwh": consumo_diario_kWh,
+            },
+            "arquitectura_tecnica": arquitectura,
+            "analisis_financiero": None,
+            "pendiente_ingenieria_o_costo": True,
+            "nota_pendiente": arquitectura.get("nota_pendiente") or (
+                "Falta el costo de fábrica de al menos una turbina seleccionada "
+                f"({arquitectura['arreglo_turbinas']['turbinas_sin_costo']}) -- no se "
+                "puede calcular CAPEX real todavía."
+            ),
+        }
 
-    for modelo in turbinas_seleccionadas:
-        fila = df_specs[df_specs["Modelo"] == modelo]
-        if not fila.empty and "Precio_USD_Individual_OffGrid" in fila.columns:
-            precio_unitario = fila["Precio_USD_Individual_OffGrid"].values[0]
-            if precio_unitario and precio_unitario > 0:
-                costo_turbinas_total += precio_unitario
-        else:
-            # Si no hay precio, usar valor default aproximado
-            costo_turbinas_total += 10000  # Default para turbina media
+    costo_inversor_base = arquitectura["inversor_seleccionado"]["costo_USD"]
+    costo_bess_base = arquitectura["bess_seleccionado"]["costo_total_USD"]
 
     # PASO 3: Aplicar margen y costo de importación
     costo_turbinas_con_margen = calcular_precio_final(costo_turbinas_total)
@@ -266,13 +280,9 @@ def _generar_recomendaciones(
 
 
 if __name__ == "__main__":
-    # Ejemplo de uso
-    turbinas = [
-        "Small Tulip Turbine (1m)",
-        "Small Tulip Turbine (1m)",
-        "Medium Tulip Turbine (2m)",
-        "Medium Tulip Turbine (2m)",
-    ]
+    # Ejemplo de uso -- claves canónicas (turbine_specs.py::SPECS_TURBINAS), no
+    # nombres completos de modelo
+    turbinas = ["small_tulip", "small_tulip", "medium_tulip", "medium_tulip"]
 
     resultado = analizar_sistema_eolico_completo(
         turbinas_seleccionadas=turbinas,

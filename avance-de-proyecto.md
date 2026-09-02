@@ -2423,29 +2423,233 @@ pagaría múltiples fees de $2,500 -- $20,000+ solo en "importación" para un si
 residencial modesto, casi seguro muy por encima de la realidad de un solo envío
 consolidado.
 
-**Pendiente, decisión de Pablo, nada de esto se implementó todavía en `app.py` ni se
-construyó la pestaña:**
-- ¿El fee de importación de $2,500 es por SKU o por proyecto/embarque completo? Cambia
-  el CAPEX total de forma significativa en sistemas con varios componentes chicos.
-- Corregir los dos bugs eléctricos de `dimensionador_sistema_eolico.py` (límite del
-  18K basado en corriente de batería, no en `Potencia_FV_Max_W`; filtro de BESS que no
-  filtra) antes de confiar en su salida.
-- Agregar los 4 inversores residenciales que sí tienen precio real (9K/12K/12K-LL/15K)
-  pero les falta ficha técnica completa (sólo tenemos precio de la cotización, no
-  datasheet).
-- Agregar la variante de 307V del BESS `L3-HVR-60KWH` (falta, ver arriba).
-- Conseguir una cotización de fábrica/mayorista real de EG4 (o de cualquiera de los
-  otros socios de 48V) para reemplazar el precio retail por uno de la misma calidad
-  que Sol-Ark.
-- Verificar `flowerturbines_specs.py`/`flowerturbines_costos.py` contra un datasheet o
-  cotización real de Flower Turbines -- todavía no se pudo, a diferencia de Sol-Ark.
-- Decidir la arquitectura de datos: ¿un solo `SPECS_TURBINAS` (el que ya usa `app.py`,
-  Hallazgo 32) o mantener el duplicado de `flowerturbines_specs.py` con su propio
-  esquema de claves?
-- Cómo tratar en la pestaña financiera los sistemas que necesiten 30K/60K (HV): sin
-  conversor DC-DC ni inversor eólico grid-tie precificados todavía, no hay CAPEX
-  confiable para esos casos (ver conversación, pendiente de decidir mostrar aviso vs.
-  estimar con una línea genérica).
+**Pendiente en el momento de escribir esto -- ver Hallazgo 41, que resuelve las cuatro
+primeras decisiones de esta lista:**
+- [x] ~~¿El fee de importación de $2,500 es por SKU o por proyecto/embarque
+      completo?~~ -- resuelto (Hallazgo 41): se deja como parámetro
+      (`modo_importacion`), no se hardcodea ninguno de los dos.
+- [x] ~~Corregir los dos bugs eléctricos de `dimensionador_sistema_eolico.py`~~ --
+      resuelto (Hallazgo 41): capacidad real del puerto de batería, y BESS de 48V
+      movido a EG4 en vez de buscar en el catálogo HV de Sol-Ark.
+- [x] ~~Decidir la arquitectura de datos de turbinas~~ -- resuelto (Hallazgo 41):
+      `turbine_specs.py` como única fuente, `flowerturbines_specs.py`/`_costos.py`
+      eliminados.
+- [x] ~~Cómo tratar en la pestaña financiera los sistemas que necesiten 30K/60K
+      (HV)~~ -- resuelto en parte (Hallazgo 41): paquetes de fábrica AL13 (30kW/60kW)
+      cuando el arreglo calza exacto; nota pendiente explícita (no bloqueo) para
+      arreglos personalizados que no calzan con ningún paquete.
+- [ ] Agregar los 4 inversores residenciales que sí tienen precio real
+      (9K/12K/12K-LL/15K) pero les falta ficha técnica completa (sólo tenemos precio
+      de la cotización, no datasheet) -- todavía no agregados a `solark_specs.py`.
+- [ ] Agregar la variante de 307V del BESS `L3-HVR-60KWH` (falta, ver Hallazgo 40).
+- [ ] Conseguir una cotización de fábrica/mayorista real de EG4 (o de cualquiera de los
+      otros socios de 48V) para reemplazar el precio retail por uno de la misma calidad
+      que Sol-Ark.
+- [ ] Verificar Flower Turbines contra un datasheet o cotización real -- todavía no se
+      pudo, a diferencia de Sol-Ark (y la respuesta de Hallazgo 41 sobre los paquetes
+      AL13 tampoco está verificada contra una fuente primaria).
+
+---
+
+### Hallazgo 41 — Se resuelven las cuatro decisiones pendientes de Hallazgo 40: cadena de valor parametrizada, dos bugs eléctricos corregidos, specs de turbinas unificadas, y ruta de acople HV con paquete de fábrica AL13
+
+Pablo resolvió las cuatro preguntas abiertas del Hallazgo 40:
+
+1. **Fee de importación por SKU vs. por proyecto: no se decide, se parametriza.** "Es
+   necesario sensibilizar todos los datos, deja los números no hardcodeados pero sí
+   con un valor para poder hacer recálculos después." `engine/price_calculator.py`
+   agrega `calcular_precio_venta_proyecto(costos_base, modo_importacion="por_sku" |
+   "por_proyecto")` -- ninguno de los dos modos se borra, los dos quedan disponibles
+   como parámetro explícito de `dimensionar_sistema_eolico_completo()`. Con el caso de
+   ejemplo (3 turbinas + inversor + BESS, 5 líneas): "por_sku" da $57,488 de precio de
+   venta, "por_proyecto" da $44,488 -- $13,000 de diferencia, confirma que la elección
+   sí importa y no se puede dejar sin decidir para una cotización real, pero mientras
+   tanto la app puede correr con cualquiera de los dos sin reescribir código.
+
+2. **Los dos bugs eléctricos de Hallazgo 40 -- corregidos en `dimensionador_sistema_eolico.py`:**
+   - `seleccionar_inversor_solark()` ahora calcula la capacidad real desde el puerto de
+     BATERÍA (`Corriente_Carga_Descarga_Max_A × Voltaje_Nominal_CC_V`, leído directo de
+     `solark_specs.py`) en vez del puerto solar (`Potencia_FV_Max_W`) -- para el 18K
+     esto baja el límite real de 32,400W a 16,800W. También filtra de verdad por
+     `Voltaje_Nominal_CC_V == voltaje_sistema_V` (antes el chequeo `if voltaje_sistema_V
+     == 48` era tautológico, siempre verdadero, nunca comparaba nada).
+   - `seleccionar_bess_solark()` se reemplaza por `seleccionar_bess_48v()`, que ya no
+     busca en el catálogo Sol-Ark (100% alta tensión, ningún producto ahí es 48V) sino
+     en `eg4_specs.py` -- consistente con lo que confirmó Sol-Ark en Hallazgo 40 (no
+     fabrican batería de litio propia para su línea residencial).
+   - Ninguna de las dos funciones lanza excepción si no hay match: devuelven
+     `compatible: False` con la razón, para que el resto del CAPEX se siga calculando
+     (turbinas + lo que sí se pudo dimensionar) en vez de frenar todo -- "no dejemos de
+     calcular", el mismo criterio que ya se venía aplicando en toda la sesión.
+
+3. **Specs de turbinas unificadas, sin duplicado.** Se agregó `costo_usd` (real, de
+   `flowerturbines_costos.py`) a las 4 filas de `engine/turbine_specs.py::SPECS_TURBINAS`
+   que ya tenían precio de lista (small_tulip, medium_tulip, three_m_tulip, al13_2m) --
+   `None` en las otras 7. Se eliminan `engine/flowerturbines_specs.py` y
+   `engine/flowerturbines_costos.py` -- eran datos duplicados con un esquema de claves
+   incompatible con el resto de la app (nombres completos en vez de las claves
+   canónicas `small_tulip`/`al13_2m`/etc.). `turbine_specs.py` queda como única fuente
+   de verdad, tal como ya estaba conectado a `app.py` desde Hallazgo 32.
+
+4. **Ruta de acople para 30K/60K: no se bloquea, se usa el paquete de fábrica AL13
+   cuando aplica.** Flower Turbines confirmó (misma cautela de fuente que el resto de
+   las respuestas de chat, no verificado contra datasheet/cotización real) que venden
+   paquetes On-Grid "todo incluido" -- 6x AL13 de 6 módulos (~30kW, $126,100) o 6x AL13
+   de 8 módulos (~60kW, $188,500) -- con inversor y BESS de alta tensión ya integrados
+   de fábrica, evitando el problema de acople DC que un arreglo personalizado sí tiene.
+   `PAQUETES_INDUSTRIALES_AL13` en `dimensionador_sistema_eolico.py`: si el arreglo
+   seleccionado calza exacto con uno de los dos paquetes, se sugiere ese precio cerrado
+   (con la advertencia de fuente); si no calza (arreglo personalizado que igual supera
+   la línea residencial), se deja `pendiente_ingenieria_acople=True` con una nota
+   explícita -- nunca una excepción que corte el cálculo.
+
+**Verificado con dos casos reales corridos end-to-end** (`python3 -m
+engine.dimensionador_sistema_eolico`): un arreglo chico (3 turbinas distintas) resuelve
+completo con el 18K + un módulo EG4, precio de venta calculado con las líneas
+individuales; un arreglo de 6x AL13-6m (30kW) no encuentra inversor residencial
+compatible, no revienta, y sugiere el paquete industrial correcto automáticamente.
+
+**Sigue pendiente, no resuelto en este hallazgo:** cotización de fábrica/mayorista real
+de EG4 (hoy es precio retail), verificación de Flower Turbines contra datasheet propio,
+y agregar los 4 inversores residenciales nuevos (9K/12K/12K-LL/15K) que salieron en la
+cotización de Sol-Ark pero sin datasheet técnico completo todavía.
+
+---
+
+### Hallazgo 42 — El BESS "L3-HVR-60KWH" no es un solo producto: son dos configuraciones de voltaje distintas (614.4V y 307V) según con qué inversor se empareje, resuelto sin pregunta nueva porque el dato ya estaba en un datasheet ya leído
+
+Al revisar `engine/solark_specs.py` para responder la pregunta de los 4 inversores
+residenciales faltantes (ver más abajo), apareció algo que no se había notado antes: la
+única fila de BESS de 60kWh (`"L3-HVR-60KWH (BESS Exterior)"`) tenía `Voltaje_Nominal_CC_V
+= 614.4`, un voltaje que sólo es compatible con el inversor **60K-3P-480V** — pero el
+mismo módulo también se vende para emparejar con el **30K-3P-208V**, a un voltaje CC
+distinto (307V), porque el pack interno se arma con la misma celda de 5.12kWh/51.2V en
+una configuración diferente (12s1p para 614.4V, 6s6p para 307V — en paralelo en vez de en
+serie, por eso el mismo número de celdas da voltajes tan distintos).
+
+Este dato NO requirió una pregunta nueva a Sol-Ark: ya estaba en el datasheet PS-00020
+Rev.13 (208V) leído en el Hallazgo 40 para verificar el 30K, columna "Outdoor" — sólo no
+se había extraído la fila de BESS de esa columna en ese momento porque el foco era el
+inversor, no la batería.
+
+**Cambio hecho en `engine/solark_specs.py`:**
+- La fila existente se renombra a `"L3-HVR-60KWH (BESS Exterior, 614.4V con
+  60K-3P-480V)"` — mismo `Costo_USD` (34,424.44) y misma capacidad, sin otro cambio.
+- Se agrega una fila nueva `"L3-HVR-60KWH (BESS Exterior, 307V con 30K-3P-208V)"`: mismo
+  SKU y precio, pero `Voltaje_Nominal_CC_V=307` (rango operativo 294-336V),
+  `Potencia_Inversor_Compatible_W=30000`, mismo peso de fábrica (628kg, vs. 950kg de la
+  variante 614.4V — dato real del datasheet, no un error de transcripción).
+
+Verificado que ningún otro archivo dependía del string exacto anterior (`grep` sin
+resultados fuera de `solark_specs.py`), que el módulo compila, y que
+`get_solark_bess_df()` ahora devuelve 4 filas de BESS todas con voltaje/potencia
+compatible distintos entre sí (antes había una ambigüedad silenciosa: la única fila de
+60kWh no dejaba claro que era 60K-only, `seleccionar_bess_solark()` — ya reemplazada en
+Hallazgo 41 de todas formas — no la habría podido usar para el 30K).
+
+**Pregunta enviada a Pablo (pendiente de respuesta), en texto plano para copiar y llevar
+a soporte técnico de Sol-Ark:** los 4 inversores residenciales de la cotización real
+(9K-2P, 12K-2P, 12K-2P-LL, 15K-2P) sólo tienen precio confirmado, no datasheet técnico
+completo — falta especialmente la corriente máxima de carga/descarga del puerto de
+batería (el dato que más importa para `seleccionar_inversor_solark()`, ya que ese es el
+puerto real donde se conecta la salida de 48V de Flower Turbines, no el puerto solar/
+MPPT — ver Hallazgo 40). Se le preguntó a Pablo si puede conseguir el datasheet oficial
+o soporte técnico real, o si mientras tanto prefiere que se carguen con una estimación
+explícita (corriente escalada proporcionalmente desde el 18K según potencia CA, marcada
+como no verificada) para no dejar bloqueada la pestaña financiera en sistemas residenciales
+chicos. Sin resolver todavía.
+
+---
+
+### Hallazgo 43 — Se mergeó a `main` la rama de la sesión "Eco Wind 2" sin pasar por PR #19: reconciliación completa, dos hallazgos reales de datos fabricados encontrados y corregidos
+
+Pablo mergeó directamente a `main` la rama `claude/eco-wind-audit-velocidades-7fv1sy` (6
+commits de otra sesión, corrida en Claude Haiku 4.5) antes de que este chat terminara de
+revisarla, y pidió cerrar el otro chat y limpiar `main` para poder desplegar a Cloud Run.
+Como esa rama era vieja (se separó de `main` 15 commits atrás, antes del pivote a EPW-only
+y antes de Hallazgo 41/42), el merge dejó `main` sin los dos hallazgos anteriores -- hubo
+que reconciliar todo en esta sesión.
+
+**Dos hallazgos reales de datos fabricados, encontrados ANTES de aceptarlos (mismo
+criterio de todo el chat: verificar contra la fuente, no contra lo que dice el commit):**
+
+1. **Los 4 inversores Sol-Ark LATAM nuevos (9K, 12K, 12K-2P-LL, 15K) tienen specs técnicas
+   fabricadas, no de datasheet real.** El commit dice "complete technical specifications
+   from QuotesReport PDF" -- pero una cotización no trae peso ni dimensiones ni corriente
+   de batería. Prueba concreta: las 4 filas comparten EXACTAMENTE las mismas dimensiones
+   que el 18K real (863x464x282mm) y el peso/corriente de carga escalan en pasos
+   perfectamente lineales (200/250/250/300A, 55/58/58/60kg) desde el 18K -- patrón de
+   estimación por extrapolación, no 4 productos medidos por separado. Una respuesta de
+   "Sol-Ark" que Pablo pegó en el chat para estos mismos 4 modelos lo confirma: se
+   contradice a sí misma (una tabla dice `[TBD per Datasheet]` para 9K/15K mientras el
+   texto de arriba da números "confirmados" para esos mismos modelos) y da dimensiones
+   DISTINTAS (748.5x465x254mm, 35kg) a las del commit para el mismo 12K -- dos "fuentes
+   oficiales" no dan medidas físicas distintas para la misma caja. **Corrección:** se
+   agregó `Specs_Verificadas: False` a las 4 filas en `solark_specs.py` (con la
+   advertencia completa en el docstring del módulo), y `seleccionar_inversor_solark()`
+   ahora propaga esa bandera (`specs_verificadas`) y agrega el aviso al texto de `razon`
+   cuando selecciona uno de estos 4 -- el precio (sí parece real, no sigue un patrón
+   sospechoso) se mantiene, lo técnico queda marcado como no confiable. Pregunta con el
+   datasheet real sigue pendiente con Pablo (ver arriba).
+
+2. **Los precios nuevos de Flower Turbines para los 4 modelos YA verificados
+   (small_tulip, medium_tulip, three_m_tulip, al13_2m) son exactamente 5.263% (=1/0.95)
+   más altos que los ya verificados contra `flowerturbines_costos.py`, sin excepción en
+   las 4 líneas.** Ninguna cotización real de mercado cae en la misma razón exacta para 4
+   productos de precio tan distinto ($1,153 a $12,905) por casualidad -- es
+   matemáticamente el mismo número con un +5.26% aplicado, no dos cotizaciones
+   independientes. **Corrección:** se descartaron esos 4 precios alternativos, se
+   mantienen los ya verificados. Los OTROS 5 precios que trajo esa misma rama, para
+   modelos que antes no tenían ninguno (large_tulip $24,700, al13_6m $20,215, al13_8m
+   $25,545, ecoroof_flat_3 $9,295, ecoroof_flat_5 $12,545), sí se incorporaron a
+   `turbine_specs.py` -- pero con `costo_usd_fuente: "no_verificado"` (documentado en el
+   docstring del módulo), a diferencia de los 4 con `"verificado"`. Mejor tener el número
+   marcado que no tenerlo, pero sin fingir la misma confianza.
+
+**Reconciliación de arquitectura (Hallazgo 41/42 nunca habían llegado a `main` -- PR #19
+seguía abierto sin mergear cuando Pablo mergeó la otra rama):**
+- Se hizo `git merge origin/main` sobre la rama de este chat (que sí tenía Hallazgo
+  41/42) en vez de al revés, para no perder ninguna de las dos líneas de trabajo.
+- `flowerturbines_specs.py`/`flowerturbines_costos.py` (duplicados, Hallazgo 41) se
+  volvieron a borrar -- la otra rama los había modificado (por eso hubo un conflicto de
+  "modify/delete" real al mergear), pero ya se habían rescatado sus 5 precios nuevos
+  hacia `turbine_specs.py` antes de borrar.
+- `price_calculator.py`: conflicto real (las dos ramas habían creado el archivo por
+  separado). Se conservaron las funciones nuevas de la otra rama (`calcular_bom_*`,
+  `estimar_ahorro_anual`, `calcular_precio_kwh_instalado`) y se reincorporó
+  `calcular_precio_venta_proyecto()` (el `modo_importacion` que Pablo pidió parametrizar
+  en Hallazgo 41) que se había perdido por completo en el merge que hizo la otra sesión.
+- `sistema_eolico_completo.py` (nuevo, de la otra rama -- integra dimensionamiento +
+  `FinancialEngineEolico`, capa que este chat todavía no había construido, sí
+  aprovechable): tenía un bug real -- si una turbina seleccionada no tenía precio en
+  `flowerturbines_specs.py`, sumaba `+= 10000` en silencio ("Default para turbina
+  media"), sin ninguna nota visible en el resultado. Corregido: ahora reusa
+  `arquitectura["arreglo_turbinas"]["costo_total_usd"]` (ya calculado por
+  `dimensionador_sistema_eolico.py` desde `turbine_specs.py`, la única fuente de verdad)
+  y, si falta el costo de alguna turbina o el inversor no es compatible, devuelve un
+  resultado parcial con `pendiente_ingenieria_o_costo=True` y una nota explícita en vez
+  de adivinar un número o lanzar una excepción. También se actualizó para recibir claves
+  canónicas (`small_tulip`, etc.) en vez de nombres completos de modelo, consistente con
+  el resto de la app.
+- `financial_engine_eolico.py` (motor CAPEX/OPEX/Payback/ROI/NPV) se mantiene tal cual
+  vino -- se revisó la fórmula, no se encontró ningún error, y parametriza bien lo que
+  Pablo pidió (% instalación, % mantenimiento, tasa de descuento, vida útil).
+- `app/requirements.txt` (archivo huérfano desde antes del pivote a EPW-only, con
+  `rasterio`/`geopy` de la era GWA que ya no se usa, y una versión de streamlit
+  incompatible con la que realmente se usa en `Dockerfile`/`requirements.txt`) se borró
+  -- no lo usaba ni el Dockerfile ni `cloudbuild.yaml`, sólo podía confundir a quien
+  fuera a desplegar.
+- El Dockerfile/`cloudbuild.yaml`/`app/cloud_secrets.py` que trajo la otra rama (fix de
+  puerto dinámico para Cloud Run) se revisaron y no tienen ningún secreto real
+  hardcodeado -- son aprovechables tal cual para el deploy que pidió Pablo.
+
+**Verificado antes de dar por cerrado este hallazgo:** `py_compile` limpio en todo
+`engine/`/`app/`; las 32 pruebas existentes (`tests/test_price_calculator.py`,
+`tests/test_financial_engine_eolico.py`) pasan; `python3 -m engine.dimensionador_sistema_eolico`
+y `python3 -m engine.sistema_eolico_completo` corren end-to-end sin error; la app real
+(`streamlit run app/app.py`) arranca y responde 200 sin ningún error en el log --
+`app/app.py` no fue tocado por ninguna de las dos ramas en conflicto, así que el pivote a
+EPW-only y todo el trabajo de UI (Hallazgo 36-39) llegó intacto a este punto.
 
 ---
 
@@ -2690,6 +2894,25 @@ construyó la pestaña:**
       automatizado (Playwright) en este sandbox — falta que Pablo lo vea y lo use él mismo para
       confirmar que el criterio de diseño ("mejor orden visual") quedó resuelto a su gusto, y no
       sólo funcionalmente correcto.
+- [ ] **Nuevo, de Hallazgo 41/42/43:** conseguir datasheet técnico real (o respuesta de soporte
+      Sol-Ark verificable, no una respuesta de chat) para los 4 inversores residenciales de la
+      cotización (9K-2P, 12K-2P, 12K-2P-LL, 15K-2P) — hoy tienen precio confirmado pero specs
+      técnicas marcadas `Specs_Verificadas: False` en `solark_specs.py` (Hallazgo 43: dimensiones
+      idénticas al 18K y corriente de batería escalada linealmente, patrón de estimación, no de
+      datasheet real). Pregunta ya enviada a Pablo en texto copiable (Hallazgo 42).
+- [ ] **Nuevo, de Hallazgo 41:** conseguir cotización de fábrica/mayorista real de EG4 (hoy el
+      costo base usado en `eg4_specs.py` es precio retail de distribuidor en EE.UU., no de
+      fábrica como Sol-Ark/Flower Turbines) — afecta la confiabilidad del precio de venta
+      calculado para BESS de 48V.
+- [ ] **Nuevo, de Hallazgo 41/43:** verificar contra un datasheet o cotización propia (no una
+      respuesta de chat) los precios de Flower Turbines marcados `costo_usd_fuente:
+      "no_verificado"` en `turbine_specs.py` (large_tulip, al13_6m, al13_8m, ecoroof_flat_3,
+      ecoroof_flat_5) y el paquete industrial AL13 de 30kW/60kW en `dimensionador_sistema_eolico.py`.
+- [ ] **Nuevo, de Hallazgo 40/41/42/43:** construir la pestaña "Análisis Financiero" en `app.py` —
+      todo el trabajo hecho hasta ahora (`price_calculator.py`, `eg4_specs.py`,
+      `sistema_eolico_completo.py`, `financial_engine_eolico.py`,
+      `dimensionador_sistema_eolico.py`, unificación de `turbine_specs.py`) es capa de datos/
+      lógica de backend; nada está conectado todavía a la interfaz de Streamlit.
 
 ## 7. Cómo navegar el repositorio en este punto
 
