@@ -36,10 +36,20 @@ steps:
       - "--allow-unauthenticated"
       - "--port"
       - "8080"
+      # 2Gi (antes 1Gi) y --cpu-boost: el error real reportado era
+      # "STARTUP TCP probe failed... DEADLINE_EXCEEDED" -- el contenedor no
+      # llegaba a escuchar en el puerto a tiempo. Streamlit + pandas + numpy +
+      # plotly + folium es un import pesado; con sólo 1 CPU y sin boost de
+      # arranque, Cloud Run puede tardar más en levantar el proceso de lo que
+      # dura el probe de arranque, o el proceso puede quedarse sin memoria
+      # (que se ve igual que un timeout, porque el contenedor nunca llega a
+      # abrir el puerto). --cpu-boost da CPU completa sólo durante el arranque
+      # (no cuesta más en régimen normal, se apaga después del arranque).
       - "--memory"
-      - "1Gi"
+      - "2Gi"
       - "--cpu"
       - "1"
+      - "--cpu-boost"
       - "--timeout"
       - "3600s"
       - "--set-env-vars"

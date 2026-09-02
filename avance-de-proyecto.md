@@ -2711,6 +2711,65 @@ que sí renderice imagen (este sandbox no pudo, ver arriba).
 
 ---
 
+### Hallazgo 45 — Deploy a Cloud Run falla con "STARTUP TCP probe... DEADLINE_EXCEEDED": imagen de Docker con ~105MB de datos que la app en producción no usa, más ajuste de memoria/CPU de arranque
+
+Pablo reportó (captura del Explorador de registros de Cloud Run) que la revisión
+`eco-wind-00006-2pq` fallaba al arrancar: *"Default STARTUP TCP probe failed... The
+instance was not started. Connection failed with status DEADLINE_EXCEEDED"* — el
+contenedor nunca llegó a escuchar en el puerto 8080 dentro del tiempo que Cloud Run le
+da al arranque. Esto pasó DESPUÉS del fix de la otra sesión (commit `747382b`, unificar
+ENTRYPOINT+CMD) — o sea, ese fix no alcanzó solo.
+
+**Auditoría del código primero** (antes de tocar config de Cloud Run a ciegas): se
+revisó todo lo que `app.py` importa, directa e indirectamente, buscando trabajo pesado
+a nivel de módulo (que corre una sola vez al arrancar, antes de que Streamlit levante
+el servidor) — no se encontró ningún catálogo ni archivo grande leído en el momento del
+`import` (el catálogo de 5,276 estaciones y los EPW se leen dentro de funciones, no al
+importar el módulo). El código de la app en sí arranca rápido — confirmado localmente
+otra vez con `streamlit run app/app.py` (Hallazgo 43), responde 200 en unos 10s.
+
+**El problema real encontrado: la imagen de Docker carga ~105MB de datos que la app
+jamás usa en producción**, lo que hace más lento el "cold pull" de la imagen en cada
+arranque de instancia nueva (justo la ventana de tiempo que el probe de arranque está
+midiendo):
+- `documentos_tecnicos/` (83MB, los 91 manuales técnicos de Flower Turbines/Sol-Ark) —
+  sólo lo referencia `engine/estructural_asce7.py`, un módulo de investigación de la
+  Pista B/estructural que `app.py` NO importa (confirmado: ningún import, directo ni
+  transitivo, lo alcanza).
+- `datos_clima/gwa_costa_rica_10m.tif` (22MB) y `datos_clima/gwa_juan_santamaria/`
+  (92KB) — el ráster real de GWA de la línea de investigación que Hallazgo 36 decidió
+  abandonar por completo (EPW-only). Confirmado con `grep` que ya no queda ningún
+  `import rasterio` en todo el repo — este dato ya no lo usa nada.
+
+**Corrección:** se agregan ambas rutas a `.dockerignore` — los archivos NO se borran
+del repositorio (siguen disponibles para consulta/investigación en git), sólo dejan de
+viajar dentro de la imagen que se despliega. Además, dos ajustes de resiliencia en
+`cloudbuild.yaml` que no cuestan más en régimen normal pero sí ayudan directamente
+contra un arranque lento: memoria 1Gi → 2Gi (Streamlit + pandas + numpy + plotly +
+folium es una pila de imports pesada; si el proceso se queda sin memoria durante el
+arranque, Cloud Run lo ve exactamente igual que un timeout, porque el contenedor nunca
+llega a abrir el puerto) y `--cpu-boost` (CPU completa sólo durante el arranque, se
+apaga después).
+
+**Bug real encontrado de paso, no relacionado al timeout pero sí a Hallazgo 43:**
+`requirements.txt` (el que de verdad usa el `Dockerfile`) no tenía `geopy` — la
+librería que `engine/epw_real.py` usa para geocodificación por nombre (`Nominatim`,
+`Photon`). El import está protegido con `try/except ImportError` así que no rompe nada,
+pero en producción la búsqueda de sitio "por nombre" quedaría silenciosamente
+deshabilitada sin ningún aviso. Se agrega `geopy` a `requirements.txt`. De paso se
+quitan `matplotlib` y `scipy`: confirmado con `grep` que ningún módulo que `app.py`
+alcanza (directa o transitivamente) los importa de verdad — sólo aparecían en un
+comentario/docstring de `flower_turbines_curves.py` mencionando que `scipy.optimize`
+se usó para AJUSTAR los coeficientes durante el desarrollo, no en tiempo de ejecución.
+
+**Pendiente:** esto no se pudo probar contra el Cloud Run real de Pablo (sin acceso a
+su proyecto de GCP desde este sandbox) — es la corrección más probable según la
+auditoría del código y el patrón de falla reportado (imagen pesada + probe de TCP que
+se agota), pero si el siguiente deploy sigue fallando, el log de Cloud Build (no sólo
+el de Cloud Run) durante el `docker build` diría si el problema está en otro lado.
+
+---
+
 ## 6. Pendientes activos / bloqueos
 
 - [x] ~~Conseguir A/k reales del Global Wind Atlas~~ — resuelto, y con datos más ricos de lo
