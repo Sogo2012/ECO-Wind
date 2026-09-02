@@ -162,7 +162,12 @@ SOLARK_SPECS = [
         "Notas_Tecnicas": "Celda Prismática LiFePO4; Interior IP20; Supresión de fuego integrada en packs"
     },
     {
-        "Modelo": "L3-HVR-60KWH (BESS Exterior)",
+        # Renombrado (Hallazgo 42): "L3-HVR-60KWH" es el mismo SKU/precio para DOS
+        # configuraciones de voltaje distintas, según con qué inversor se empareje --
+        # confirmado comparando los dos datasheets reales (PS-00019 Rev.11 480V y
+        # PS-00020 Rev.13 208V). Esta fila es la variante de 614.4V (con el 60K); la
+        # de 307V (con el 30K) es la fila siguiente -- antes sólo estaba esta.
+        "Modelo": "L3-HVR-60KWH (BESS Exterior, 614.4V con 60K-3P-480V)",
         "Tipo_Equipo": "Banco de Baterías (LiFePO4)",
         "Costo_USD": 34424.44,
         "Capacidad_kWh": 61.44,
@@ -186,6 +191,37 @@ SOLARK_SPECS = [
         "Climatizacion": "Aire acondicionado integrado",
         "Control_Temperatura": True,
         "Notas_Tecnicas": "Celda Prismática LiFePO4; Exterior IP55; Aire acondicionado integrado para control temp."
+    },
+    {
+        # Variante de 307V (Hallazgo 42) -- mismo SKU y precio que la de arriba, pero
+        # empareja con el Sol-Ark 30K-3P-208V en vez del 60K-3P-480V. Datos extraídos
+        # directo de PS-00020 Rev.13 (208V), columna "Outdoor" -- no es una estimación.
+        "Modelo": "L3-HVR-60KWH (BESS Exterior, 307V con 30K-3P-208V)",
+        "Tipo_Equipo": "Banco de Baterías (LiFePO4)",
+        "Costo_USD": 34424.44,
+        "Capacidad_kWh": 61.44,
+        "Capacidad_Usable_kWh": 55.30,
+        "Potencia_Inversor_Compatible_W": 30000,
+        "Tipo_Celda": "Prismática LiFePO4",
+        "Ubicacion_Instalacion": "Exterior",
+        "IP_Rating": "IP55",
+        "Voltaje_Nominal_CC_V": 307,
+        "Voltaje_Operativo_CC_Min_V": 294,
+        "Voltaje_Operativo_CC_Max_V": 336,
+        "Corriente_Carga_Max_A": 100,
+        "Corriente_Descarga_Max_A": 100,
+        "Corriente_Recomendada_A": 100,
+        "Corriente_Passthrough_A": 200,
+        "Altura_cm": 76,
+        "Ancho_cm": 107,
+        "Profundidad_cm": 226,
+        "Peso_kg": 628.00,
+        "Supresion_Fuego": True,
+        "Climatizacion": "Aire acondicionado integrado",
+        "Control_Temperatura": True,
+        "Notas_Tecnicas": "Celda Prismática LiFePO4; Exterior IP55; config. de pack 6s6p (vs. 12s1p de la "
+                          "variante 614.4V) -- mismo módulo base de 5.12kWh/51.2V, mismo peso de fábrica "
+                          "distinto (628kg vs 950kg) según el propio datasheet, no es un error de transcripción."
     }
 ]
 

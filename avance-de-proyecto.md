@@ -2516,6 +2516,51 @@ cotización de Sol-Ark pero sin datasheet técnico completo todavía.
 
 ---
 
+### Hallazgo 42 — El BESS "L3-HVR-60KWH" no es un solo producto: son dos configuraciones de voltaje distintas (614.4V y 307V) según con qué inversor se empareje, resuelto sin pregunta nueva porque el dato ya estaba en un datasheet ya leído
+
+Al revisar `engine/solark_specs.py` para responder la pregunta de los 4 inversores
+residenciales faltantes (ver más abajo), apareció algo que no se había notado antes: la
+única fila de BESS de 60kWh (`"L3-HVR-60KWH (BESS Exterior)"`) tenía `Voltaje_Nominal_CC_V
+= 614.4`, un voltaje que sólo es compatible con el inversor **60K-3P-480V** — pero el
+mismo módulo también se vende para emparejar con el **30K-3P-208V**, a un voltaje CC
+distinto (307V), porque el pack interno se arma con la misma celda de 5.12kWh/51.2V en
+una configuración diferente (12s1p para 614.4V, 6s6p para 307V — en paralelo en vez de en
+serie, por eso el mismo número de celdas da voltajes tan distintos).
+
+Este dato NO requirió una pregunta nueva a Sol-Ark: ya estaba en el datasheet PS-00020
+Rev.13 (208V) leído en el Hallazgo 40 para verificar el 30K, columna "Outdoor" — sólo no
+se había extraído la fila de BESS de esa columna en ese momento porque el foco era el
+inversor, no la batería.
+
+**Cambio hecho en `engine/solark_specs.py`:**
+- La fila existente se renombra a `"L3-HVR-60KWH (BESS Exterior, 614.4V con
+  60K-3P-480V)"` — mismo `Costo_USD` (34,424.44) y misma capacidad, sin otro cambio.
+- Se agrega una fila nueva `"L3-HVR-60KWH (BESS Exterior, 307V con 30K-3P-208V)"`: mismo
+  SKU y precio, pero `Voltaje_Nominal_CC_V=307` (rango operativo 294-336V),
+  `Potencia_Inversor_Compatible_W=30000`, mismo peso de fábrica (628kg, vs. 950kg de la
+  variante 614.4V — dato real del datasheet, no un error de transcripción).
+
+Verificado que ningún otro archivo dependía del string exacto anterior (`grep` sin
+resultados fuera de `solark_specs.py`), que el módulo compila, y que
+`get_solark_bess_df()` ahora devuelve 4 filas de BESS todas con voltaje/potencia
+compatible distintos entre sí (antes había una ambigüedad silenciosa: la única fila de
+60kWh no dejaba claro que era 60K-only, `seleccionar_bess_solark()` — ya reemplazada en
+Hallazgo 41 de todas formas — no la habría podido usar para el 30K).
+
+**Pregunta enviada a Pablo (pendiente de respuesta), en texto plano para copiar y llevar
+a soporte técnico de Sol-Ark:** los 4 inversores residenciales de la cotización real
+(9K-2P, 12K-2P, 12K-2P-LL, 15K-2P) sólo tienen precio confirmado, no datasheet técnico
+completo — falta especialmente la corriente máxima de carga/descarga del puerto de
+batería (el dato que más importa para `seleccionar_inversor_solark()`, ya que ese es el
+puerto real donde se conecta la salida de 48V de Flower Turbines, no el puerto solar/
+MPPT — ver Hallazgo 40). Se le preguntó a Pablo si puede conseguir el datasheet oficial
+o soporte técnico real, o si mientras tanto prefiere que se carguen con una estimación
+explícita (corriente escalada proporcionalmente desde el 18K según potencia CA, marcada
+como no verificada) para no dejar bloqueada la pestaña financiera en sistemas residenciales
+chicos. Sin resolver todavía.
+
+---
+
 ## 6. Pendientes activos / bloqueos
 
 - [x] ~~Conseguir A/k reales del Global Wind Atlas~~ — resuelto, y con datos más ricos de lo
@@ -2757,6 +2802,24 @@ cotización de Sol-Ark pero sin datasheet técnico completo todavía.
       automatizado (Playwright) en este sandbox — falta que Pablo lo vea y lo use él mismo para
       confirmar que el criterio de diseño ("mejor orden visual") quedó resuelto a su gusto, y no
       sólo funcionalmente correcto.
+- [ ] **Nuevo, de Hallazgo 41/42:** conseguir datasheet técnico real (o respuesta de soporte
+      Sol-Ark) para los 4 inversores residenciales de la cotización (9K-2P, 12K-2P, 12K-2P-LL,
+      15K-2P) — hoy sólo tienen precio confirmado, falta la corriente máxima de carga/descarga
+      del puerto de batería para poder usarlos en `seleccionar_inversor_solark()`. Pregunta ya
+      enviada a Pablo en texto copiable (Hallazgo 42); alternativa si no se consigue: estimación
+      explícita escalada desde el 18K, marcada como no verificada.
+- [ ] **Nuevo, de Hallazgo 41:** conseguir cotización de fábrica/mayorista real de EG4 (hoy el
+      costo base usado en `eg4_specs.py` es precio retail de distribuidor en EE.UU., no de
+      fábrica como Sol-Ark/Flower Turbines) — afecta la confiabilidad del precio de venta
+      calculado para BESS de 48V.
+- [ ] **Nuevo, de Hallazgo 41:** verificar las specs y costos de Flower Turbines usados en
+      `turbine_specs.py`/`dimensionador_sistema_eolico.py` contra un datasheet o cotización
+      propia, no sólo la respuesta de chat recibida (con la misma cautela ya aplicada al paquete
+      industrial AL13 de 30kW/60kW, que quedó marcado como fuente no verificada).
+- [ ] **Nuevo, de Hallazgo 40/41/42:** construir la pestaña "Análisis Financiero" en `app.py` —
+      todo el trabajo hecho hasta ahora (`price_calculator.py`, `eg4_specs.py`,
+      `dimensionador_sistema_eolico.py`, unificación de `turbine_specs.py`) es capa de datos/
+      lógica de backend; nada está conectado todavía a la interfaz de Streamlit.
 
 ## 7. Cómo navegar el repositorio en este punto
 
