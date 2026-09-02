@@ -9,7 +9,8 @@ Campos documentados:
 - Altura: 1.4m a 9.5m
 - Producción a 12 m/s: datos reales de laboratorio
 - Vida de diseño: 20-40 años
-- Todos los valores en unidades SI
+- Precios USD Off-Grid: Cotizaciones oficiales Costa Rica (2024)
+- Todos los valores en unidades SI, precios en USD
 """
 import pandas as pd
 
@@ -36,7 +37,9 @@ FLOWERTURBINES_SPECS = [
         "Material_Palas": "Plástico ABS reciclable / Termoplástico",
         "Material_Chasis": "Acero con pintura en polvo",
         "Vida_Diseno_Anos": 40,
-        "Cimentacion_Requerida": "Dado concreto 0.5x0.5x0.5m o lastre Eco-Roof"
+        "Cimentacion_Requerida": "Dado concreto 0.5x0.5x0.5m o lastre Eco-Roof",
+        "Precio_USD_Individual_OffGrid": 1214.06,
+        "Precio_USD_Bouquet3_OffGrid": 3564.17
     },
     {
         "Modelo": "Survival Unit",
@@ -84,7 +87,9 @@ FLOWERTURBINES_SPECS = [
         "Material_Palas": "Plástico ABS / Termoplástico",
         "Material_Chasis": "Acero estructural (pedestal piramidal)",
         "Vida_Diseno_Anos": 40,
-        "Cimentacion_Requerida": "Losa 2.1x2.1x0.25m o zapata 1.0x1.0x1.6m (12x M14)"
+        "Cimentacion_Requerida": "Losa 2.1x2.1x0.25m o zapata 1.0x1.0x1.6m (12x M14)",
+        "Precio_USD_Individual_OffGrid": 9841.33,
+        "Precio_USD_Bouquet5_OffGrid": 53950.00
     },
     {
         "Modelo": "3-Meter Tulip Turbine",
@@ -108,7 +113,9 @@ FLOWERTURBINES_SPECS = [
         "Material_Palas": "Termoplástico",
         "Material_Chasis": "Acero estructural con base de anclaje",
         "Vida_Diseno_Anos": 20,
-        "Cimentacion_Requerida": "Base de concreto reforzada con pernos M14"
+        "Cimentacion_Requerida": "Base de concreto reforzada con pernos M14",
+        "Precio_USD_Individual_OffGrid": 13585.00,
+        "Precio_USD_Bouquet5_OffGrid": 106600.00
     },
     {
         "Modelo": "Large Tulip Turbine",
@@ -132,7 +139,8 @@ FLOWERTURBINES_SPECS = [
         "Material_Palas": "Termoplástico aeroespacial",
         "Material_Chasis": "Pedestal de acero galvanizado pesado",
         "Vida_Diseno_Anos": 20,
-        "Cimentacion_Requerida": "Zapata 2.5x2.5x0.9m o 2.5x4.0x0.5m"
+        "Cimentacion_Requerida": "Zapata 2.5x2.5x0.9m o 2.5x4.0x0.5m",
+        "Precio_USD_Individual_OffGrid": 24700.00
     },
     {
         "Modelo": "AL13 Power Tower (2 Mód)",
@@ -156,7 +164,8 @@ FLOWERTURBINES_SPECS = [
         "Material_Palas": "Aluminio anodizado reciclable",
         "Material_Chasis": "Acero estructural A36 (Caja 1x1 m)",
         "Vida_Diseno_Anos": 20,
-        "Cimentacion_Requerida": "Base de concreto 1.0x1.0x2.2m"
+        "Cimentacion_Requerida": "Base de concreto 1.0x1.0x2.2m",
+        "Precio_USD_OffGrid": 9399.00
     },
     {
         "Modelo": "AL13 Power Tower (6 Mód)",
@@ -180,7 +189,8 @@ FLOWERTURBINES_SPECS = [
         "Material_Palas": "Aluminio anodizado reciclable",
         "Material_Chasis": "Acero A36 + Poste estabilizador (70 kg)",
         "Vida_Diseno_Anos": 20,
-        "Cimentacion_Requerida": "Zapata 2.5x2.5x0.9m + Anclaje para poste"
+        "Cimentacion_Requerida": "Zapata 2.5x2.5x0.9m + Anclaje para poste",
+        "Precio_USD_OffGrid": 20215.00
     },
     {
         "Modelo": "AL13 Power Tower (8 Mód)",
@@ -204,7 +214,8 @@ FLOWERTURBINES_SPECS = [
         "Material_Palas": "Aluminio anodizado reciclable",
         "Material_Chasis": "Acero A36 + Poste estabilizador reforzado",
         "Vida_Diseno_Anos": 20,
-        "Cimentacion_Requerida": "Zapata 2.5x2.5x1.2m + Poste lateral a 1280 mm"
+        "Cimentacion_Requerida": "Zapata 2.5x2.5x1.2m + Poste lateral a 1280 mm",
+        "Precio_USD_OffGrid": 25545.00
     },
     {
         "Modelo": "Eco-Roof Energy Hub (Flat - 3 Turbines)",
@@ -228,7 +239,8 @@ FLOWERTURBINES_SPECS = [
         "Material_Palas": "Plástico ABS reciclable",
         "Material_Chasis": "Plataforma plana. Cajas contrapeso 300x315x150 mm",
         "Vida_Diseno_Anos": 40,
-        "Cimentacion_Requerida": "Instalación sin perforaciones (Efecto Bouquet integrado)"
+        "Cimentacion_Requerida": "Instalación sin perforaciones (Efecto Bouquet integrado)",
+        "Precio_USD_OffGrid": 9295.00
     },
     {
         "Modelo": "Eco-Roof Energy Hub (Flat - 5 Turbines)",
@@ -252,7 +264,8 @@ FLOWERTURBINES_SPECS = [
         "Material_Palas": "Plástico ABS reciclable",
         "Material_Chasis": "Sistema de balancín para nivelación simétrica",
         "Vida_Diseno_Anos": 40,
-        "Cimentacion_Requerida": "Instalación sin perforaciones"
+        "Cimentacion_Requerida": "Instalación sin perforaciones",
+        "Precio_USD_OffGrid": 12545.00
     },
     {
         "Modelo": "Eco-Roof Energy Hub (Slanted)",

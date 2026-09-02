@@ -6,3 +6,9 @@ folium>=0.12.0
 streamlit-folium>=0.6.0
 scipy>=1.7.0
 plotly>=5.0.0
+# Google Cloud integrations
+google-cloud-secret-manager>=2.16.0
+google-auth>=2.25.0
+google-cloud-storage>=2.10.0
+# Additional dependencies
+requests>=2.31.0
