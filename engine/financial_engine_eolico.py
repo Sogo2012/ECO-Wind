@@ -220,6 +220,50 @@ class FinancialEngineEolico:
             sistema_tipo=sistema_tipo,
         )
 
+    def calcular_ahorro_y_viabilidad(
+        self,
+        capex_usd: float,
+        ahorro_anual_usd: float,
+        mantenimiento_anual_usd: float,
+        energia_anual_kWh: float = 0.0,
+        potencia_pico_W: int = 0,
+        n_turbinas: int = 0,
+        sistema_tipo: str = "Standalone",
+    ) -> dict:
+        """
+        Calcula Payback/ROI/NPV a partir de un CAPEX y un AHORRO ANUAL ya resueltos en
+        dólares (Hallazgo 54) -- el llamador decide cómo se valoró ese ahorro: tarifa
+        plana (energía × $/kWh, ver calcular_punto_capex_directo) o tarifa horaria real
+        de Costa Rica cruzada contra la producción hora por hora (ver
+        engine/tarifas_electricas_cr.py::calcular_ahorro_tarifa_horaria_usd), donde un
+        kWh generado en horario Punta vale mucho más que uno generado de noche. Este
+        motor no necesita saber cuál de los dos se usó -- sólo el resultado en dólares.
+
+        capex_usd               : precio de venta real del proyecto al cliente (USD).
+        ahorro_anual_usd        : valor real del ahorro anual de electricidad (USD/año),
+                                  ya calculado por el llamador (no se deriva de tarifa_kwh_USD).
+        mantenimiento_anual_usd : costo de mantenimiento anual real (USD/año), NO un %.
+        energia_anual_kWh/potencia_pico_W/n_turbinas: sólo informativos en el resultado,
+                                  no afectan el cálculo.
+        """
+        viabilidad = _calcular_viabilidad(
+            capex_usd, ahorro_anual_usd, mantenimiento_anual_usd,
+            self.vida_util_anos, self.tasa_descuento_pct,
+        )
+        return {
+            "potencia_pico_W": potencia_pico_W,
+            "turbinas_count": n_turbinas,
+            "sistema_tipo": sistema_tipo,
+            "capex": round(capex_usd, 2),
+            "ahorro_anual_kwh": energia_anual_kWh,
+            "ahorro_anual_USD": round(ahorro_anual_usd, 2),
+            "mantenimiento_anual_USD": round(mantenimiento_anual_usd, 2),
+            "opex_anual_neto": viabilidad["opex_anual_neto"],
+            "payback_years": viabilidad["payback_years"],
+            "roi_percentage": viabilidad["roi_percentage"],
+            "npv_usd": viabilidad["npv_usd"],
+        }
+
     def calcular_punto_capex_directo(
         self,
         capex_usd: float,
@@ -238,6 +282,10 @@ class FinancialEngineEolico:
         mantenimiento real, y no quiere que la app se los adivine con supuestos de
         margen/flete/instalación/mantenimiento porcentual.
 
+        El ahorro anual se sigue derivando de la tarifa PLANA (energia_anual_kWh ×
+        self.tarifa_kwh_USD) -- para el modo de tarifa horaria real de Costa Rica, ver
+        calcular_ahorro_y_viabilidad() (Hallazgo 54), que este método ya usa por dentro.
+
         capex_usd               : precio de venta real del proyecto al cliente (USD) --
                                   la inversión real que se recupera con el ahorro.
         mantenimiento_anual_usd : costo de mantenimiento anual real (USD/año), NO un %.
@@ -246,23 +294,15 @@ class FinancialEngineEolico:
                                   resultado tenga la misma forma que calcular_punto_unico().
         """
         ahorro_anual_usd = energia_anual_kWh * self.tarifa_kwh_USD
-        viabilidad = _calcular_viabilidad(
-            capex_usd, ahorro_anual_usd, mantenimiento_anual_usd,
-            self.vida_util_anos, self.tasa_descuento_pct,
+        return self.calcular_ahorro_y_viabilidad(
+            capex_usd=capex_usd,
+            ahorro_anual_usd=ahorro_anual_usd,
+            mantenimiento_anual_usd=mantenimiento_anual_usd,
+            energia_anual_kWh=energia_anual_kWh,
+            potencia_pico_W=potencia_pico_W,
+            n_turbinas=n_turbinas,
+            sistema_tipo=sistema_tipo,
         )
-        return {
-            "potencia_pico_W": potencia_pico_W,
-            "turbinas_count": n_turbinas,
-            "sistema_tipo": sistema_tipo,
-            "capex": round(capex_usd, 2),
-            "ahorro_anual_kwh": energia_anual_kWh,
-            "ahorro_anual_USD": round(ahorro_anual_usd, 2),
-            "mantenimiento_anual_USD": round(mantenimiento_anual_usd, 2),
-            "opex_anual_neto": viabilidad["opex_anual_neto"],
-            "payback_years": viabilidad["payback_years"],
-            "roi_percentage": viabilidad["roi_percentage"],
-            "npv_usd": viabilidad["npv_usd"],
-        }
 
     def calcular_sensibilidad_parametrica(
         self,

@@ -70,6 +70,7 @@ from engine.epw_real import (
     obtener_estaciones_cercanas, geocode_name, descargar_y_extraer_epw, sitio_precacheado_cercano,
 )
 from engine.financial_engine_eolico import FinancialEngineEolico
+from engine.tarifas_electricas_cr import calcular_ahorro_tarifa_horaria_usd
 from engine.dimensionador_sistema_eolico import dimensionar_sistema_eolico_completo, VOLTAJE_TURBINAS_V
 from engine.solark_specs import get_solark_df
 from engine.eg4_specs import get_eg4_df
@@ -943,17 +944,26 @@ with tab_financiero:
 
             # Mismo cálculo de kWh/año que "Resultados" (Hallazgo 12/17), recalculado acá
             # para no depender de que el usuario haya visitado esa pestaña en esta sesión.
-            kwh_anual_total = sum(
+            # Se guarda también la serie horaria completa del proyecto (Hallazgo 54): la
+            # tarifa horaria de Costa Rica necesita saber A QUÉ HORA se genera cada kWh, no
+            # sólo el total anual -- serie_horaria_W_por_turbina es POR TURBINA, se escala
+            # por N de cada clúster y se suman todos para tener el perfil horario del proyecto.
+            resultados_clusters = [
                 simular(df_clima, altura_buje=c["altura_buje"], modelo=c["modelo"], N=int(c["N"]),
-                        elevacion_m=elevacion_m, z0=z0, metodo_bouquet=metodo_bouquet)["kwh_anual"]
+                        elevacion_m=elevacion_m, z0=z0, metodo_bouquet=metodo_bouquet)
                 for c in st.session_state.clusters
+            ]
+            kwh_anual_total = sum(r["kwh_anual"] for r in resultados_clusters)
+            serie_horaria_kwh_total = sum(
+                r["serie_horaria_W_por_turbina"] * int(c["N"]) / 1000.0
+                for r, c in zip(resultados_clusters, st.session_state.clusters)
             )
             turbinas_seleccionadas = [
                 c["modelo"] for c in st.session_state.clusters for _ in range(int(c["N"]))
             ]
 
             st.markdown("**Parámetros del proyecto**")
-            col_f1, col_f2, col_f3 = st.columns(3)
+            col_f1, col_f2 = st.columns(2)
             with col_f1:
                 consumo_diario_kWh = st.number_input(
                     "Consumo diario del sitio (kWh/día)", min_value=0.1, value=20.0, step=1.0,
@@ -964,10 +974,6 @@ with tab_financiero:
                 horas_autonomia = st.number_input(
                     "Horas de autonomía deseadas", min_value=1, max_value=48, value=12, step=1,
                     key="fin_horas_autonomia")
-            with col_f3:
-                tarifa_kwh_USD = st.number_input(
-                    "Tarifa eléctrica ($/kWh)", min_value=0.01, value=0.15, step=0.01, format="%.2f",
-                    key="fin_tarifa_kwh")
 
             sistema_tipo_label = st.radio(
                 "Tipo de sistema",
@@ -975,6 +981,76 @@ with tab_financiero:
                 horizontal=True,
             )
             sistema_tipo = "Standalone" if sistema_tipo_label.startswith("Standalone") else "Hybrid"
+
+            st.markdown("**Tarifa eléctrica**")
+            modo_tarifa = st.radio(
+                "¿Cómo querés valorar el ahorro de electricidad?",
+                ["Tarifa plana (USD/kWh)", "Tarifa horaria real de Costa Rica (ARESEP)"],
+                horizontal=True,
+                key="fin_modo_tarifa",
+                help="La tarifa horaria cruza la producción REAL hora por hora de la turbina "
+                     "contra los periodos Punta/Valle/Nocturno de CNFL/ICE (Hallazgo 54) -- un "
+                     "kWh generado en horario Punta vale varias veces más que uno generado de "
+                     "noche, algo que una tarifa plana no puede reflejar.",
+            )
+
+            resultado_tou = None
+            if modo_tarifa == "Tarifa plana (USD/kWh)":
+                tarifa_kwh_USD = st.number_input(
+                    "Tarifa eléctrica ($/kWh)", min_value=0.01, value=0.15, step=0.01, format="%.2f",
+                    key="fin_tarifa_kwh")
+            else:
+                col_t1, col_t2, col_t3 = st.columns(3)
+                with col_t1:
+                    proveedor_tou = st.selectbox(
+                        "Proveedor", ["CNFL", "ICE"], key="fin_tou_proveedor",
+                        help="CNFL cubre el Gran Área Metropolitana; ICE el resto del país.",
+                    )
+                opciones_tarifa_tou = {
+                    "CNFL": ["T-REH (0-500 kWh)", "T-REH (>500 kWh)"],
+                    "ICE": ["T-RH", "T-MT (Media Tensión Max)"],
+                }[proveedor_tou]
+                with col_t2:
+                    tarifa_tou = st.selectbox(
+                        "Tarifa", opciones_tarifa_tou, key="fin_tou_tarifa",
+                        help="T-REH/T-RH: residencial. T-MT: media tensión (proyectos más grandes).",
+                    )
+                with col_t3:
+                    tipo_cambio_crc_usd = st.number_input(
+                        "Tipo de cambio (₡ por USD)", min_value=1.0, value=520.0, step=1.0,
+                        key="fin_tipo_cambio",
+                        help="Verificá el tipo de cambio de referencia del Banco Central de Costa "
+                             "Rica (BCCR) antes de cotizar -- cambia a diario, este es sólo un punto "
+                             "de partida editable, no un valor fijo del sistema.",
+                    )
+
+                try:
+                    resultado_tou = calcular_ahorro_tarifa_horaria_usd(
+                        serie_horaria_kwh_total, proveedor_tou, tarifa_tou, tipo_cambio_crc_usd,
+                    )
+                except ValueError as e:
+                    st.error(str(e))
+
+                if resultado_tou:
+                    # Dos "$" en el mismo st.caption() arman un par que Streamlit interpreta
+                    # como LaTeX ($...$) -- se escapan con "\$" (mismo bug real de Hallazgo 48).
+                    st.caption(
+                        f"Tarifa efectiva ponderada por producción real: "
+                        f"\\${resultado_tou['tarifa_efectiva_usd_kwh']:.4f}/kWh "
+                        f"({resultado_tou['ahorro_anual_crc']:,.0f} ₡/año → "
+                        f"\\${resultado_tou['ahorro_anual_usd']:,.0f}/año)."
+                    )
+                    tabla_periodos = pd.DataFrame([
+                        {"Periodo": periodo, "kWh/año": v["kwh"],
+                         "Precio (₡/kWh)": v["precio_crc_kwh"], "Valor (USD/año)": v["usd"]}
+                        for periodo, v in resultado_tou["desglose_por_periodo"].items()
+                    ])
+                    st.dataframe(
+                        tabla_periodos.style.format({
+                            "kWh/año": "{:,.0f}", "Precio (₡/kWh)": "{:,.2f}", "Valor (USD/año)": "${:,.0f}",
+                        }),
+                        hide_index=True,
+                    )
 
             with st.expander("Parámetros avanzados"):
                 col_a1, col_a2 = st.columns(2)
@@ -1069,20 +1145,45 @@ with tab_financiero:
                     "Ingresá el precio de venta al cliente para calcular Payback, ROI, NPV y "
                     "viabilidad económica."
                 )
+            elif modo_tarifa != "Tarifa plana (USD/kWh)" and resultado_tou is None:
+                st.info(
+                    "No se pudo calcular el ahorro con tarifa horaria (ver el error arriba) -- "
+                    "cambiá a \"Tarifa plana (USD/kWh)\" o revisá la selección de proveedor/tarifa."
+                )
             else:
-                fe = FinancialEngineEolico(
-                    tarifa_kwh_USD=tarifa_kwh_USD,
-                    vida_util_anos=int(vida_util_anos),
-                    tasa_descuento_pct=tasa_descuento_pct,
-                )
-                fin = fe.calcular_punto_capex_directo(
-                    capex_usd=precio_venta_usd,
-                    energia_anual_kWh=kwh_anual_total,
-                    mantenimiento_anual_usd=mantenimiento_anual_usd,
-                    potencia_pico_W=arquitectura["arreglo_turbinas"]["potencia_pico_total_W"],
-                    n_turbinas=arquitectura["arreglo_turbinas"]["cantidad"],
-                    sistema_tipo=sistema_tipo,
-                )
+                if modo_tarifa == "Tarifa plana (USD/kWh)":
+                    fe = FinancialEngineEolico(
+                        tarifa_kwh_USD=tarifa_kwh_USD,
+                        vida_util_anos=int(vida_util_anos),
+                        tasa_descuento_pct=tasa_descuento_pct,
+                    )
+                    fin = fe.calcular_punto_capex_directo(
+                        capex_usd=precio_venta_usd,
+                        energia_anual_kWh=kwh_anual_total,
+                        mantenimiento_anual_usd=mantenimiento_anual_usd,
+                        potencia_pico_W=arquitectura["arreglo_turbinas"]["potencia_pico_total_W"],
+                        n_turbinas=arquitectura["arreglo_turbinas"]["cantidad"],
+                        sistema_tipo=sistema_tipo,
+                    )
+                else:
+                    # Tarifa horaria real (Hallazgo 54): el ahorro ya viene calculado
+                    # cruzando producción hora por hora contra los periodos Punta/Valle/
+                    # Nocturno -- calcular_ahorro_y_viabilidad() lo recibe directo, sin
+                    # volver a derivarlo de un $/kWh plano.
+                    fe = FinancialEngineEolico(
+                        tarifa_kwh_USD=resultado_tou["tarifa_efectiva_usd_kwh"] or 0.01,
+                        vida_util_anos=int(vida_util_anos),
+                        tasa_descuento_pct=tasa_descuento_pct,
+                    )
+                    fin = fe.calcular_ahorro_y_viabilidad(
+                        capex_usd=precio_venta_usd,
+                        ahorro_anual_usd=resultado_tou["ahorro_anual_usd"],
+                        mantenimiento_anual_usd=mantenimiento_anual_usd,
+                        energia_anual_kWh=kwh_anual_total,
+                        potencia_pico_W=arquitectura["arreglo_turbinas"]["potencia_pico_total_W"],
+                        n_turbinas=arquitectura["arreglo_turbinas"]["cantidad"],
+                        sistema_tipo=sistema_tipo,
+                    )
 
                 # Fila 1: qué genera el sistema en electricidad -- respuesta directa a
                 # "esos kWh cuántos dólares representan" (ahorro de electricidad NO
@@ -1131,9 +1232,10 @@ with tab_financiero:
 
             st.caption(
                 "Motor: `dimensionador_sistema_eolico.py` (arquitectura técnica, automática) + "
-                "`financial_engine_eolico.py::calcular_punto_capex_directo` (Hallazgo 53) -- CAPEX, "
-                "mantenimiento y precio de venta ingresados directo por el usuario, ya no se "
-                "estiman con costo de fábrica + margen + flete supuestos."
+                "`financial_engine_eolico.py` (Hallazgo 53: CAPEX, mantenimiento y precio de venta "
+                "ingresados directo por el usuario) + `tarifas_electricas_cr.py` (Hallazgo 54: "
+                "tarifas horarias reales de CNFL/ICE cruzadas contra la producción hora por hora, "
+                "en vez de una tarifa plana adivinada)."
             )
 
 
