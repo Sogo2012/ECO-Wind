@@ -3125,6 +3125,69 @@ directo a Pablo, generado y verificado visualmente (`pymupdf`) antes de enviarlo
 
 ---
 
+### Hallazgo 51 — Se sube el límite de altura de buje de 15m a 150m para poder evaluar instalación en techo de edificios altos, y se descubre que las turbinas "Eco-Roof" no son seleccionables en el simulador
+
+Pablo preguntó si se podía ampliar el perfil de viento a 60m, para evaluar poner
+turbinas en el techo de un edificio de 15 pisos.
+
+**Respuesta técnica, antes de tocar código:** sí, sin necesitar ningún dato nuevo del
+EPW. El EPW sólo trae viento medido a 10m -- la extrapolación a cualquier otra altura
+(3m o 60m, da lo mismo) ya la hace `wind_at_height()` (ley logarítmica, Hallazgo 20),
+que no tiene ningún límite matemático en la altura destino; el techo de 15m era sólo
+un límite puesto a mano en los widgets de Streamlit, no una limitación de la fórmula
+ni del dato. Verificado con el cross-check independiente que la app ya tenía (ley de
+potencia de EnergyPlus, `wind_at_height_potencia()`): entre 10m y 100m los dos métodos
+se mantienen consistentes entre sí (6-10% de diferencia en todo el rango, sin
+dispararse) -- no hay señal de que la extrapolación se vuelva absurda a 60m.
+
+**Cambio real:** se sube `max_value` de 15.0 a 150.0 en 2 widgets de `app.py` -- el
+slider "Altura de buje a explorar" (Contexto climático, sólo visual/exploratorio) y el
+`number_input` "Buje (m)" de cada clúster (Equipos y configuración, el que sí alimenta
+el cálculo real de energía). Se agrega ayuda explícita en ambos: para una instalación
+en techo, la altura de buje = altura del edificio + altura del mástil sobre el techo
+(NO la cantidad de pisos) -- un edificio de 15 pisos ronda 45-55m según la altura de
+entrepiso.
+
+**Salvedad honesta, no resuelta:** la ley logarítmica con un z0 regional (el mismo que
+ya usa la app para el sitio destino) da la velocidad REGIONAL esperada a esa altura --
+es la extrapolación estándar de un primer análisis de recurso eólico, pero NO modela el
+efecto aerodinámico LOCAL de estar encima de un edificio puntual (aceleración del flujo
+sobre el borde del techo, turbulencia por parapetos/equipos de HVAC, estela de
+edificios vecinos más altos) -- esos efectos están bien documentados en la literatura
+de turbinas integradas a edificios (BIWT) y pueden tanto ayudar como perjudicar el
+resultado real frente a esta extrapolación "limpia". Modelarlos requeriría datos
+específicos del edificio (CFD, túnel de viento, o factores de corrección publicados)
+que este proyecto no tiene todavía.
+
+**Hallazgo colateral, sin resolver:** las turbinas "Eco-Roof Energy Hub" (3 modelos en
+`turbine_specs.py`: `ecoroof_flat_3`, `ecoroof_flat_5`, `ecoroof_slanted`) -- el
+producto que Flower Turbines vende específicamente para techo, sin cimentación -- NO
+están en `CURVE_COEFFICIENTS` (`flower_turbines_curves.py`), así que el selector
+"Modelo" de "Equipos y configuración" no las puede elegir: tienen ficha técnica y costo
+completos, pero ningún cálculo de energía las puede simular. Mismo problema para
+`survival_unit`. Workaround inmediato usado con Pablo: para el caso de techo, usar un
+modelo Tulip existente (ej. `small_tulip`, que es literalmente la turbina individual
+que arma el Eco-Roof Flat-3/5 en plataforma) con la altura de buje = altura del
+edificio + mástil -- la curva de potencia es por MODELO de turbina, no por tipo de
+montaje, así que es válido físicamente aunque no aparezca como "Eco-Roof" en la
+interfaz.
+
+**Verificado:** `py_compile` limpio, las 32 pruebas existentes siguen pasando, y
+prueba en vivo con Playwright (EPW real de San José, slider a 60m, clúster con buje
+55m, calcular producción) -- sin errores, y el punto marcado en el gráfico (4.64 m/s a
+60m) coincide exacto con el cálculo hecho a mano en Python antes de tocar la UI.
+
+**Pendiente, no resuelto en este hallazgo:**
+- Agregar coeficientes de curva de potencia para `ecoroof_flat_3`, `ecoroof_flat_5`,
+  `ecoroof_slanted` y `survival_unit` a `CURVE_COEFFICIENTS` para que sean
+  seleccionables de verdad en "Equipos y configuración" -- hoy existen en
+  `turbine_specs.py` pero son inertes en el simulador.
+- Cuantificar (o al menos documentar con una fuente publicada) el efecto aerodinámico
+  local de un techo de edificio (aceleración/turbulencia) en vez de usar sólo la
+  extrapolación regional limpia.
+
+---
+
 ## 6. Pendientes activos / bloqueos
 
 - [x] ~~Conseguir A/k reales del Global Wind Atlas~~ — resuelto, y con datos más ricos de lo
@@ -3409,6 +3472,16 @@ directo a Pablo, generado y verificado visualmente (`pymupdf`) antes de enviarlo
       embarcan desarmadas/en secciones (supuesto usado para tratar el peso como el único
       factor limitante) — si el volumen real limita antes que el peso, los límites de
       pallet/contenedor podrían estar sobrestimando cuántas unidades entran.
+- [ ] **Nuevo, de Hallazgo 51:** agregar coeficientes de curva de potencia para
+      `ecoroof_flat_3`, `ecoroof_flat_5`, `ecoroof_slanted` y `survival_unit` a
+      `CURVE_COEFFICIENTS` (`flower_turbines_curves.py`) — hoy tienen ficha técnica y
+      costo en `turbine_specs.py` pero no son seleccionables en "Equipos y
+      configuración", así que ningún cálculo de energía las puede usar.
+- [ ] **Nuevo, de Hallazgo 51:** documentar o cuantificar el efecto aerodinámico LOCAL
+      de un techo de edificio (aceleración sobre el borde, turbulencia por
+      parapetos/HVAC, estela de edificios vecinos) para instalaciones tipo Eco-Roof —
+      hoy sólo se extrapola la velocidad REGIONAL a la altura del techo, sin ese
+      efecto local (ver literatura de turbinas integradas a edificios, BIWT).
 
 ## 7. Cómo navegar el repositorio en este punto
 
