@@ -61,7 +61,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.simulador_pista_a import (
     simular, comparar_metodo_ingenuo_vs_horario, wind_at_height, wind_at_height_potencia,
-    Z0_DEFAULT, Z0_MET_DEFAULT,
+    terreno_mas_cercano_por_z0, Z0_DEFAULT, Z0_MET_DEFAULT,
 )
 from engine.flower_turbines_curves import CURVE_COEFFICIENTS
 from engine.turbine_specs import SPECS_TURBINAS, RUTA_IMAGEN, LOGO_ECO, LOGO_FLOWER_TURBINES
@@ -846,8 +846,13 @@ with tab_resultados:
             media_confirmada = resultado_clima["media"]
             with st.expander("Hallazgo 20 -- perfil de viento por altura: dos rugosidades, y un cross-check independiente"):
                 _r0 = resultados[0]
+                # El cross-check usa el MISMO z0 de destino que ya eligió el usuario arriba
+                # (mapeado a la clase de TERRENOS_ENERGYPLUS más cercana) -- antes quedaba fijo
+                # en "suburban" sin importar el z0 real seleccionado (Hallazgo 52: nada
+                # hardcodeado, el tipo de terreno lo elige el usuario).
+                _terreno_dst = terreno_mas_cercano_por_z0(z0)
                 _v_pot = wind_at_height_potencia(
-                    media_confirmada, 10, _r0["altura_buje"], terreno="suburban", terreno_met="country")
+                    media_confirmada, 10, _r0["altura_buje"], terreno=_terreno_dst, terreno_met="country")
                 st.write(
                     f"El viento de referencia (10m, aeropuerto/EPW) y el sitio real donde va la "
                     f"turbina casi nunca tienen la misma rugosidad -- hasta Hallazgo 20 esta app usaba "
@@ -859,7 +864,10 @@ with tab_resultados:
                 )
                 st.write(
                     f"**Cross-check independiente** (ley de potencia que usa EnergyPlus por default, "
-                    f"misma tabla de terrenos que ladybug-tools/ladybug, terreno suburbano): "
+                    f"misma tabla de terrenos que ladybug-tools/ladybug, con el mismo **z0={z0}** elegido "
+                    f"arriba -- internamente la clase con ese z0 tabulado se llama \"{_terreno_dst}\" en "
+                    f"la tabla original de EnergyPlus, aunque el nombre no siempre calce 1 a 1 con las "
+                    f"etiquetas en español de esta app): "
                     f"{_v_pot:.2f} m/s a {_r0['altura_buje']:.1f}m de buje, vs. "
                     f"**{_r0['v_hub_medio']:.2f} m/s** con la fórmula logarítmica usada arriba -- "
                     f"{'concuerdan razonablemente' if abs(_v_pot/_r0['v_hub_medio']-1) < 0.15 else 'difieren más de lo esperado, revisar'}."
