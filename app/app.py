@@ -70,7 +70,7 @@ from engine.epw_real import (
     obtener_estaciones_cercanas, geocode_name, descargar_y_extraer_epw, sitio_precacheado_cercano,
 )
 from engine.financial_engine_eolico import FinancialEngineEolico
-from engine.tarifas_electricas_cr import calcular_ahorro_tarifa_horaria_usd
+from engine.tarifas_electricas_cr import calcular_ahorro_tarifa_horaria_usd, calcular_ahorro_tarifa_comercial_usd
 from engine.dimensionador_sistema_eolico import dimensionar_sistema_eolico_completo, VOLTAJE_TURBINAS_V
 from engine.solark_specs import get_solark_df
 from engine.eg4_specs import get_eg4_df
@@ -985,20 +985,70 @@ with tab_financiero:
             st.markdown("**Tarifa eléctrica**")
             modo_tarifa = st.radio(
                 "¿Cómo querés valorar el ahorro de electricidad?",
-                ["Tarifa plana (USD/kWh)", "Tarifa horaria real de Costa Rica (ARESEP)"],
+                ["Tarifa plana (USD/kWh)", "Tarifa horaria real de Costa Rica (ARESEP)",
+                 "Tarifa comercial de Costa Rica (T-CO)"],
                 horizontal=True,
                 key="fin_modo_tarifa",
                 help="La tarifa horaria cruza la producción REAL hora por hora de la turbina "
                      "contra los periodos Punta/Valle/Nocturno de CNFL/ICE (Hallazgo 54) -- un "
                      "kWh generado en horario Punta vale varias veces más que uno generado de "
-                     "noche, algo que una tarifa plana no puede reflejar.",
+                     "noche, algo que una tarifa plana no puede reflejar. La tarifa comercial "
+                     "(T-CO) es para gimnasios/estadios/comercios -- precio plano por kWh según "
+                     "el consumo mensual del sitio, sin periodos horarios (Hallazgo 55).",
             )
 
             resultado_tou = None
+            resultado_co = None
             if modo_tarifa == "Tarifa plana (USD/kWh)":
                 tarifa_kwh_USD = st.number_input(
                     "Tarifa eléctrica ($/kWh)", min_value=0.01, value=0.15, step=0.01, format="%.2f",
                     key="fin_tarifa_kwh")
+            elif modo_tarifa == "Tarifa comercial de Costa Rica (T-CO)":
+                col_c1, col_c2, col_c3 = st.columns(3)
+                with col_c1:
+                    proveedor_co = st.selectbox(
+                        "Proveedor", ["CNFL", "ICE"], key="fin_co_proveedor",
+                        help="CNFL cubre el Gran Área Metropolitana; ICE el resto del país.",
+                    )
+                with col_c2:
+                    tramo_label = st.selectbox(
+                        "Consumo mensual del sitio",
+                        ["≤ 3000 kWh/mes (sin medidor de potencia)",
+                         "> 3000 kWh/mes (con medidor de potencia)"],
+                        key="fin_co_tramo",
+                        help="Determina qué tarifa T-CO aplica -- gimnasios/estadios grandes "
+                             "normalmente caen en el tramo >3000 kWh/mes.",
+                    )
+                tramo_co = "pequeno" if tramo_label.startswith("≤") else "grande"
+                with col_c3:
+                    tipo_cambio_crc_usd = st.number_input(
+                        "Tipo de cambio (₡ por USD)", min_value=1.0, value=520.0, step=1.0,
+                        key="fin_co_tipo_cambio",
+                        help="Verificá el tipo de cambio de referencia del Banco Central de Costa "
+                             "Rica (BCCR) antes de cotizar -- cambia a diario, este es sólo un punto "
+                             "de partida editable, no un valor fijo del sistema.",
+                    )
+
+                try:
+                    resultado_co = calcular_ahorro_tarifa_comercial_usd(
+                        kwh_anual_total, proveedor_co, tramo_co, tipo_cambio_crc_usd,
+                    )
+                except ValueError as e:
+                    st.error(str(e))
+
+                if resultado_co:
+                    st.caption(
+                        f"Tarifa T-CO: ₡{resultado_co['precio_crc_kwh']:.2f}/kWh → "
+                        f"\\${resultado_co['ahorro_anual_usd']:,.0f}/año "
+                        f"({resultado_co['ahorro_anual_crc']:,.0f} ₡/año)."
+                    )
+                    st.info(
+                        "Esta tarifa NO incluye el cargo por demanda máxima (kW) que T-CO "
+                        "también cobra en el tramo >3000 kWh -- calcularlo requeriría el perfil "
+                        "de demanda horaria del sitio (no sólo el consumo diario promedio) para "
+                        "saber si la turbina genera justo en el instante del pico. Este número "
+                        "es sólo el ahorro de energía, no el ahorro total de la factura."
+                    )
             else:
                 col_t1, col_t2, col_t3 = st.columns(3)
                 with col_t1:
@@ -1145,10 +1195,15 @@ with tab_financiero:
                     "Ingresá el precio de venta al cliente para calcular Payback, ROI, NPV y "
                     "viabilidad económica."
                 )
-            elif modo_tarifa != "Tarifa plana (USD/kWh)" and resultado_tou is None:
+            elif modo_tarifa == "Tarifa horaria real de Costa Rica (ARESEP)" and resultado_tou is None:
                 st.info(
                     "No se pudo calcular el ahorro con tarifa horaria (ver el error arriba) -- "
                     "cambiá a \"Tarifa plana (USD/kWh)\" o revisá la selección de proveedor/tarifa."
+                )
+            elif modo_tarifa == "Tarifa comercial de Costa Rica (T-CO)" and resultado_co is None:
+                st.info(
+                    "No se pudo calcular el ahorro con tarifa comercial (ver el error arriba) -- "
+                    "cambiá a \"Tarifa plana (USD/kWh)\" o revisá la selección de proveedor/tramo."
                 )
             else:
                 if modo_tarifa == "Tarifa plana (USD/kWh)":
@@ -1161,6 +1216,24 @@ with tab_financiero:
                         capex_usd=precio_venta_usd,
                         energia_anual_kWh=kwh_anual_total,
                         mantenimiento_anual_usd=mantenimiento_anual_usd,
+                        potencia_pico_W=arquitectura["arreglo_turbinas"]["potencia_pico_total_W"],
+                        n_turbinas=arquitectura["arreglo_turbinas"]["cantidad"],
+                        sistema_tipo=sistema_tipo,
+                    )
+                elif modo_tarifa == "Tarifa comercial de Costa Rica (T-CO)":
+                    # Tarifa comercial T-CO (Hallazgo 55): precio plano por kWh, sin periodos
+                    # horarios -- sólo el componente de energía (ver docstring de
+                    # calcular_ahorro_tarifa_comercial_usd para qué NO incluye).
+                    fe = FinancialEngineEolico(
+                        tarifa_kwh_USD=resultado_co["precio_crc_kwh"] / resultado_co["tipo_cambio_crc_por_usd"],
+                        vida_util_anos=int(vida_util_anos),
+                        tasa_descuento_pct=tasa_descuento_pct,
+                    )
+                    fin = fe.calcular_ahorro_y_viabilidad(
+                        capex_usd=precio_venta_usd,
+                        ahorro_anual_usd=resultado_co["ahorro_anual_usd"],
+                        mantenimiento_anual_usd=mantenimiento_anual_usd,
+                        energia_anual_kWh=kwh_anual_total,
                         potencia_pico_W=arquitectura["arreglo_turbinas"]["potencia_pico_total_W"],
                         n_turbinas=arquitectura["arreglo_turbinas"]["cantidad"],
                         sistema_tipo=sistema_tipo,
@@ -1234,8 +1307,8 @@ with tab_financiero:
                 "Motor: `dimensionador_sistema_eolico.py` (arquitectura técnica, automática) + "
                 "`financial_engine_eolico.py` (Hallazgo 53: CAPEX, mantenimiento y precio de venta "
                 "ingresados directo por el usuario) + `tarifas_electricas_cr.py` (Hallazgo 54: "
-                "tarifas horarias reales de CNFL/ICE cruzadas contra la producción hora por hora, "
-                "en vez de una tarifa plana adivinada)."
+                "tarifas horarias reales de CNFL/ICE cruzadas contra la producción hora por hora; "
+                "Hallazgo 55: tarifa comercial T-CO), en vez de una tarifa plana adivinada."
             )
 
 
