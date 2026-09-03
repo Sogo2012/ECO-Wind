@@ -3480,12 +3480,80 @@ interpretan como LaTeX) en el caption nuevo de tarifa efectiva.
   de "no confirmados" arriba).
 - El tratamiento de feriados (¿cuentan como fin de semana, sin Punta?) es una
   suposición razonable, no una cifra confirmada en ningún pliego.
-- T-RE (escalonada), T-TCVE, T-A y T-CO quedan como datos de referencia sin cálculo de
-  ahorro conectado -- ver la sección de arriba para el motivo de cada una.
+- T-RE (escalonada), T-TCVE y T-A quedan como datos de referencia sin cálculo de
+  ahorro conectado -- ver la sección de arriba para el motivo de cada una. T-CO
+  (comercial) se conectó parcialmente en el Hallazgo 55 siguiente.
 - El desglose por periodo redondea cada fila de forma independiente antes de sumar
   (ej. $11+$13+$3 puede mostrar $27 en la tabla mientras el total real, con más
   decimales, es $28) -- es un artefacto de presentación, no un error de cálculo (el
   ahorro real usado en Payback/ROI/NPV es el total sin redondear por fila).
+
+---
+
+### Hallazgo 55 — Investigación de la tabla oficial del calculador de Flower Turbines (se descarta el método de tabla) y se agrega la tarifa comercial T-CO (sólo componente de energía)
+
+Dos pedidos de Pablo en la misma conversación:
+
+**1) "¿Por qué el cálculo de kWh no usa la tabla del fabricante en vez de la fórmula?"**
+Se investigó a fondo: las 10 capturas PDF del calculador oficial de Flower Turbines
+que Pablo ya tenía guardadas en el repo
+(`documentos_tecnicos/resultados de calculador flower turbines/1 solo.pdf` .. `10.pdf`,
+N=1 a N=10) se leyeron completas -- son la fuente primaria real, 930 puntos (31
+velocidades × 10 N × 3 modelos: Small/Medium/Large Tulip) en Watts por turbina. Se
+comparó, punto por punto y también en un caso real (Heredia, Medium Tulip×3, buje
+25m), contra la fórmula ajustada que ya usa la app (`P=k·v³` + multiplicador de
+bouquet exponencial): la diferencia es de sólo **+0.18%** en el total anual (4,245.2
+kWh/año con la tabla interpolada vs. 4,237.6 kWh/año con la fórmula), consistente con
+que la fórmula ya tiene R²≈1.0 contra esta misma tabla (así se ajustó originalmente).
+**Decisión de Pablo, con la evidencia en mano: no vale la pena agregar un segundo
+método** -- la fórmula actual ya es prácticamente idéntica a la tabla oficial Y
+además cubre TODOS los modelos (la tabla del calculador sólo cubre Small/Medium/
+Large, no `three_m_tulip` ni los `al13_*`, que vienen de otras fuentes oficiales). La
+app queda exactamente igual que antes en este punto -- no se tocó ningún código de
+`flower_turbines_curves.py` ni de `simulador_pista_a.py`.
+
+**2) "¿Por qué no veo la tarifa comercial (T-CO) en la app?"**
+Repaso honesto de por qué faltaba: T-CO (gimnasios/estadios/comercios) tiene DOS
+componentes de cobro -- energía (₡/kWh) y demanda máxima (₡/kW) -- y el Hallazgo 54
+la había dejado completamente afuera porque el componente de demanda requiere el
+perfil de consumo horario del sitio (no sólo el kWh/día promedio que pide la app),
+algo que no se modela hoy. Pero el componente de ENERGÍA sí se puede calcular con lo
+que la app ya tiene, sin inventar ningún dato -- así que se conecta ESE componente:
+
+- `engine/tarifas_electricas_cr.py`: nueva función `calcular_ahorro_tarifa_comercial_usd(
+  kwh_anual, proveedor, tramo, tipo_cambio_crc_por_usd)` -- tramo "pequeno" (≤3000
+  kWh/mes, sin medidor de potencia: 98.28 CNFL / 99.70 ICE ₡/kWh) o "grande" (>3000
+  kWh/mes: 59.18 CNFL / 59.67 ICE ₡/kWh, la tarifa marginal sobre el excedente/
+  abonado con potencia -- se excluye a propósito la fila "bloque base 0-3000 kWh" de
+  CNFL, que tiene 0 ₡/kWh porque ese tramo se cobra con cargo fijo, no por energía).
+  A diferencia de T-REH/T-RH/T-MT, T-CO no tiene periodos horarios -- es un precio
+  plano, así que no hace falta cruzar contra la serie horaria, sólo el kWh/año total.
+- `app.py`: tercera opción en el radio de "Tarifa eléctrica" -- "Tarifa comercial de
+  Costa Rica (T-CO)", con selector de Proveedor y de tramo de consumo mensual. Usa
+  `FinancialEngineEolico.calcular_ahorro_y_viabilidad()` (el mismo método genérico del
+  Hallazgo 54), así que Payback/ROI/NPV se calculan igual que con las otras dos tarifas.
+- Aviso explícito en pantalla: "esta tarifa NO incluye el cargo por demanda máxima" --
+  el número que muestra es sólo el ahorro de energía, no el ahorro total de la
+  factura de un cliente T-CO real.
+
+**Verificado:** `py_compile` limpio, las 32 pruebas existentes siguen pasando.
+Cálculo de T-CO verificado a mano para los 4 combos (proveedor × tramo) con 1,000
+kWh: CNFL pequeño = ₡98,280 ($189.00), CNFL grande = ₡59,180 ($113.81), ICE pequeño =
+₡99,700 ($191.73), ICE grande = ₡59,670 ($114.75) -- coinciden exacto con
+`precio_crc_kwh × kwh / tipo_cambio`. Bug real encontrado y corregido en el camino:
+el primer caption mezclaba el símbolo "$" con un valor en colones ("$98.28 ₡/kWh",
+contradictorio) -- se corrigió a "₡98.28/kWh". Probado en vivo con Playwright:
+cambiar de tramo recalcula todo (₡98.28→₡59.18/kWh, ahorro $46→$28/año en el caso
+default), y los otros dos modos de tarifa (plana y horaria) siguen funcionando sin
+regresión.
+
+**Pendiente, no resuelto en este hallazgo:**
+- El cargo por demanda máxima de T-CO (₡/kW) sigue sin modelarse -- el número que
+  muestra la app para T-CO es sólo el ahorro de energía, nunca el ahorro total de
+  factura de un cliente con medidor de potencia real.
+- Los valores CRC/kWh de T-CO no se re-verificaron en este hallazgo (ya se habían
+  verificado en Hallazgo 54: CNFL exacto contra el pliego vigente 2026, ICE sin
+  confirmar cifra a cifra).
 
 ---
 

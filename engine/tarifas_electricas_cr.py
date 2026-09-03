@@ -45,12 +45,14 @@ CÓMO SE USAN LOS 4 GRUPOS DE TARIFA (honesto sobre lo que SÍ y lo que NO calcu
    sitio (no sólo un kWh/día promedio, que es todo lo que la app pide hoy) para saber
    en qué horas hay excedente real. Queda como trabajo futuro explícito.
 
-4. TARIFAS_COMERCIALES_CR (T-CO, gimnasios/estadios/comercios) -- guardada como
-   referencia, NO conectada. Tiene cargos por DEMANDA MÁXIMA (kW, no kWh) que
-   requieren saber en qué instante ocurre el pico de demanda del sitio y si la
-   turbina está generando en ese momento (reducción de demanda pico) -- un cálculo
-   distinto al de "ahorro de energía" que ya hace el resto de la app, no modelado
-   todavía.
+4. TARIFAS_COMERCIALES_CR (T-CO, gimnasios/estadios/comercios) -- CONECTADA
+   PARCIALMENTE (Hallazgo 55): SÍ se calcula el ahorro del componente de ENERGÍA
+   (precio plano por kWh según el tramo de consumo mensual del sitio, sin periodos
+   horarios -- ver `calcular_ahorro_tarifa_comercial_usd()`). NO se calcula el cargo
+   por DEMANDA MÁXIMA (kW, no kWh): eso requiere saber en qué instante ocurre el pico
+   de demanda del sitio y si la turbina está generando en ese momento (reducción de
+   demanda pico) -- un cálculo distinto al de "ahorro de energía", con datos que esta
+   app no pide todavía (perfil de demanda horaria del sitio).
 """
 
 import math
@@ -150,6 +152,66 @@ def get_tarifas_mt_gd_df() -> pd.DataFrame:
 
 def get_tarifas_comerciales_df() -> pd.DataFrame:
     return pd.DataFrame(TARIFAS_COMERCIALES_CR)
+
+
+def _tabla_precio_comercial(proveedor: str, tramo: str) -> float:
+    """
+    Precio marginal de energía (CRC/kWh) de T-CO para un proveedor y tramo de
+    consumo mensual del sitio -- tramo="pequeno" (<=3000 kWh/mes, sin medidor de
+    potencia) o tramo="grande" (>3000 kWh/mes, tarifa sobre el excedente/abonado
+    con potencia). Se toma de TARIFAS_COMERCIALES_CR filtrando las filas con
+    Costo_Energia_CRC_kWh > 0 -- eso excluye a propósito la fila "Bloque base
+    0-3000 kWh" de CNFL, que trae 0.0 CRC/kWh porque esos primeros 3000 kWh se
+    facturan con un cargo FIJO (177,540 CRC), no por kWh (ver docstring del módulo).
+    """
+    candidatas = [
+        r for r in TARIFAS_COMERCIALES_CR
+        if r["Proveedor"] == proveedor and r["Costo_Energia_CRC_kWh"] > 0
+    ]
+    for r in candidatas:
+        if tramo == "pequeno" and r["Subcategoria_Consumo"].startswith("<="):
+            return r["Costo_Energia_CRC_kWh"]
+        if tramo == "grande" and r["Subcategoria_Consumo"].startswith(">"):
+            return r["Costo_Energia_CRC_kWh"]
+    raise ValueError(f"No se encontró tarifa T-CO para proveedor={proveedor!r}, tramo={tramo!r}")
+
+
+def calcular_ahorro_tarifa_comercial_usd(
+    kwh_anual: float, proveedor: str, tramo: str, tipo_cambio_crc_por_usd: float,
+) -> dict:
+    """
+    Ahorro anual -- SÓLO el componente de ENERGÍA -- para la tarifa T-CO (comercio y
+    servicios: gimnasios, estadios, comercios). A diferencia de T-REH/T-RH/T-MT, T-CO
+    no tiene periodos horarios (Punta/Valle/Nocturno): es un precio plano por kWh que
+    depende del TRAMO de consumo mensual del sitio (<=3000 o >3000 kWh/mes), no de la
+    hora del día -- por eso no hace falta cruzar contra la serie horaria de
+    producción, sólo el total anual.
+
+    tramo: "pequeno" (<=3000 kWh/mes, sin medidor de potencia) o "grande" (>3000
+    kWh/mes, con medidor de potencia).
+
+    NO incluye el cargo por demanda máxima (Cargo_Potencia_Demanda_CRC_kW) del tramo
+    "grande": ese cargo se factura por el kW más alto que el sitio le compra a la red
+    en el mes, y para saber cuánto lo reduce la turbina haría falta el perfil de
+    demanda horaria del sitio (no sólo su consumo diario promedio) y si la turbina
+    genera justo en el instante del pico -- dato que esta app no pide hoy (mismo
+    motivo por el que T-TCVE tampoco está conectada, ver Hallazgo 54/55 en
+    avance-de-proyecto.md).
+    """
+    if tipo_cambio_crc_por_usd <= 0:
+        raise ValueError("El tipo de cambio CRC->USD debe ser positivo.")
+    precio_crc_kwh = _tabla_precio_comercial(proveedor, tramo)
+    ahorro_crc = kwh_anual * precio_crc_kwh
+    ahorro_usd = ahorro_crc / tipo_cambio_crc_por_usd
+    return {
+        "proveedor": proveedor,
+        "tramo": tramo,
+        "precio_crc_kwh": precio_crc_kwh,
+        "tipo_cambio_crc_por_usd": tipo_cambio_crc_por_usd,
+        "kwh_total": round(kwh_anual, 1),
+        "ahorro_anual_crc": round(ahorro_crc, 2),
+        "ahorro_anual_usd": round(ahorro_usd, 2),
+    }
 
 
 def tarifas_horarias_disponibles() -> List[str]:
