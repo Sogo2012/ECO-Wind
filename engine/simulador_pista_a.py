@@ -25,6 +25,7 @@ sin resolverse -- pendiente real de Fase 2, no de esta sesion.
 """
 import calendar
 import json
+import math
 
 import numpy as np
 import pandas as pd
@@ -110,6 +111,26 @@ def wind_at_height(v_ref, h_ref, h_target, z0=Z0_DEFAULT, z0_met=Z0_MET_DEFAULT)
     return np.where(h_target <= z0, 0.0, resultado)
 
 
+def terreno_mas_cercano_por_z0(z0):
+    """
+    Clase de TERRENOS_ENERGYPLUS cuyo z0 tabulado esta mas cerca del z0 numerico dado --
+    para que wind_at_height_potencia() (ley de potencia) use la MISMA rugosidad de
+    destino que el usuario ya eligio para wind_at_height() (ley logaritmica), en vez de
+    una categoria fija sin relacion con esa seleccion (Hallazgo 52: "el tipo de terreno
+    lo selecciona el usuario, no quiero nada hardcodeado").
+
+    Compara en escala LOGARITMICA, no lineal: z0 abarca ordenes de magnitud (0.03 a
+    1.0m) y las clases de Davenport-Wieringa/EnergyPlus estan espaciadas
+    multiplicativamente, no aditivamente -- con distancia lineal, el z0=0.3 que la app
+    usa para "suburbano" queda EXACTAMENTE empatado entre "country" (0.1) y "suburban"
+    (0.5) (|0.3-0.1|=|0.3-0.5|=0.2) y el desempate de min() cae en el primero del dict
+    por orden de declaracion, no por cercania real -- con distancia logaritmica el
+    empate se rompe correctamente hacia "suburban" (mas cerca en escala log).
+    """
+    log_z0 = math.log(z0)
+    return min(TERRENOS_ENERGYPLUS, key=lambda k: abs(math.log(TERRENOS_ENERGYPLUS[k][2]) - log_z0))
+
+
 def wind_at_height_potencia(v_ref, h_ref, h_target, terreno="suburban", terreno_met="country"):
     """
     Ley de potencia (la que usa EnergyPlus por default, NO la logaritmica
@@ -120,7 +141,9 @@ def wind_at_height_potencia(v_ref, h_ref, h_target, terreno="suburban", terreno_
     doble verificacion ya usado en el proyecto (p.ej. GWA vs. EPW, Hallazgo 3).
 
     terreno/terreno_met: uno de "water", "country", "suburban", "city" --
-    ver TERRENOS_ENERGYPLUS para la definicion de cada clase.
+    ver TERRENOS_ENERGYPLUS para la definicion de cada clase. El llamador debe
+    resolver el "terreno" de destino desde el z0 numerico que el usuario eligio
+    (ver terreno_mas_cercano_por_z0()) en vez de fijar una clase a mano.
     """
     d_met, a_met, _ = TERRENOS_ENERGYPLUS[terreno_met]
     d_dst, a_dst, _ = TERRENOS_ENERGYPLUS[terreno]

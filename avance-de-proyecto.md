@@ -3188,6 +3188,87 @@ prueba en vivo con Playwright (EPW real de San José, slider a 60m, clúster con
 
 ---
 
+### Hallazgo 52 — Se cierra (con evidencia, no por decisión sin probar) el intento de resucitar el ajuste espacial vía GWA-50m/ERA5-Land/Köppen-Gower/TPI; se corrige el último valor hardcodeado del cross-check de altura
+
+Pablo trajo dos pistas nuevas para el problema de fondo de Hallazgo 35/36 (viento
+confiable por punto exacto en Costa Rica): un ráster real de GWA a **50m** (en vez de
+10m) para Heredia, y un documento técnico ("Alternativas Simulador Viento Global")
+proponiendo resucitar el mecanismo de razón de escala con 4 mejoras: selección de
+donante por Distancia de Gower + Köppen-Geiger, ERA5-Land (9km) vía Open-Meteo en vez
+de GWA, corrección orográfica TPI/EN 1991-1-4, y rugosidad z0 dinámica vía ESA
+WorldCover. Se investigaron las dos pistas a fondo, con pruebas reales, no sólo teoría.
+
+**GWA a 50m para Heredia (lat=9.9996, lon=-84.1231):** mejora medible pero no resuelve
+el problema. Contra los mismos 3 chequeos que hundieron la versión de 10m
+(Hallazgo 35): el ruido por coordenada dentro del mismo aeropuerto Santamaría bajó de
++126% a +30%, y el ruido espacial del barrido 25x25 del Valle Central bajó de 78% a
+36% de la media -- una mejora real, pero el orden relativo Santamaría/La Sabana sigue
+sin resolverse de forma consistente (depende de qué coordenada "oficial" de Santamaría
+se use). Aparte: el EPW "EstadioHerediahour.epw" que Pablo subió resultó ser sintético
+(encabezado `fuente=MN8, WMO=999`, no una estación real) y su propia media a 10m
+(5.31 m/s) diverge +32% de la estación real de Santamaría a sólo 11km -- el mismo
+síntoma de "Valle Central sin dato confiable" pero en una tercera fuente distinta.
+
+**Evaluación de "ECO-Wind V2" (el documento con Gower/Köppen/ERA5-Land/TPI/WorldCover):
+ninguna de las 4 piezas sobrevive el contraste con datos reales.**
+1. *Köppen + Gower para elegir donante* -- irrelevante por geometría, no por código: la
+   estación no-costarricense más cercana a Heredia está a 147-168 km (35x más lejos
+   que las opciones locales) sobre las 5,276 estaciones del catálogo completo. Ningún
+   filtro climático cambia un donante que ya está a 150km de cualquier alternativa
+   (confirma y cierra el pendiente de Hallazgo 27, que sólo lo había probado con 4
+   sitios).
+2. *ERA5-Land vía Open-Meteo* -- no se pudo probar: `archive-api.open-meteo.com` y
+   `api.open-meteo.com` están bloqueados en este sandbox (confirmado por 3 vías
+   independientes). Se encontró que esto ya se había intentado antes (notebook
+   `sensibilizar_punto_exacto.ipynb`, Parte 5, para los 4 sitios conocidos) con el
+   mismo error, sin llegar nunca a documentarse como Hallazgo -- queda formalmente
+   pendiente, no descartado ni confirmado.
+3. *Corrección orográfica TPI/EN 1991-1-4* -- no aplica al problema real. El propio
+   Eurocódigo exige pendiente >3° para activarse; la pendiente real entre Santamaría/
+   La Sabana/Heredia da 1.0-2.1° con las elevaciones reales conocidas. El ruido de
+   ±126% dentro del mismo aeropuerto (Hallazgo 35) no puede ser orográfico -- es la
+   misma pista plana. (Sí es válida en Guanacaste real -- Tilarán, Papagayo Jet -- pero
+   no en el Valle Central).
+4. *Rugosidad z0 vía ESA WorldCover* -- el acceso SÍ funciona (bucket público AWS S3,
+   sin fricción), pero reproduce el mismo patrón de ruido de GWA en otra variable: las
+   3 coordenadas de Santamaría dan z0 entre 0.03 y 0.55-1.0 (18-30x de salto), y en
+   Heredia el píxel exacto cae en "cuerpo de agua" (z0≈0.0005) pese a que el 90% de la
+   ventana de 210x210m alrededor es zona urbana.
+5. Extra probado de paso: subir GWA de 10m a 50m (sin las otras 3 piezas) empeoró el
+   error en los 7 de 7 sitios conocidos -- consistente con que el problema no es de
+   qué altura del ráster se usa.
+
+**Conclusión, sin ambigüedad:** el problema no es la fuente de datos (GWA, WorldCover,
+o -- si algún día se puede probar -- ERA5-Land) sino que cualquier dato remoto de
+resolución moderada leído en un punto exacto tiene ruido de píxel/registro mayor que
+la variación física real del viento en el Valle Central urbano-mixto. La única salida
+real es medición local (anemómetro en sitio + correlación contra Santamaría,
+"measure-correlate-predict"), no una fuente o corrección matemática mejor. **No se
+retoma ninguna de las 4 líneas de V2** -- se cierra con este hallazgo documentado en
+vez de dejarlo abierto para que alguien lo reintente sin esta evidencia.
+
+**Decisión de producto de Pablo, aplicada en código:** "si coloco un EPW del sitio,
+respetamos lo que dice aunque sea sintético -- la altura de las turbinas y el tipo de
+terreno los selecciona el usuario, no quiero nada hardcodeado." Confirmado que la app
+ya cumple esto en casi todo (ningún EPW se trata distinto por su fuente/WMO; altura de
+buje y z0 ya eran inputs del usuario desde antes) -- **con una excepción real
+encontrada y corregida:** el cross-check de ley de potencia en "Resultados" (expander
+"Hallazgo 20") tenía `terreno="suburban"` fijo en el código, sin importar qué z0 
+eligiera el usuario arriba. Se agrega `terreno_mas_cercano_por_z0()` en
+`engine/simulador_pista_a.py`, que mapea el z0 numérico elegido a la clase de
+`TERRENOS_ENERGYPLUS` más cercana **en escala logarítmica** (no lineal -- con distancia
+lineal, z0=0.3 queda exactamente empatado entre "country" y "suburban" y el desempate
+de `min()` caía silenciosamente en la clase equivocada). El texto de la UI ahora
+también refleja el z0 real usado, no un valor fijo.
+
+**Verificado:** `py_compile` limpio, las 32 pruebas existentes siguen pasando, mapeo
+verificado para los 4 z0 del selector (0.03→water, 0.1→country, 0.3→suburban,
+1.0→city -- los 4 dan el resultado físicamente correcto), y prueba en vivo con
+Playwright cambiando z0 a "urbano denso" y confirmando que el cross-check usa "city"
+y el z0=1.0 correcto en el texto mostrado, sin errores.
+
+---
+
 ## 6. Pendientes activos / bloqueos
 
 - [x] ~~Conseguir A/k reales del Global Wind Atlas~~ — resuelto, y con datos más ricos de lo
@@ -3482,6 +3563,21 @@ prueba en vivo con Playwright (EPW real de San José, slider a 60m, clúster con
       parapetos/HVAC, estela de edificios vecinos) para instalaciones tipo Eco-Roof —
       hoy sólo se extrapola la velocidad REGIONAL a la altura del techo, sin ese
       efecto local (ver literatura de turbinas integradas a edificios, BIWT).
+- [x] ~~Nuevo, de Hallazgo 51: investigar si GWA a 50/100m o ERA5-Land resuelve el
+      ruido espacial del Valle Central~~ — cerrado con evidencia (Hallazgo 52): GWA-50m
+      mejora el ruido a la mitad pero no lo resuelve, ERA5-Land sigue bloqueado de red
+      y sin poder probarse, y las 3 correcciones adicionales evaluadas (Gower/Köppen,
+      TPI/EN1991-1-4, WorldCover z0) no atacan la causa real o reproducen el mismo
+      ruido en otra variable. No se retoma ninguna línea de ajuste espacial remoto —
+      la salida real es medición local (measure-correlate-predict).
+- [ ] **Nuevo, de Hallazgo 52:** si en algún momento se puede probar ERA5-Land vía
+      Open-Meteo desde un entorno con internet real (Colab, como ya se hizo para CDS) —
+      el notebook `sensibilizar_punto_exacto.ipynb` (Parte 5) ya está escrito y listo
+      para correr, sólo bloqueado por red en este sandbox de desarrollo.
+- [ ] **Nuevo, de Hallazgo 52:** la coordenada de "Puntarenas" en
+      `datos_clima/epw_catalog_global.json` está mal (a 4.5-9.4 km de Heredia cuando la
+      ciudad real está a ~70-80 km) — mismo tipo de error ya conocido en Finca Favorita
+      (Hallazgo 35), confirmar y corregir la coordenada real del catálogo.
 
 ## 7. Cómo navegar el repositorio en este punto
 
