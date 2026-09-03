@@ -669,10 +669,15 @@ with tab_contexto:
         # si esa pestaña todavía no se visitó en esta sesión, cae al default de simular().
         z0_actual = st.session_state.get("z0_avanzado", Z0_DEFAULT)
         _altura_explorar = st.slider(
-            "Altura de buje a explorar (m)", 0.5, 15.0, 10.0, 0.5, key="altura_explorar_slider",
+            "Altura de buje a explorar (m)", 0.5, 150.0, 10.0, 0.5, key="altura_explorar_slider",
             help="Mueve esta altura para ver cómo cambia la velocidad real del viento (heatmap y "
                  "perfil de abajo) entre la altura de referencia del EPW (10m) y la altura real de "
-                 "buje de tu turbina -- misma fórmula y rugosidad que usa el cálculo de energía.",
+                 "buje de tu turbina -- misma fórmula y rugosidad que usa el cálculo de energía. "
+                 "Para una instalación en TECHO de un edificio, usá altura del edificio + altura del "
+                 "mástil sobre el techo (Hallazgo 51) -- ojo, la ley logarítmica extrapola la "
+                 "velocidad REGIONAL a esa altura, no el efecto aerodinámico local de estar encima "
+                 "de un edificio puntual (aceleración sobre el borde del techo, turbulencia), que "
+                 "esta app no modela todavía.",
         )
         st.caption(
             f"Rugosidad de destino usada abajo: z0={z0_actual} m -- configurable en "
@@ -713,8 +718,14 @@ with tab_config:
                 index=list(CURVE_COEFFICIENTS.keys()).index(c["modelo"]), key=f"modelo_{i}",
             )
             c["N"] = cc2.number_input("N", min_value=1, max_value=20, value=c["N"], step=1, key=f"n_{i}")
-            c["altura_buje"] = cc3.number_input("Buje (m)", min_value=0.5, max_value=15.0,
-                                                 value=c["altura_buje"], step=0.5, key=f"h_{i}")
+            c["altura_buje"] = cc3.number_input(
+                "Buje (m)", min_value=0.5, max_value=150.0,
+                value=c["altura_buje"], step=0.5, key=f"h_{i}",
+                help="Para una instalación en TECHO (ej. azotea de un edificio de varios pisos): "
+                     "altura del edificio (m) + altura del mástil/soporte sobre el techo -- NO la "
+                     "cantidad de pisos. Un edificio de 15 pisos ronda 45-55m según la altura de "
+                     "entrepiso (Hallazgo 51).",
+            )
             if cc4.button("✕", key=f"del_{i}", help="Quitar este clúster") and len(st.session_state.clusters) > 1:
                 st.session_state.clusters.pop(i)
                 st.rerun()
