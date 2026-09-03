@@ -3358,6 +3358,137 @@ cuenta desde Hallazgo 49) sigue funcionando sin cambios.
 
 ---
 
+### Hallazgo 54 — Tarifas eléctricas reales de Costa Rica (CNFL/ICE) con horarios Punta/Valle/Nocturno, cruzadas contra la producción hora por hora de la turbina, en vez de una tarifa plana
+
+Pablo pasó 4 tablas de tarifas reales de CNFL/ICE (horarias residenciales, escalonadas,
+media tensión + excedentes de generación distribuida, y comerciales) y pidió
+integrarlas en vez de seguir usando una tarifa plana ($/kWh) para calcular el ahorro
+-- y, específicamente, "planifica los horarios de las tarifas con los potenciales de
+producción de los equipos según el análisis de potencia horaria": cruzar A QUÉ HORA
+del día genera la turbina contra los periodos Punta/Valle/Nocturno reales, no sólo
+sumar kWh/año y multiplicar por un promedio.
+
+**Investigación previa (Hallazgo 54, antes de programar nada):** los pliegos primarios
+de ARESEP/ICE/CNFL están bloqueados por la política de red de este entorno (403/
+EGRESS_BLOCKED en aresep.go.cr, grupoice.com, cnfl.go.cr) -- se investigó vía búsqueda
+web (que sí funciona) para (1) confirmar el horario exacto de cada periodo y (2)
+verificar los valores CRC/kWh que dio Pablo contra la fuente oficial más reciente.
+Resultado, con fuentes citadas en el código (`engine/tarifas_electricas_cr.py`):
+
+- **Horario, idéntico para T-RH (ICE), T-REH (CNFL) y T-MT (ICE, sólo la parte de
+  energía)** -- confirmado por múltiples búsquedas independientes que coinciden entre
+  sí (confianza alta para el rango horario, no se pudo abrir el PDF primario letra por
+  letra):
+  - Punta: 10:00-12:30 y 17:30-20:00, **sólo Lunes a Viernes**.
+  - Valle: 06:00-10:00 y 12:30-17:30 en L-V; **fin de semana completo (sábado y
+    domingo) las ventanas de Punta se reclasifican como Valle** -- queda un solo
+    bloque 06:00-20:00 los sábados/domingos.
+  - Nocturno: 20:00-06:00 (cruza medianoche), todos los días por igual, sin excepción
+    de fin de semana.
+  - No se encontró variación estacional (verano/invierno, seco/lluvioso) en ninguna
+    fuente. Feriados: ninguna fuente los menciona explícitamente -- se asume que se
+    tratan como fin de semana (sin Punta), **sin confirmar**.
+- **Valores CRC/kWh que dio Pablo:** los de CNFL (T-REH 0-500/>500, T-RE escalonada
+  completa, T-CO ≤3000 kWh) coinciden EXACTOS con el pliego "Tarifas Vigentes" de CNFL
+  vigente desde el 1/ene/2026. Los de ICE T-RE (bloques 0-140 y 141-195) son
+  consistentes -- casi al colón -- con aplicar la rebaja de -14.92% que ARESEP fijó
+  para la tarifa residencial de ICE en 2026 sobre la base 2024/2025. El resto (ICE
+  T-RH horaria, ICE T-MT, ICE T-CO, T-A, bloques altos de T-RE de ICE, CNFL T-CO
+  >3000 kWh completo, y el valor nocturno de T-TCVE) no se pudo confirmar cifra a
+  cifra por el bloqueo de red -- no hay evidencia de que estén mal, sólo no se
+  verificaron. Dato importante: **2026 trajo una rebaja tarifaria general en Costa
+  Rica** (ICE residencial -14.92%, CNFL residencial -14.55%) -- cualquier tarifa 2025
+  que se tuviera guardada está entre 5% y 17% por encima de la vigente.
+
+**Qué se conectó al cálculo real (motor nuevo: `engine/tarifas_electricas_cr.py`):**
+- Las 4 tablas de Pablo se guardaron tal cual (`TARIFAS_HORARIAS_CR`,
+  `TARIFAS_ESCALONADAS_CR`, `TARIFAS_MT_GD_CR`, `TARIFAS_COMERCIALES_CR`) con
+  `get_..._df()` para cada una, siguiendo el mismo patrón que `solark_specs.py`/
+  `eg4_specs.py`.
+- `clasificar_periodo(timestamp, proveedor, tarifa)`: dado un timestamp y el horario
+  ARESEP de `PERIODOS_HORARIOS_CR`, devuelve "Punta"/"Valle"/"Nocturno" -- maneja
+  rangos que cruzan medianoche (Nocturno) y reglas separadas por día de semana/fin de
+  semana.
+- `calcular_ahorro_tarifa_horaria_usd(serie_horaria_kwh, proveedor, tarifa,
+  tipo_cambio_crc_por_usd)`: clasifica CADA HORA de la serie horaria real de
+  producción del proyecto (no un promedio), la valora al precio CRC/kWh del periodo
+  correspondiente, suma, y convierte a USD -- devuelve el ahorro total y el desglose
+  kWh/₡/USD por periodo (Punta/Valle/Nocturno), para que se vea de dónde sale el
+  número, no sólo el total.
+- `FinancialEngineEolico.calcular_ahorro_y_viabilidad(capex_usd, ahorro_anual_usd,
+  mantenimiento_anual_usd, ...)`: nuevo método público, extraído de
+  `calcular_punto_capex_directo()` (que ahora es un wrapper de 3 líneas sobre este) --
+  recibe el ahorro anual YA resuelto en dólares, sin importar si vino de tarifa plana
+  o de la tarifa horaria real. `_calcular_punto_financiero()` y
+  `calcular_punto_unico()` (Hallazgo 40-53, basados en % de instalación/mantenimiento)
+  quedan intactos, ninguna prueba existente se tocó.
+- `app.py`, pestaña "Análisis Financiero": nueva sección "Tarifa eléctrica" con un
+  radio "Tarifa plana (USD/kWh)" vs "Tarifa horaria real de Costa Rica (ARESEP)". En
+  modo horario: selector de Proveedor (CNFL/ICE) x Tarifa (T-REH 0-500/>500, T-RH,
+  T-MT), campo de tipo de cambio ₡/USD editable, tabla de desglose por periodo, y
+  caption con la tarifa efectiva ponderada por la producción real (para comparar
+  contra el modo plano). La serie horaria del proyecto se arma sumando
+  `serie_horaria_W_por_turbina × N / 1000` de cada clúster (ya la devuelve `simular()`
+  por turbina, sólo faltaba escalarla y sumarla entre clústers).
+
+**Qué NO se conectó todavía, y por qué (honesto, no "adivinar" un mecanismo dudoso):**
+- **T-RE (escalonada, CNFL/ICE):** se guardó como dato de referencia, no se calculó
+  ningún ahorro con ella. No se pudo confirmar con la fuente oficial si el cargo
+  fijo/tarifa de cada bloque se cobra de forma progresiva (como un bracket de
+  impuesto) o como categoría (todo el consumo del mes a la tarifa del bloque más alto
+  alcanzado) -- son mecánicas de facturación distintas que dan resultados distintos, y
+  calcular un "ahorro" adivinando cuál es exactamente el error que este hallazgo
+  existe para evitar.
+- **T-TCVE (excedentes de generación distribuida) y T-A:** guardadas como referencia.
+  T-TCVE es lo que ICE paga por el excedente que el sistema INYECTA a la red cuando
+  genera más de lo que el sitio consume en ese instante -- vale mucho menos (~19-27
+  ₡/kWh) que la energía autoconsumida (~55-166 ₡/kWh según periodo). Calcularla de
+  verdad requiere un perfil de CONSUMO horario del sitio (hoy la app sólo pide un
+  kWh/día promedio, no una curva de carga horaria) para saber en qué horas hay
+  excedente real -- trabajo futuro explícito, no un cálculo que se pueda improvisar
+  con lo que la app ya pide hoy.
+- **T-CO (comercial, gimnasios/estadios):** guardada como referencia. Tiene cargos por
+  DEMANDA MÁXIMA (kW, no kWh) que requieren saber en qué instante ocurre el pico de
+  demanda del sitio -- un cálculo de "reducción de demanda pico" distinto al de
+  "ahorro de energía" que ya hace el resto de la app, no modelado.
+- El tipo de cambio CRC→USD es un campo editable con un valor por defecto (₡520 por
+  USD) -- **no hardcodeado como una constante confiable**: cambia a diario, y la
+  recomendación de la investigación es usar el Tipo de Cambio de Referencia que
+  publica el BCCR (bccr.fi.cr) antes de cotizar en firme, no el valor por defecto.
+
+**Verificado:** `py_compile` limpio en los 3 archivos modificados; las 32 pruebas
+existentes (`_calcular_punto_financiero`/`calcular_punto_unico`, basadas en tarifa
+plana/%) siguen pasando sin tocarlas. Mecánica de clasificación horaria verificada a
+mano con una semana sintética de 1 kWh/hora: de las 168 horas, 25 caen en Punta, 73 en
+Valle y 70 en Nocturno -- coincide exacto con el conteo manual (5 horas Punta/día ×
+5 días L-V, 9 horas Valle/día × 5 días + 14 horas/día × 2 días de fin de semana, 10
+horas Nocturno/día × 7 días). Probado en vivo con Playwright: modo plano sin cambios
+(regresión limpia); modo horario con CNFL T-REH y con ICE T-RH -- la tabla de
+desglose reparte los 245 kWh/año del caso default en Punta/Valle/Nocturno sumando
+exacto el total, cambiar de proveedor recalcula todo (CNFL daba $28/año de ahorro,
+ICE $42/año, consistente con que las tarifas Valle/Nocturno de ICE son más altas); un
+caso de prueba con números chicos (CAPEX=$300, mantenimiento=$10) dio Payback=839.4
+años/ROI=-95%/NPV=-$14,787, verificado a mano con la fórmula exacta. Se encontró y
+corrigió en el camino el mismo bug de Hallazgo 48 (dos "\$" en un `st.caption()` se
+interpretan como LaTeX) en el caption nuevo de tarifa efectiva.
+
+**Pendiente, no resuelto en este hallazgo:**
+- Ninguno de los rangos horarios ni de los valores no confirmados de esta sección se
+  verificó contra el PDF primario de ARESEP/ICE/CNFL (bloqueado por red en este
+  entorno) -- alguien con acceso sin restricciones debería confirmar línea por línea
+  antes de cotizar en firme a un cliente con la tarifa horaria (ver la lista completa
+  de "no confirmados" arriba).
+- El tratamiento de feriados (¿cuentan como fin de semana, sin Punta?) es una
+  suposición razonable, no una cifra confirmada en ningún pliego.
+- T-RE (escalonada), T-TCVE, T-A y T-CO quedan como datos de referencia sin cálculo de
+  ahorro conectado -- ver la sección de arriba para el motivo de cada una.
+- El desglose por periodo redondea cada fila de forma independiente antes de sumar
+  (ej. $11+$13+$3 puede mostrar $27 en la tabla mientras el total real, con más
+  decimales, es $28) -- es un artefacto de presentación, no un error de cálculo (el
+  ahorro real usado en Payback/ROI/NPV es el total sin redondear por fila).
+
+---
+
 ## 6. Pendientes activos / bloqueos
 
 - [x] ~~Conseguir A/k reales del Global Wind Atlas~~ — resuelto, y con datos más ricos de lo
