@@ -69,7 +69,7 @@ from engine.epw_real import (
     SITIOS_EPW_REAL, cargar_epw_real, heatmap_json_desde_epw, rosa_vientos_detallada_desde_epw,
     obtener_estaciones_cercanas, geocode_name, descargar_y_extraer_epw, sitio_precacheado_cercano,
 )
-from engine.sistema_eolico_completo import analizar_sistema_eolico_completo
+from engine.financial_engine_eolico import FinancialEngineEolico
 from engine.dimensionador_sistema_eolico import dimensionar_sistema_eolico_completo, VOLTAJE_TURBINAS_V
 from engine.solark_specs import get_solark_df
 from engine.eg4_specs import get_eg4_df
@@ -905,12 +905,24 @@ with tab_resultados:
 
 with tab_financiero:
     st.caption(
-        "Estimación de CAPEX, inversor y banco de baterías recomendados (Sol-Ark + EG4), y retorno "
-        "de inversión -- usa las turbinas ya configuradas en \"Equipos y configuración\" y la "
-        "producción ya calculada en \"Resultados\"."
+        "Viabilidad económica del proyecto (CAPEX, Payback, ROI, NPV) -- usa las turbinas ya "
+        "configuradas en \"Equipos y configuración\" y la producción ya calculada en \"Resultados\"."
     )
 
-    if not st.session_state.get("calculo_listo"):
+    modulo_financiero_activo = st.toggle(
+        "Activar módulo financiero (viabilidad económica)",
+        value=True,
+        key="fin_modulo_activo",
+        help="Apagalo si por ahora sólo te interesa el dimensionamiento técnico (pestaña "
+             "\"Especificación Técnica\") y no necesitás calcular CAPEX/Payback/ROI todavía.",
+    )
+
+    if not modulo_financiero_activo:
+        st.info(
+            "Módulo financiero desactivado. Activá el switch de arriba para ingresar costos "
+            "reales y calcular Payback, ROI, NPV y viabilidad económica."
+        )
+    elif not st.session_state.get("calculo_listo"):
         st.info("Configurá el proyecto en la pestaña \"Equipos y configuración\" y presioná "
                  "**Calcular producción del proyecto** primero.")
     else:
@@ -940,7 +952,7 @@ with tab_financiero:
                 c["modelo"] for c in st.session_state.clusters for _ in range(int(c["N"]))
             ]
 
-            st.markdown("**Parámetros financieros**")
+            st.markdown("**Parámetros del proyecto**")
             col_f1, col_f2, col_f3 = st.columns(3)
             with col_f1:
                 consumo_diario_kWh = st.number_input(
@@ -954,7 +966,8 @@ with tab_financiero:
                     key="fin_horas_autonomia")
             with col_f3:
                 tarifa_kwh_USD = st.number_input(
-                    "Tarifa eléctrica ($/kWh)", min_value=0.01, value=0.15, step=0.01, format="%.2f")
+                    "Tarifa eléctrica ($/kWh)", min_value=0.01, value=0.15, step=0.01, format="%.2f",
+                    key="fin_tarifa_kwh")
 
             sistema_tipo_label = st.radio(
                 "Tipo de sistema",
@@ -964,91 +977,36 @@ with tab_financiero:
             sistema_tipo = "Standalone" if sistema_tipo_label.startswith("Standalone") else "Hybrid"
 
             with st.expander("Parámetros avanzados"):
-                col_a1, col_a2, col_a3, col_a4 = st.columns(4)
+                col_a1, col_a2 = st.columns(2)
                 with col_a1:
-                    costo_instalacion_pct = st.slider(
-                        "Costo de instalación (% de equipos)", 0, 100, 35, step=5) / 100
-                with col_a2:
-                    costo_mantenimiento_pct_anual = st.slider(
-                        "Mantenimiento anual (% del CAPEX)", 0.0, 5.0, 2.0, step=0.5,
-                        help="Es el parámetro que más pesa en si un proyecto sale viable o no -- "
-                             "hoy no viene de un dato real de mantenimiento verificado, se deja "
-                             "ajustable para poder sensibilizarlo en vivo.",
-                    ) / 100
-                with col_a3:
                     vida_util_anos = st.number_input(
                         "Vida útil del proyecto (años)", min_value=1, value=40, step=1)
-                with col_a4:
+                with col_a2:
                     tasa_descuento_pct = st.number_input(
                         "Tasa de descuento para NPV (%)", min_value=0.0, value=8.0, step=0.5)
 
-            analisis = analizar_sistema_eolico_completo(
+            # Dimensionamiento técnico (inversor + BESS): sigue siendo AUTOMÁTICO -- es
+            # selección de equipo compatible según la electricidad real del arreglo
+            # (Hallazgo 40/41), no un costo adivinado. Lo que deja de adivinarse acá es
+            # el PRECIO del proyecto (Hallazgo 53 en avance-de-proyecto.md).
+            arquitectura = dimensionar_sistema_eolico_completo(
                 turbinas_seleccionadas=turbinas_seleccionadas,
                 consumo_diario_kWh=consumo_diario_kWh,
-                energia_anual_kWh=kwh_anual_total,
                 horas_autonomia=int(horas_autonomia),
-                tarifa_kwh_USD=tarifa_kwh_USD,
-                sistema_tipo=sistema_tipo,
-                costo_instalacion_pct=costo_instalacion_pct,
-                costo_mantenimiento_pct_anual=costo_mantenimiento_pct_anual,
-                vida_util_anos=int(vida_util_anos),
-                tasa_descuento_pct=tasa_descuento_pct,
+                energia_anual_kWh=kwh_anual_total,
             )
 
             st.divider()
-            arquitectura = analisis["arquitectura_tecnica"]
-            inversor = arquitectura["inversor_seleccionado"]
 
-            if analisis.get("pendiente_ingenieria_o_costo"):
-                st.warning(analisis["nota_pendiente"])
-                costo_turbinas = arquitectura["arreglo_turbinas"]["costo_total_usd"]
-                if costo_turbinas is not None:
-                    st.metric("Costo de fábrica -- sólo turbinas (sin inversor/BESS todavía)",
-                              f"${costo_turbinas:,.2f}")
+            if arquitectura.get("pendiente_ingenieria_acople"):
+                st.warning(arquitectura["nota_pendiente"])
             else:
+                inversor = arquitectura["inversor_seleccionado"]
                 if not inversor.get("specs_verificadas", True):
                     st.warning(
                         f"El inversor seleccionado ({inversor['modelo']}) todavía no tiene datasheet "
                         "oficial verificado -- la corriente de carga de batería usada es una estimación "
                         "(ver Hallazgo 43 en avance-de-proyecto.md).",
-                    )
-
-                fin = analisis["analisis_financiero"]
-
-                # Fila 1: qué genera el sistema en electricidad -- respuesta directa a
-                # "esos kWh cuántos dólares representan" (ahorro de electricidad NO
-                # comprada a la red, no el valor de venta del kWh al mercado).
-                b1, b2, b3 = st.columns(3)
-                b1.metric("Energía anual generada", f"{kwh_anual_total:,.0f} kWh/año")
-                b2.metric("Ahorro anual (electricidad no comprada)",
-                          f"${fin['ahorro_anual_USD']:,.0f}/año")
-                b3.metric("Mantenimiento anual estimado", f"${fin['mantenimiento_anual_USD']:,.0f}/año")
-
-                st.markdown("**Retorno de la inversión**")
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("CAPEX total", f"${fin['capex']:,.0f}")
-                c2.metric("Payback",
-                          f"{fin['payback_years']:.1f} años" if fin["payback_years"] is not None else "N/A")
-                c3.metric("ROI (vida útil)",
-                          f"{fin['roi_percentage']:.0f}%" if fin["roi_percentage"] is not None else "N/A")
-                c4.metric("Viabilidad", analisis["indicadores_viabilidad"]["viabilidad_economica"])
-
-                if fin["opex_anual_neto"] <= 0:
-                    # Nota (bug real encontrado con Playwright, Hallazgo 48): dos "$" en el mismo
-                    # st.caption() arman un par que Streamlit interpreta como LaTeX ($...$) y
-                    # rompe el texto -- se escapan con "\$" para que se muestren literales.
-                    st.caption(
-                        "El ahorro anual estimado en electricidad no alcanza a cubrir el mantenimiento "
-                        f"anual (ahorro: \\${fin['ahorro_anual_USD']:,.0f}/año vs. mantenimiento: "
-                        f"\\${fin['mantenimiento_anual_USD']:,.0f}/año) -- por eso Payback/ROI/NPV muestran N/A."
-                    )
-                    st.info(
-                        "El costo de fábrica de las turbinas domina el CAPEX (ver desglose abajo) -- con "
-                        "arreglos chicos y la tarifa eléctrica ingresada, este tipo de proyecto suele NO "
-                        "competir por ahorro puro de factura eléctrica. Si el objetivo del cliente es "
-                        "respaldo/resiliencia energética (no depender 100% de la red) en vez de recuperar "
-                        "la inversión sólo con el ahorro de electricidad, ese es el valor que hay que "
-                        "presentar -- este cálculo no lo cuantifica en dólares todavía."
                     )
 
                 st.markdown("**Arquitectura del sistema**")
@@ -1067,39 +1025,116 @@ with tab_financiero:
                     else:
                         st.write("**BESS:** no aplica (sistema Hybrid, sin banco de baterías)")
 
-                st.markdown("**Desglose de costos (precio de venta: costo de fábrica + importación + margen)**")
-                cm = analisis["costos_con_margen_importacion"]
-                tabla_costos = pd.DataFrame([
-                    {"Categoría": "Turbinas", "Precio de venta (USD)": cm["turbinas_usd"]},
-                    {"Categoría": "Inversor", "Precio de venta (USD)": cm["inversor_usd"]},
-                    {"Categoría": "BESS", "Precio de venta (USD)": cm["bess_usd"]},
-                    {"Categoría": "Instalación", "Precio de venta (USD)": fin["capex_instalacion"]},
-                    {"Categoría": "TOTAL (CAPEX)", "Precio de venta (USD)": fin["capex"]},
-                ])
-                st.dataframe(
-                    tabla_costos.style.format({"Precio de venta (USD)": "${:,.2f}"}),
-                    hide_index=True,
+            st.divider()
+            st.markdown("**Costeo real del proyecto (Hallazgo 53 -- dejar de adivinar)**")
+            st.caption(
+                "En vez de estimar el CAPEX con costo de fábrica + margen + flete supuestos, "
+                "ingresá acá los números reales de tu cotización: cuánto cuestan los equipos, a "
+                "cuánto se los vas a vender al cliente, y cuánto vas a cobrar de mantenimiento al "
+                "año. Payback, ROI, NPV y viabilidad se calculan directo de esos datos."
+            )
+            col_c1, col_c2, col_c3 = st.columns(3)
+            with col_c1:
+                costo_equipos_usd = st.number_input(
+                    "Costo de los equipos (turbinas + inversor + BESS, USD)",
+                    min_value=0.0, value=0.0, step=100.0, format="%.2f",
+                    key="fin_costo_equipos",
+                    help="Lo que ECO Consultor paga por comprar/importar los equipos -- sólo "
+                         "informativo, para ver el margen (no entra en el cálculo de Payback).",
                 )
-                flete = analisis["flete"]
-                st.caption(
-                    f"Flete de importación incluido arriba: modo **{flete['modo']}** "
-                    f"({flete['unidades_de_transporte']} -- ${flete['costo_usd']:,.0f} total), "
-                    "calculado por el peso real del embarque consolidado (turbinas + inversor + "
-                    "BESS), no un fee plano por línea -- ver Hallazgo 50 en avance-de-proyecto.md. "
-                    "Tarifas de mercado dadas por Pablo/ECO Consultor, pendientes de confirmar con "
-                    "un forwarder real antes de cotizar en firme."
+            with col_c2:
+                precio_venta_usd = st.number_input(
+                    "Precio de venta al cliente (USD)",
+                    min_value=0.0, value=0.0, step=100.0, format="%.2f",
+                    key="fin_precio_venta",
+                    help="Precio final cotizado al cliente, llave en mano (equipos + instalación) "
+                         "-- este es el CAPEX real que se usa para Payback/ROI/NPV.",
+                )
+            with col_c3:
+                mantenimiento_anual_usd = st.number_input(
+                    "Mantenimiento anual (USD/año)",
+                    min_value=0.0, value=0.0, step=50.0, format="%.2f",
+                    key="fin_mantenimiento_anual",
+                    help="Costo real esperado de mantenimiento al año -- reemplaza el % del "
+                         "CAPEX que se adivinaba antes.",
                 )
 
-                with st.expander("Recomendaciones"):
-                    for rec in analisis["recomendaciones"]:
-                        st.write(rec)
+            if costo_equipos_usd > 0 and precio_venta_usd > 0:
+                margen_usd = precio_venta_usd - costo_equipos_usd
+                margen_pct = (margen_usd / costo_equipos_usd) * 100
+                st.caption(f"Margen sobre costo de equipos: ${margen_usd:,.2f} ({margen_pct:.0f}%).")
 
-                st.caption(
-                    "Motor: `dimensionador_sistema_eolico.py` + `financial_engine_eolico.py` "
-                    "(Hallazgo 40-48). Turbinas y Sol-Ark 18K/30K/60K + 9K/12K/12K-LL/15K: costo de "
-                    "fábrica/cotización real. BESS EG4 (48V): precio retail, no de fábrica -- ver "
-                    "`eg4_specs.py`."
+            if precio_venta_usd <= 0:
+                st.info(
+                    "Ingresá el precio de venta al cliente para calcular Payback, ROI, NPV y "
+                    "viabilidad económica."
                 )
+            else:
+                fe = FinancialEngineEolico(
+                    tarifa_kwh_USD=tarifa_kwh_USD,
+                    vida_util_anos=int(vida_util_anos),
+                    tasa_descuento_pct=tasa_descuento_pct,
+                )
+                fin = fe.calcular_punto_capex_directo(
+                    capex_usd=precio_venta_usd,
+                    energia_anual_kWh=kwh_anual_total,
+                    mantenimiento_anual_usd=mantenimiento_anual_usd,
+                    potencia_pico_W=arquitectura["arreglo_turbinas"]["potencia_pico_total_W"],
+                    n_turbinas=arquitectura["arreglo_turbinas"]["cantidad"],
+                    sistema_tipo=sistema_tipo,
+                )
+
+                # Fila 1: qué genera el sistema en electricidad -- respuesta directa a
+                # "esos kWh cuántos dólares representan" (ahorro de electricidad NO
+                # comprada a la red, no el valor de venta del kWh al mercado).
+                b1, b2, b3 = st.columns(3)
+                b1.metric("Energía anual generada", f"{kwh_anual_total:,.0f} kWh/año")
+                b2.metric("Ahorro anual (electricidad no comprada)",
+                          f"${fin['ahorro_anual_USD']:,.0f}/año")
+                b3.metric("Mantenimiento anual", f"${fin['mantenimiento_anual_USD']:,.0f}/año")
+
+                st.markdown("**Retorno de la inversión**")
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("CAPEX (precio de venta)", f"${fin['capex']:,.0f}")
+                c2.metric("Payback",
+                          f"{fin['payback_years']:.1f} años" if fin["payback_years"] is not None else "N/A")
+                c3.metric("ROI (vida útil)",
+                          f"{fin['roi_percentage']:.0f}%" if fin["roi_percentage"] is not None else "N/A")
+                viabilidad_economica = (
+                    "VIABLE" if fin["roi_percentage"] and fin["roi_percentage"] > 0 else "NO VIABLE"
+                )
+                c4.metric("Viabilidad", viabilidad_economica)
+
+                if fin["npv_usd"] is not None:
+                    st.caption(
+                        f"NPV a {int(vida_util_anos)} años, tasa de descuento {tasa_descuento_pct:.1f}%: "
+                        f"${fin['npv_usd']:,.0f}"
+                    )
+
+                if fin["opex_anual_neto"] <= 0:
+                    # Nota (bug real encontrado con Playwright, Hallazgo 48): dos "$" en el mismo
+                    # st.caption() arman un par que Streamlit interpreta como LaTeX ($...$) y
+                    # rompe el texto -- se escapan con "\$" para que se muestren literales.
+                    st.caption(
+                        "El ahorro anual estimado en electricidad no alcanza a cubrir el "
+                        f"mantenimiento anual ingresado (ahorro: \\${fin['ahorro_anual_USD']:,.0f}/año "
+                        f"vs. mantenimiento: \\${fin['mantenimiento_anual_USD']:,.0f}/año) -- por eso "
+                        "Payback/ROI/NPV muestran N/A."
+                    )
+                    st.info(
+                        "Con el precio de venta y la tarifa eléctrica ingresados, este proyecto NO "
+                        "recupera el mantenimiento sólo con ahorro de electricidad. Si el objetivo "
+                        "del cliente es respaldo/resiliencia energética (no depender 100% de la red) "
+                        "en vez de recuperar la inversión sólo con el ahorro eléctrico, ese es el "
+                        "valor que hay que presentar -- este cálculo no lo cuantifica en dólares."
+                    )
+
+            st.caption(
+                "Motor: `dimensionador_sistema_eolico.py` (arquitectura técnica, automática) + "
+                "`financial_engine_eolico.py::calcular_punto_capex_directo` (Hallazgo 53) -- CAPEX, "
+                "mantenimiento y precio de venta ingresados directo por el usuario, ya no se "
+                "estiman con costo de fábrica + margen + flete supuestos."
+            )
 
 
 # --- Tab: Especificación Técnica (Hallazgo 49) -- datos generales + ficha de cada equipo,
