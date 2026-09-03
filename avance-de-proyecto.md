@@ -3269,6 +3269,95 @@ y el z0=1.0 correcto en el texto mostrado, sin errores.
 
 ---
 
+### Hallazgo 53 — "Dejemos de adivinar": el módulo financiero pasa de estimar el CAPEX con costo de fábrica + margen + flete supuestos a pedir el precio de venta real, y se agrega un switch para apagarlo entero
+
+Pablo pidió reestructurar el análisis financiero: "vamos a dejar de adivinar" -- un
+switch para encender/apagar todo el módulo financiero, y adentro, campos para meter
+directo el costo de los equipos, el precio de venta al cliente y la tarifa eléctrica,
+para que Payback/ROI/NPV/Viabilidad salgan de datos reales en vez de la cadena de
+supuestos (costo de fábrica de `turbine_specs.py` + flete por peso de Hallazgo 50 +
+margen de importación fijo del 35%) que la app venía adivinando desde Hallazgo 40.
+
+**Qué SÍ se sigue calculando automático, y por qué:** la arquitectura técnica
+(selección de inversor Sol-Ark y banco EG4 vía
+`dimensionador_sistema_eolico_completo()`) sigue siendo automática -- es selección de
+equipo compatible según la electricidad real del arreglo (regla de voltaje/corriente
+confirmada con ambos fabricantes, Hallazgo 40/41), no un precio inventado. Lo único
+que se adivinaba, y ahora se pide directo al usuario, es el PRECIO del proyecto.
+
+**Cambios en el motor (`engine/financial_engine_eolico.py`):**
+- Se extrae `_calcular_viabilidad(capex, ahorro_anual_usd, mantenimiento_anual_usd,
+  vida_util_anos, tasa_descuento_pct)`: el núcleo de Payback/ROI/NPV que antes vivía
+  sólo dentro de `_calcular_punto_financiero()` (la ruta basada en % de instalación/
+  mantenimiento), ahora es una función compartida. `_calcular_punto_financiero()` se
+  reescribió para llamarla en vez de duplicar el cálculo -- su comportamiento externo
+  (y las 32 pruebas que lo verifican con inputs basados en %) queda idéntico, no se
+  tocó ninguna de las dos ramas de retorno temprano (capex/n_turbinas inválidos, u
+  opex neto ≤0).
+- Se agrega `FinancialEngineEolico.calcular_punto_capex_directo(capex_usd,
+  energia_anual_kWh, mantenimiento_anual_usd, potencia_pico_W=0, n_turbinas=0,
+  sistema_tipo="Standalone")`: calcula el ahorro anual (`energia_anual_kWh × tarifa`)
+  y llama a `_calcular_viabilidad()` con el CAPEX y el mantenimiento que el usuario
+  ingresó directo en dólares -- sin pasar por costo de fábrica, flete ni margen.
+  Devuelve el mismo diccionario (mismas llaves: `capex`, `ahorro_anual_USD`,
+  `payback_years`, `roi_percentage`, `npv_usd`, etc.) que el método viejo
+  `calcular_punto_unico()`, para que la UI no tenga que distinguir entre los dos.
+
+**Cambios en la UI (`app/app.py`, pestaña "Análisis Financiero"):**
+- Nuevo `st.toggle("Activar módulo financiero", value=True)`: apagado, la pestaña
+  muestra sólo un mensaje informativo y no calcula nada -- para cuando a Pablo sólo le
+  interesa el dimensionamiento técnico (pestaña "Especificación Técnica") todavía.
+- La pestaña ya NO llama a `analizar_sistema_eolico_completo()` (la función que
+  encadenaba costo de fábrica → flete consolidado → margen → `calcular_punto_unico()`)
+  -- ahora llama directo a `dimensionar_sistema_eolico_completo()` sólo para mostrar
+  "Arquitectura del sistema" (inversor + BESS), y a
+  `calcular_punto_capex_directo()` para la viabilidad.
+- 3 campos nuevos, todos en dólares reales (no %): "Costo de los equipos" (turbinas +
+  inversor + BESS -- sólo informativo, para ver el margen), "Precio de venta al
+  cliente" (este SÍ es el CAPEX real que entra al cálculo de Payback/ROI/NPV), y
+  "Mantenimiento anual (USD/año)" -- reemplaza el slider de "% del CAPEX" que
+  admitía en su propio texto de ayuda no venir de un dato real verificado.
+  Se muestra el margen (precio de venta − costo de equipos) como referencia.
+- Se eliminan de "Parámetros avanzados" los sliders "Costo de instalación (% de
+  equipos)" y "Mantenimiento anual (% del CAPEX)" -- ya no aplican, el precio de venta
+  ingresado por el usuario ya es el precio llave en mano. Se mantienen "Vida útil" y
+  "Tasa de descuento para NPV": son supuestos financieros estándar (no un costo
+  adivinado) y siguen siendo ajustables.
+- Se elimina la tabla "Desglose de costos" (basada en `costos_con_margen_importacion`
+  y el `flete` de Hallazgo 50) y el expander de "Recomendaciones" (generaba texto a
+  partir del mismo pipeline de % que se está reemplazando) -- ver Pendiente abajo.
+
+**Nada del backend de costeo por %/flete/margen se borró** -- `sistema_eolico_completo.py`,
+`price_calculator.py` y `_calcular_punto_financiero()`/`calcular_punto_unico()` siguen
+intactos y con sus pruebas pasando; sólo dejaron de ser la ruta que usa esta pestaña.
+
+**Verificado:** `py_compile` limpio en los archivos modificados, las 32 pruebas
+existentes siguen pasando sin tocarlas, cálculo manual de un caso (CAPEX=$300,
+mantenimiento=$10/año, ahorro≈$26.7/año con el arreglo default) confirma Payback=11.2
+años, ROI=257%, NPV=$19 a 40 años/8% -- coincide con la fórmula. Probado en vivo con
+Playwright: switch apagado oculta todo el módulo sin errores; con datos reales (costo
+equipos $10,000, precio de venta $15,000, mantenimiento $300/año) muestra margen 50%
+($5,000) y "NO VIABLE" con N/A correctamente cuando el mantenimiento supera el ahorro
+anual; modo Hybrid muestra "BESS: no aplica" igual que antes; la pestaña
+"Especificación Técnica" (que ya usaba `dimensionar_sistema_eolico_completo()` por su
+cuenta desde Hallazgo 49) sigue funcionando sin cambios.
+
+**Pendiente, no resuelto en este hallazgo:**
+- Se quitó el texto de "Recomendaciones" (payback/ROI/NPV interpretados en prosa) al
+  quitar `analizar_sistema_eolico_completo()` -- si Pablo lo quiere de vuelta, hay que
+  adaptar `_generar_recomendaciones()` (hoy privada en `sistema_eolico_completo.py`)
+  para que reciba el diccionario de `calcular_punto_capex_directo()`.
+- No hay validación cruzada entre "costo de los equipos" y "precio de venta" más allá
+  de mostrar el margen -- si el usuario mete un precio de venta MENOR al costo de
+  equipos (margen negativo), la app no avisa, sólo muestra un margen en rojo... en
+  realidad ni siquiera eso, sólo el número negativo sin resaltar.
+- El campo "Costo de los equipos" es puramente informativo hoy (no entra en ningún
+  cálculo de viabilidad) -- si más adelante Pablo quiere ver el margen como % de
+  utilidad sobre el precio de venta (en vez de sobre el costo), hay que agregar ese
+  segundo cálculo.
+
+---
+
 ## 6. Pendientes activos / bloqueos
 
 - [x] ~~Conseguir A/k reales del Global Wind Atlas~~ — resuelto, y con datos más ricos de lo
