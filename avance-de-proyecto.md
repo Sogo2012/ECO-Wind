@@ -3730,6 +3730,52 @@ ficha técnica se descarga sin error).
 
 ---
 
+### Hallazgo 58 — El precio se mueve de "Equipos y configuración" a "Análisis Financiero", y se corrige un crash real al subir un EPW propio
+
+**1) Reubicación del precio (a pedido de Pablo).** El selector de Artículo y los
+precios agregados en Hallazgo 57 vivían en "Equipos y configuración" -- Pablo pidió
+que NO se vean ahí: la decisión de precio/equipo específico se toma al final, en
+"Análisis Financiero", junto con el resto del costeo real del proyecto. Se movió
+tal cual (mismo selector, misma lógica de `get_articulos_disponibles()`/
+`get_precio_exworks_usd()`) a una sección nueva "Selección de equipo -- precio
+EXWORKS" dentro de "Análisis Financiero", justo antes de "Costeo real del proyecto
+(Hallazgo 53)" -- ahí queda como referencia para llenar a mano el costo de equipos
+y el precio de venta al cliente. "Equipos y configuración" vuelve a ser sólo
+Modelo/N/Buje + ficha técnica, sin ningún precio.
+
+**2) Bug real encontrado: la app se podía caer al subir un EPW propio.** Pablo
+reportó "no me está leyendo el archivo epw" al subir uno en "Selección de clima".
+Revisando `cargar_epw_subido()` en `app.py`: sólo atrapaba 3 tipos de error
+(`FileNotFoundError, ValueError, KeyError`) -- cualquier otra falla real al leer un
+EPW no estándar (una fila con menos columnas de las esperadas → `IndexError`, un
+archivo con menos de 8 líneas de encabezado → `RuntimeError`, una codificación
+distinta a latin-1 → `UnicodeDecodeError`) no quedaba atrapada, y tumbaba toda la
+app con un traceback crudo en vez de un mensaje. Comparado contra
+`cargar_estacion_elegida()` (la otra ruta que carga un EPW, para una estación de la
+lista): esa función SÍ atrapa `Exception` genérico -- inconsistencia real entre las
+dos rutas. Se corrigió `cargar_epw_subido()` para atrapar cualquier excepción y
+mostrar un mensaje claro en vez de crashear.
+
+**Pendiente -- esto hace el fallo más seguro, no necesariamente resuelve la causa
+real de Pablo.** No se pudo reproducir el error exacto que Pablo vio (no se
+compartió el mensaje ni el archivo) -- el fix de arriba evita que la app se caiga y
+va a mostrar QUÉ está fallando la próxima vez que pase, pero si el archivo de
+Pablo tiene un problema real de formato (por ejemplo, un EPW exportado de otra
+herramienta con menos u otras columnas que el estándar EnergyPlus), hace falta el
+mensaje de error real (o el archivo) para saber si además hay que ajustar el
+parser (`cargar_epw_real()` en `engine/epw_real.py`) -- no se tocó ese parser
+todavía porque hacerlo sin ver el error real sería adivinar.
+
+**Verificado:** `py_compile` limpio, 33/33 pruebas pasando. Reubicación probada en
+vivo con Playwright: "Equipos y configuración" ya no menciona "Precio" ni
+"Artículo" en ningún lado; "Análisis Financiero" sí muestra la nueva sección
+"Selección de equipo" con el selector funcionando (mismo comportamiento que antes,
+sólo cambió de pestaña), sin errores. El fix del EPW no se pudo probar contra el
+archivo real de Pablo (no disponible) -- sólo se confirmó que el `except` más
+amplio compila y no rompe el camino feliz (EPW válido sigue cargando igual).
+
+---
+
 ## 6. Pendientes activos / bloqueos
 
 - [x] ~~Conseguir A/k reales del Global Wind Atlas~~ — resuelto, y con datos más ricos de lo

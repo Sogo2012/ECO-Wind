@@ -99,7 +99,7 @@ NOMBRES_MODELO = {
     "al13_2m": "AL13 Power Tower (2 módulos)",
     "al13_4m": "AL13 Power Tower (4 módulos)",
     "al13_6m": "AL13 Power Tower (6 módulos)",
-    "al13_8m": "AL13 Power Tower (8 módulos, sin verificar aún)",
+    "al13_8m": "AL13 Power Tower (8 módulos)",
 }
 MESES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
 
@@ -206,7 +206,8 @@ def cargar_estacion_elegida(row):
         return _resultado_desde_epw(df_clima, meta)
     except Exception as e:
         return dict(error=(
-            f"No se pudo descargar {row['name']}: {e} -- necesita conexión a internet."
+            f"No se pudo descargar los datos de {row['name']}. "
+            "Verificá la conexión a internet e intentá de nuevo."
         ))
 
 
@@ -219,8 +220,12 @@ def cargar_epw_subido(ruta):
     nunca por ubicación."""
     try:
         df_clima, meta = cargar_epw_real(ruta)
-    except (FileNotFoundError, ValueError, KeyError) as e:
-        return dict(error=str(e))
+    except Exception as e:
+        return dict(error=(
+            f"No se pudo leer el archivo como EPW válido: {e} -- confirmá que es un .epw real "
+            "(formato EnergyPlus/climate.onebuilding.org, 8 líneas de encabezado + una fila por "
+            "hora) y no un archivo renombrado o exportado de otra herramienta."
+        ))
     return _resultado_desde_epw(df_clima, meta)
 
 
@@ -531,9 +536,7 @@ with st.sidebar:
     st.divider()
     st.markdown(f"""
     <div style="font-size:0.62rem; color:{GRIS}; line-height:1.6;">
-        Motor: flower_turbines_curves.py<br>
-        Clima: EPW real, estación elegida o subida<br>
-        ECO Consultor · Fase 2 -- avance-de-proyecto.md
+        ECO Consultor
     </div>
     """, unsafe_allow_html=True)
 
@@ -685,10 +688,9 @@ with tab_contexto:
                  "perfil de abajo) entre la altura de referencia del EPW (10m) y la altura real de "
                  "buje de tu turbina -- misma fórmula y rugosidad que usa el cálculo de energía. "
                  "Para una instalación en TECHO de un edificio, usá altura del edificio + altura del "
-                 "mástil sobre el techo -- ojo, la ley logarítmica extrapola la "
-                 "velocidad REGIONAL a esa altura, no el efecto aerodinámico local de estar encima "
-                 "de un edificio puntual (aceleración sobre el borde del techo, turbulencia), que "
-                 "esta app no modela todavía.",
+                 "mástil sobre el techo -- ojo, la ley logarítmica extrapola la velocidad REGIONAL "
+                 "a esa altura, no el efecto aerodinámico local de estar encima de un edificio "
+                 "puntual (aceleración sobre el borde del techo, turbulencia).",
         )
         st.caption(
             f"Rugosidad de destino usada abajo: z0={z0_actual} m -- configurable en "
@@ -741,30 +743,6 @@ with tab_config:
                 st.session_state.clusters.pop(i)
                 st.rerun()
 
-            _articulos_disponibles = get_articulos_disponibles(c["modelo"])
-            if not _articulos_disponibles:
-                st.caption("Precio: no disponible todavía para este modelo (no hay artículo cargado en el catálogo).")
-            else:
-                _opciones_articulo = [art for art, _ in _articulos_disponibles]
-                _articulo_guardado = c.get("articulo")
-                _idx_articulo = (
-                    _opciones_articulo.index(_articulo_guardado)
-                    if _articulo_guardado in _opciones_articulo else 0
-                )
-                c["articulo"] = st.selectbox(
-                    "Artículo (catálogo Flower Turbines)", options=_opciones_articulo,
-                    index=_idx_articulo, key=f"articulo_{i}",
-                    help="Precio de venta real de fábrica -- elegí la variante exacta que vas a "
-                         "cotizar (unidad simple, bouquet, on/off-grid, con o sin accesorio).",
-                )
-                _precio_unitario = get_precio_exworks_usd(c["modelo"], c["articulo"])
-                # Dos "$" en el mismo st.caption() arman un par que Streamlit interpreta
-                # como LaTeX ($...$) -- se escapan con "\$" (mismo bug real de Hallazgo 48).
-                st.caption(
-                    f"Precio: \\${_precio_unitario:,.0f} c/u -- "
-                    f"Total del clúster ({int(c['N'])}x): \\${_precio_unitario * c['N']:,.0f}"
-                )
-
             _specs = SPECS_TURBINAS.get(c["modelo"])
             _ruta_img = RUTA_IMAGEN.get(c["modelo"])
             with st.expander(f"Ficha técnica -- {NOMBRES_MODELO.get(c['modelo'], c['modelo'])}"):
@@ -798,24 +776,6 @@ with tab_config:
         st.rerun()
 
     st.divider()
-    _precio_total_proyecto = sum(
-        (get_precio_exworks_usd(c["modelo"], c.get("articulo")) or 0) * c["N"]
-        for c in st.session_state.clusters
-    )
-    _algun_modelo_sin_precio = any(
-        get_precio_exworks_usd(c["modelo"], c.get("articulo")) is None for c in st.session_state.clusters
-    )
-    st.metric("Precio total del proyecto (equipos, EXWORKS)", f"${_precio_total_proyecto:,.0f}")
-    st.caption(
-        "Precio de venta de fábrica del artículo elegido en cada clúster (catálogo real de "
-        "Flower Turbines). NO incluye flete, importación ni instalación -- eso "
-        "lo agrega ECO Consultor aparte. Es el precio del artículo elegido × cantidad de "
-        "turbinas del clúster -- si elegís un artículo de \"bouquet\" (varias turbinas con un "
-        "solo inversor), revisá que la cantidad (N) del clúster tenga sentido con ese artículo."
-        + (" Al menos un modelo elegido todavía no tiene ningún artículo cargado." if _algun_modelo_sin_precio else "")
-    )
-
-    st.divider()
 
     with st.expander("Parámetros avanzados"):
         z0 = st.selectbox(
@@ -824,8 +784,8 @@ with tab_config:
                                     0.3: "0.3 — suburbano (default)", 1.0: "1.0 — urbano denso"}[z],
             index=2, key="z0_avanzado",
             help="Rugosidad del sitio DESTINO (donde se instala la turbina), no la del sitio "
-                 "de referencia climática. Esta app usa dos rugosidades "
-                 "distintas -- ver la nota en Resultados.",
+                 "de referencia climática -- son dos valores distintos (ver el detalle en "
+                 "\"Resultados\").",
         )
         metodo_bouquet = st.radio(
             "Modelo de Efecto Bouquet", options=["real", "lineal"], key="metodo_bouquet_radio",
@@ -897,7 +857,7 @@ with tab_resultados:
             st.dataframe(tabla, hide_index=True)
 
             media_confirmada = resultado_clima["media"]
-            with st.expander("Perfil de viento por altura: dos rugosidades, y un cross-check independiente"):
+            with st.expander("Perfil de viento por altura: dos rugosidades, y una verificación independiente"):
                 _r0 = resultados[0]
                 # El cross-check usa el MISMO z0 de destino que ya eligió el usuario arriba
                 # (mapeado a la clase de TERRENOS_ENERGYPLUS más cercana) -- antes quedaba fijo
@@ -908,15 +868,12 @@ with tab_resultados:
                     media_confirmada, 10, _r0["altura_buje"], terreno=_terreno_dst, terreno_met="country")
                 st.write(
                     f"El viento de referencia (10m, aeropuerto/EPW) y el sitio real donde va la "
-                    f"turbina casi nunca tienen la misma rugosidad -- antes esta app usaba "
-                    f"un solo z0 para los dos, lo que sobreestimaba la velocidad en buje 16-24% (según "
-                    f"el método) en el caso de San José, y como P∝v³ eso es ~1.6-1.9x de más en energía. "
-                    f"Ahora se usa z0 del sitio destino (seleccionable arriba en esta pestaña) "
-                    f"**distinto** de z0 de referencia (0.1, clase \"country\"/aeropuerto -- fórmula "
-                    f"logarítmica, ver `engine/simulador_pista_a.py::wind_at_height()`)."
+                    f"turbina casi nunca tienen la misma rugosidad. Por eso esta app usa z0 del "
+                    f"sitio destino (seleccionable arriba en esta pestaña) **distinto** de z0 de "
+                    f"referencia (0.1, clase \"country\"/aeropuerto -- fórmula logarítmica)."
                 )
                 st.write(
-                    f"**Cross-check independiente** (ley de potencia que usa EnergyPlus por default, "
+                    f"**Verificación independiente** (ley de potencia que usa EnergyPlus por default, "
                     f"misma tabla de terrenos que ladybug-tools/ladybug, con el mismo **z0={z0}** elegido "
                     f"arriba -- internamente la clase con ese z0 tabulado se llama \"{_terreno_dst}\" en "
                     f"la tabla original de EnergyPlus, aunque el nombre no siempre calce 1 a 1 con las "
@@ -926,7 +883,7 @@ with tab_resultados:
                     f"{'concuerdan razonablemente' if abs(_v_pot/_r0['v_hub_medio']-1) < 0.15 else 'difieren más de lo esperado, revisar'}."
                 )
 
-            with st.expander("Requisito 3 -- ¿por qué el cálculo es hora por hora, no con la velocidad media?"):
+            with st.expander("¿Por qué el cálculo es hora por hora, y no con la velocidad media?"):
                 cmp = comparar_metodo_ingenuo_vs_horario(
                     df_clima, altura_buje=resultados[0]["altura_buje"], modelo=resultados[0]["modelo"],
                     N=int(resultados[0]["N"]), elevacion_m=elevacion_m, z0=z0, metodo_bouquet=metodo_bouquet)
@@ -945,9 +902,8 @@ with tab_resultados:
             st.plotly_chart(crear_curva_duracion_plotly(serie_total_w), use_container_width=True)
 
             st.caption(
-                "Motor: `flower_turbines_curves.py` (validado) + corrección de densidad de aire "
-                "por elevación. Fuente climática: EPW real, estación elegida o subida por "
-                "el usuario -- sin sensibilización espacial por GWA/NASA POWER/ERA5."
+                "Cálculo validado con datos de campo, con corrección por densidad de aire según "
+                "elevación. Fuente climática: EPW real de la estación elegida o subida por el usuario."
             )
     else:
         st.info("Configurá el proyecto en la pestaña \"Equipos y configuración\" y presioná "
@@ -1014,10 +970,11 @@ with tab_financiero:
                 c["modelo"] for c in st.session_state.clusters for _ in range(int(c["N"]))
             ]
 
-            # sistema_tipo es sólo una etiqueta informativa en el resultado (no afecta
-            # ningún cálculo de Payback/ROI/NPV) -- la app hoy sólo valora turbinas, sin
-            # dimensionar inversor ni banco de baterías, así que ya no hace falta
-            # pedirle este dato al usuario.
+            # Hallazgo 57: se dejó de dimensionar/costear el BESS acá -- consumo diario,
+            # horas de autonomía y tipo de sistema quedaron sin efecto en Payback/ROI/NPV
+            # (sistema_tipo es puramente informativo en FinancialEngineEolico, default
+            # "Standalone"). Se sacan los inputs de la UI para no mostrar parámetros que
+            # ya no dimensionan nada.
             sistema_tipo = "Standalone"
 
             st.markdown("**Tarifa eléctrica**")
@@ -1028,11 +985,11 @@ with tab_financiero:
                 horizontal=True,
                 key="fin_modo_tarifa",
                 help="La tarifa horaria cruza la producción REAL hora por hora de la turbina "
-                     "contra los periodos Punta/Valle/Nocturno de CNFL/ICE -- un "
-                     "kWh generado en horario Punta vale varias veces más que uno generado de "
-                     "noche, algo que una tarifa plana no puede reflejar. La tarifa comercial "
-                     "(T-CO) es para gimnasios/estadios/comercios -- precio plano por kWh según "
-                     "el consumo mensual del sitio, sin periodos horarios.",
+                     "contra los periodos Punta/Valle/Nocturno de CNFL/ICE -- un kWh generado "
+                     "en horario Punta vale varias veces más que uno generado de noche, algo "
+                     "que una tarifa plana no puede reflejar. La tarifa comercial (T-CO) es "
+                     "para gimnasios/estadios/comercios -- precio plano por kWh según el "
+                     "consumo mensual del sitio, sin periodos horarios.",
             )
 
             resultado_tou = None
@@ -1158,6 +1115,57 @@ with tab_financiero:
                 SPECS_TURBINAS[modelo]["potencia_nominal_w"] for modelo in turbinas_seleccionadas
             )
             _cantidad_turbinas_total = len(turbinas_seleccionadas)
+
+            st.divider()
+            st.markdown("**Selección de equipo -- precio EXWORKS**")
+            st.caption(
+                "Elegí acá, por clúster, el artículo exacto del catálogo real de Flower Turbines "
+                "que vas a cotizar -- el grupo ya se filtra automático según el modelo elegido en "
+                "\"Equipos y configuración\", vos elegís la variante (unidad simple, bouquet, "
+                "on/off-grid, con o sin accesorio). Esto es sólo de referencia para llenar el "
+                "costeo de abajo -- no se usa solo para calcular Payback/ROI."
+            )
+            _precio_total_proyecto = 0.0
+            _algun_modelo_sin_precio = False
+            for _i, _c in enumerate(st.session_state.clusters):
+                _articulos_disponibles = get_articulos_disponibles(_c["modelo"])
+                _nombre_modelo = NOMBRES_MODELO.get(_c["modelo"], _c["modelo"])
+                if not _articulos_disponibles:
+                    st.caption(
+                        f"{_nombre_modelo}: precio no disponible todavía (no hay artículo cargado "
+                        "en el catálogo)."
+                    )
+                    _algun_modelo_sin_precio = True
+                    continue
+                _opciones_articulo = [art for art, _ in _articulos_disponibles]
+                _articulo_guardado = _c.get("articulo")
+                _idx_articulo = (
+                    _opciones_articulo.index(_articulo_guardado)
+                    if _articulo_guardado in _opciones_articulo else 0
+                )
+                _c["articulo"] = st.selectbox(
+                    f"Artículo -- {_nombre_modelo} ({int(_c['N'])}x)", options=_opciones_articulo,
+                    index=_idx_articulo, key=f"articulo_fin_{_i}",
+                    help="Precio de venta real de fábrica -- elegí la variante exacta que vas a "
+                         "cotizar (unidad simple, bouquet, on/off-grid, con o sin accesorio).",
+                )
+                _precio_unitario = get_precio_exworks_usd(_c["modelo"], _c["articulo"])
+                _precio_total_proyecto += _precio_unitario * _c["N"]
+                # Dos "$" en el mismo st.caption() arman un par que Streamlit interpreta
+                # como LaTeX ($...$) -- se escapan con "\$" (mismo bug real de Hallazgo 48).
+                st.caption(
+                    f"Precio: \\${_precio_unitario:,.0f} c/u -- "
+                    f"Total del clúster ({int(_c['N'])}x): \\${_precio_unitario * _c['N']:,.0f}"
+                )
+            st.metric("Precio total del proyecto (equipos, EXWORKS)", f"${_precio_total_proyecto:,.0f}")
+            st.caption(
+                "Precio de venta de fábrica del artículo elegido en cada clúster. NO incluye "
+                "flete, importación ni instalación -- eso lo agrega ECO Consultor aparte. Es el "
+                "precio del artículo elegido × cantidad de turbinas del clúster -- si elegís un "
+                "artículo de \"bouquet\" (varias turbinas con un solo inversor), revisá que la "
+                "cantidad (N) del clúster tenga sentido con ese artículo."
+                + (" Al menos un modelo elegido todavía no tiene ningún artículo cargado." if _algun_modelo_sin_precio else "")
+            )
 
             st.divider()
             st.markdown("**Costeo real del proyecto**")
@@ -1312,12 +1320,9 @@ with tab_financiero:
                     )
 
             st.caption(
-                "Motor: `financial_engine_eolico.py` (CAPEX, mantenimiento y precio "
-                "de venta ingresados directo por el usuario) + `tarifas_electricas_cr.py` "
-                "(tarifas horarias reales de CNFL/ICE cruzadas contra la producción "
-                "hora por hora; tarifa comercial T-CO), en vez de una tarifa plana "
-                "adivinada. El inversor/BESS (Sol-Ark/EG4) no se dimensiona ni se costea acá por "
-                "ahora."
+                "CAPEX, mantenimiento y precio de venta ingresados directo por el usuario. "
+                "Tarifas horarias reales de CNFL/ICE cruzadas contra la producción hora por "
+                "hora, en vez de una tarifa plana adivinada."
             )
 
 
@@ -1433,21 +1438,18 @@ with tab_especificacion:
             st.divider()
             st.markdown("### Inversor")
             _msg_inversor_fuera_alcance = (
-                "Fuera de alcance por ahora -- a pedido explícito de Pablo, la app sólo valora "
-                "equipo Flower Turbines (turbinas); el inversor Sol-Ark no se dimensiona ni se "
-                "costea acá."
+                "Esta cotización cubre las turbinas Flower Turbines -- el inversor no se "
+                "dimensiona ni se costea en esta sección."
             )
             st.info(_msg_inversor_fuera_alcance)
             _datos_pdf["inversor_no_compatible_msg"] = _msg_inversor_fuera_alcance
 
             st.divider()
             st.markdown("### Banco de baterías (BESS)")
-            st.write("No aplica por ahora -- ver nota de Inversor arriba.")
+            st.write("No aplica a esta cotización.")
 
             st.caption(
-                "Fuente de los datos: fichas técnicas oficiales de fábrica de Flower Turbines -- "
-                "ver `turbine_specs.py` y `precios_flower_turbines.py` en el repositorio para el "
-                "detalle de cada dato y su procedencia."
+                "Fuente de los datos: fichas técnicas oficiales de fábrica de Flower Turbines."
             )
 
             st.divider()
@@ -1460,9 +1462,3 @@ with tab_especificacion:
                 type="primary",
             )
 
-st.divider()
-st.caption(
-    "ECO Consultor — Simulador en desarrollo (Fase 2). "
-    "Pendiente: DEM automático para elevación, "
-    "PDF de cotización, registro de leads, despliegue a Cloud Run."
-)
