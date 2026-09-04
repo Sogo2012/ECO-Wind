@@ -69,6 +69,7 @@ from engine.epw_real import (
     SITIOS_EPW_REAL, cargar_epw_real, heatmap_json_desde_epw, rosa_vientos_detallada_desde_epw,
     obtener_estaciones_cercanas, geocode_name, descargar_y_extraer_epw, sitio_precacheado_cercano,
 )
+from engine.tipo_cambio_bccr import obtener_tipo_cambio_bccr
 from engine.financial_engine_eolico import FinancialEngineEolico
 from engine.tarifas_electricas_cr import calcular_ahorro_tarifa_horaria_usd, calcular_ahorro_tarifa_comercial_usd
 from engine.precios_flower_turbines import get_articulos_disponibles, get_precio_exworks_usd
@@ -516,6 +517,17 @@ with st.sidebar:
     st.caption(f"{len(st.session_state.clusters)} clúster(es), {_n_turbinas} turbina(s) en total.")
     if st.session_state.get("calculo_listo"):
         st.caption("Cálculo de producción listo.")
+
+    st.divider()
+    # Una sola consulta al BCCR por sesión: obtener_tipo_cambio_bccr() ya
+    # cachea a su propio nivel (archivo local), esto solo evita repetir la
+    # llamada en cada rerun de Streamlit dentro de la misma sesión de usuario.
+    if "tipo_cambio_bccr" not in st.session_state:
+        st.session_state["tipo_cambio_bccr"] = obtener_tipo_cambio_bccr()
+    _tipo_cambio, _tc_es_emergencia = st.session_state["tipo_cambio_bccr"]
+    st.metric("💵 Tipo de cambio BCCR", f"₡{_tipo_cambio:,.2f}")
+    if _tc_es_emergencia:
+        st.caption("⚠️ BCCR no disponible -- valor de emergencia, no del día.")
 
     st.divider()
     st.markdown(f"""
