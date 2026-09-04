@@ -525,9 +525,9 @@ with st.sidebar:
     if "tipo_cambio_bccr" not in st.session_state:
         st.session_state["tipo_cambio_bccr"] = obtener_tipo_cambio_bccr()
     _tipo_cambio, _tc_es_emergencia = st.session_state["tipo_cambio_bccr"]
-    st.metric("💵 Tipo de cambio BCCR", f"₡{_tipo_cambio:,.2f}")
+    st.metric("Tipo de cambio BCCR", f"₡{_tipo_cambio:,.2f}")
     if _tc_es_emergencia:
-        st.caption("⚠️ BCCR no disponible -- valor de emergencia, no del día.")
+        st.caption("BCCR no disponible -- valor de emergencia, no del día.")
 
     st.divider()
     st.markdown(f"""
