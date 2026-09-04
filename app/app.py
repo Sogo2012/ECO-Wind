@@ -220,8 +220,12 @@ def cargar_epw_subido(ruta):
     nunca por ubicación."""
     try:
         df_clima, meta = cargar_epw_real(ruta)
-    except (FileNotFoundError, ValueError, KeyError) as e:
-        return dict(error=str(e))
+    except Exception as e:
+        return dict(error=(
+            f"No se pudo leer el archivo como EPW válido: {e} -- confirmá que es un .epw real "
+            "(formato EnergyPlus/climate.onebuilding.org, 8 líneas de encabezado + una fila por "
+            "hora) y no un archivo renombrado o exportado de otra herramienta."
+        ))
     return _resultado_desde_epw(df_clima, meta)
 
 
@@ -742,30 +746,6 @@ with tab_config:
                 st.session_state.clusters.pop(i)
                 st.rerun()
 
-            _articulos_disponibles = get_articulos_disponibles(c["modelo"])
-            if not _articulos_disponibles:
-                st.caption("Precio: no disponible todavía para este modelo (no hay artículo cargado en el catálogo).")
-            else:
-                _opciones_articulo = [art for art, _ in _articulos_disponibles]
-                _articulo_guardado = c.get("articulo")
-                _idx_articulo = (
-                    _opciones_articulo.index(_articulo_guardado)
-                    if _articulo_guardado in _opciones_articulo else 0
-                )
-                c["articulo"] = st.selectbox(
-                    "Artículo (catálogo Flower Turbines)", options=_opciones_articulo,
-                    index=_idx_articulo, key=f"articulo_{i}",
-                    help="Precio de venta real de fábrica -- elegí la variante exacta que vas a "
-                         "cotizar (unidad simple, bouquet, on/off-grid, con o sin accesorio).",
-                )
-                _precio_unitario = get_precio_exworks_usd(c["modelo"], c["articulo"])
-                # Dos "$" en el mismo st.caption() arman un par que Streamlit interpreta
-                # como LaTeX ($...$) -- se escapan con "\$" (mismo bug real de Hallazgo 48).
-                st.caption(
-                    f"Precio: \\${_precio_unitario:,.0f} c/u -- "
-                    f"Total del clúster ({int(c['N'])}x): \\${_precio_unitario * c['N']:,.0f}"
-                )
-
             _specs = SPECS_TURBINAS.get(c["modelo"])
             _ruta_img = RUTA_IMAGEN.get(c["modelo"])
             with st.expander(f"Ficha técnica -- {NOMBRES_MODELO.get(c['modelo'], c['modelo'])}"):
@@ -797,24 +777,6 @@ with tab_config:
     if st.button("+ Agregar clúster"):
         st.session_state.clusters.append({"modelo": "medium_tulip", "N": 1, "altura_buje": 3.0})
         st.rerun()
-
-    st.divider()
-    _precio_total_proyecto = sum(
-        (get_precio_exworks_usd(c["modelo"], c.get("articulo")) or 0) * c["N"]
-        for c in st.session_state.clusters
-    )
-    _algun_modelo_sin_precio = any(
-        get_precio_exworks_usd(c["modelo"], c.get("articulo")) is None for c in st.session_state.clusters
-    )
-    st.metric("Precio total del proyecto (equipos, EXWORKS)", f"${_precio_total_proyecto:,.0f}")
-    st.caption(
-        "Precio de venta de fábrica del artículo elegido en cada clúster (catálogo real de "
-        "Flower Turbines -- Hallazgo 56/57). NO incluye flete, importación ni instalación -- eso "
-        "lo agrega ECO Consultor aparte. Es el precio del artículo elegido × cantidad de "
-        "turbinas del clúster -- si elegís un artículo de \"bouquet\" (varias turbinas con un "
-        "solo inversor), revisá que la cantidad (N) del clúster tenga sentido con ese artículo."
-        + (" Al menos un modelo elegido todavía no tiene ningún artículo cargado." if _algun_modelo_sin_precio else "")
-    )
 
     st.divider()
 
@@ -1173,6 +1135,57 @@ with tab_financiero:
                 SPECS_TURBINAS[modelo]["potencia_nominal_w"] for modelo in turbinas_seleccionadas
             )
             _cantidad_turbinas_total = len(turbinas_seleccionadas)
+
+            st.divider()
+            st.markdown("**Selección de equipo -- precio EXWORKS (Hallazgo 56/57)**")
+            st.caption(
+                "Elegí acá, por clúster, el artículo exacto del catálogo real de Flower Turbines "
+                "que vas a cotizar -- el grupo ya se filtra automático según el modelo elegido en "
+                "\"Equipos y configuración\", vos elegís la variante (unidad simple, bouquet, "
+                "on/off-grid, con o sin accesorio). Esto es sólo de referencia para llenar el "
+                "costeo de abajo -- no se usa solo para calcular Payback/ROI."
+            )
+            _precio_total_proyecto = 0.0
+            _algun_modelo_sin_precio = False
+            for _i, _c in enumerate(st.session_state.clusters):
+                _articulos_disponibles = get_articulos_disponibles(_c["modelo"])
+                _nombre_modelo = NOMBRES_MODELO.get(_c["modelo"], _c["modelo"])
+                if not _articulos_disponibles:
+                    st.caption(
+                        f"{_nombre_modelo}: precio no disponible todavía (no hay artículo cargado "
+                        "en el catálogo)."
+                    )
+                    _algun_modelo_sin_precio = True
+                    continue
+                _opciones_articulo = [art for art, _ in _articulos_disponibles]
+                _articulo_guardado = _c.get("articulo")
+                _idx_articulo = (
+                    _opciones_articulo.index(_articulo_guardado)
+                    if _articulo_guardado in _opciones_articulo else 0
+                )
+                _c["articulo"] = st.selectbox(
+                    f"Artículo -- {_nombre_modelo} ({int(_c['N'])}x)", options=_opciones_articulo,
+                    index=_idx_articulo, key=f"articulo_fin_{_i}",
+                    help="Precio de venta real de fábrica -- elegí la variante exacta que vas a "
+                         "cotizar (unidad simple, bouquet, on/off-grid, con o sin accesorio).",
+                )
+                _precio_unitario = get_precio_exworks_usd(_c["modelo"], _c["articulo"])
+                _precio_total_proyecto += _precio_unitario * _c["N"]
+                # Dos "$" en el mismo st.caption() arman un par que Streamlit interpreta
+                # como LaTeX ($...$) -- se escapan con "\$" (mismo bug real de Hallazgo 48).
+                st.caption(
+                    f"Precio: \\${_precio_unitario:,.0f} c/u -- "
+                    f"Total del clúster ({int(_c['N'])}x): \\${_precio_unitario * _c['N']:,.0f}"
+                )
+            st.metric("Precio total del proyecto (equipos, EXWORKS)", f"${_precio_total_proyecto:,.0f}")
+            st.caption(
+                "Precio de venta de fábrica del artículo elegido en cada clúster. NO incluye "
+                "flete, importación ni instalación -- eso lo agrega ECO Consultor aparte. Es el "
+                "precio del artículo elegido × cantidad de turbinas del clúster -- si elegís un "
+                "artículo de \"bouquet\" (varias turbinas con un solo inversor), revisá que la "
+                "cantidad (N) del clúster tenga sentido con ese artículo."
+                + (" Al menos un modelo elegido todavía no tiene ningún artículo cargado." if _algun_modelo_sin_precio else "")
+            )
 
             st.divider()
             st.markdown("**Costeo real del proyecto (Hallazgo 53 -- dejar de adivinar)**")
