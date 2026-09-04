@@ -36,17 +36,28 @@ steps:
       - "--allow-unauthenticated"
       - "--port"
       - "8080"
-      # 2Gi (antes 1Gi) y --cpu-boost: el error real reportado era
-      # "STARTUP TCP probe failed... DEADLINE_EXCEEDED" -- el contenedor no
-      # llegaba a escuchar en el puerto a tiempo. Streamlit + pandas + numpy +
-      # plotly + folium es un import pesado; con sólo 1 CPU y sin boost de
-      # arranque, Cloud Run puede tardar más en levantar el proceso de lo que
-      # dura el probe de arranque, o el proceso puede quedarse sin memoria
-      # (que se ve igual que un timeout, porque el contenedor nunca llega a
-      # abrir el puerto). --cpu-boost da CPU completa sólo durante el arranque
-      # (no cuesta más en régimen normal, se apaga después del arranque).
+      # 4Gi (antes 2Gi, y 1Gi originalmente) y --cpu-boost: el error real
+      # reportado era "STARTUP TCP probe failed... DEADLINE_EXCEEDED" -- el
+      # contenedor no llegaba a escuchar en el puerto a tiempo. Streamlit +
+      # pandas + numpy + plotly + folium es un import pesado; con sólo 1 CPU y
+      # sin boost de arranque, Cloud Run puede tardar más en levantar el
+      # proceso de lo que dura el probe de arranque, o el proceso puede
+      # quedarse sin memoria (que se ve igual que un timeout, porque el
+      # contenedor nunca llega a abrir el puerto). --cpu-boost da CPU completa
+      # sólo durante el arranque (no cuesta más en régimen normal, se apaga
+      # después del arranque).
+      #
+      # Segundo bug real encontrado (Hallazgo 60): con 2Gi, el botón "Generar
+      # informe ejecutivo (PDF)" hacía que la sesión entera "brincara"/se
+      # reconectara -- el informe lanza un Chromium real (kaleido, para
+      # exportar los gráficos a PNG), y ese Chromium sumado a Streamlit +
+      # pandas + numpy + plotly + folium YA cargados en memoria empujaba el
+      # contenedor sobre el límite -- Cloud Run lo mata y reinicia (se ve
+      # igual que la app "reiniciándose", y se pierde todo el session_state en
+      # memoria, incluido el tipo de cambio BCCR ya cacheado, que vuelve al
+      # valor de emergencia). Subir a 4Gi le da margen real a Chromium.
       - "--memory"
-      - "2Gi"
+      - "4Gi"
       - "--cpu"
       - "1"
       - "--cpu-boost"
