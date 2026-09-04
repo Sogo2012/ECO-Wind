@@ -99,7 +99,7 @@ NOMBRES_MODELO = {
     "al13_2m": "AL13 Power Tower (2 módulos)",
     "al13_4m": "AL13 Power Tower (4 módulos)",
     "al13_6m": "AL13 Power Tower (6 módulos)",
-    "al13_8m": "AL13 Power Tower (8 módulos, sin verificar aún -- Hallazgo 11)",
+    "al13_8m": "AL13 Power Tower (8 módulos, sin verificar aún)",
 }
 MESES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
 
@@ -206,8 +206,7 @@ def cargar_estacion_elegida(row):
         return _resultado_desde_epw(df_clima, meta)
     except Exception as e:
         return dict(error=(
-            f"No se pudo descargar {row['name']}: {e} -- necesita internet real "
-            "(no funciona en este sandbox de desarrollo, Hallazgo 2)."
+            f"No se pudo descargar {row['name']}: {e} -- necesita conexión a internet."
         ))
 
 
@@ -532,8 +531,8 @@ with st.sidebar:
     st.divider()
     st.markdown(f"""
     <div style="font-size:0.62rem; color:{GRIS}; line-height:1.6;">
-        Motor: flower_turbines_curves.py (Hallazgo 12)<br>
-        Clima: EPW real, estación elegida o subida (Hallazgo 36)<br>
+        Motor: flower_turbines_curves.py<br>
+        Clima: EPW real, estación elegida o subida<br>
         ECO Consultor · Fase 2 -- avance-de-proyecto.md
     </div>
     """, unsafe_allow_html=True)
@@ -686,7 +685,7 @@ with tab_contexto:
                  "perfil de abajo) entre la altura de referencia del EPW (10m) y la altura real de "
                  "buje de tu turbina -- misma fórmula y rugosidad que usa el cálculo de energía. "
                  "Para una instalación en TECHO de un edificio, usá altura del edificio + altura del "
-                 "mástil sobre el techo (Hallazgo 51) -- ojo, la ley logarítmica extrapola la "
+                 "mástil sobre el techo -- ojo, la ley logarítmica extrapola la "
                  "velocidad REGIONAL a esa altura, no el efecto aerodinámico local de estar encima "
                  "de un edificio puntual (aceleración sobre el borde del techo, turbulencia), que "
                  "esta app no modela todavía.",
@@ -736,7 +735,7 @@ with tab_config:
                 help="Para una instalación en TECHO (ej. azotea de un edificio de varios pisos): "
                      "altura del edificio (m) + altura del mástil/soporte sobre el techo -- NO la "
                      "cantidad de pisos. Un edificio de 15 pisos ronda 45-55m según la altura de "
-                     "entrepiso (Hallazgo 51).",
+                     "entrepiso.",
             )
             if cc4.button("✕", key=f"del_{i}", help="Quitar este clúster") and len(st.session_state.clusters) > 1:
                 st.session_state.clusters.pop(i)
@@ -809,7 +808,7 @@ with tab_config:
     st.metric("Precio total del proyecto (equipos, EXWORKS)", f"${_precio_total_proyecto:,.0f}")
     st.caption(
         "Precio de venta de fábrica del artículo elegido en cada clúster (catálogo real de "
-        "Flower Turbines -- Hallazgo 56/57). NO incluye flete, importación ni instalación -- eso "
+        "Flower Turbines). NO incluye flete, importación ni instalación -- eso "
         "lo agrega ECO Consultor aparte. Es el precio del artículo elegido × cantidad de "
         "turbinas del clúster -- si elegís un artículo de \"bouquet\" (varias turbinas con un "
         "solo inversor), revisá que la cantidad (N) del clúster tenga sentido con ese artículo."
@@ -825,7 +824,7 @@ with tab_config:
                                     0.3: "0.3 — suburbano (default)", 1.0: "1.0 — urbano denso"}[z],
             index=2, key="z0_avanzado",
             help="Rugosidad del sitio DESTINO (donde se instala la turbina), no la del sitio "
-                 "de referencia climática. Desde Hallazgo 20, esta app usa dos rugosidades "
+                 "de referencia climática. Esta app usa dos rugosidades "
                  "distintas -- ver la nota en Resultados.",
         )
         metodo_bouquet = st.radio(
@@ -898,7 +897,7 @@ with tab_resultados:
             st.dataframe(tabla, hide_index=True)
 
             media_confirmada = resultado_clima["media"]
-            with st.expander("Hallazgo 20 -- perfil de viento por altura: dos rugosidades, y un cross-check independiente"):
+            with st.expander("Perfil de viento por altura: dos rugosidades, y un cross-check independiente"):
                 _r0 = resultados[0]
                 # El cross-check usa el MISMO z0 de destino que ya eligió el usuario arriba
                 # (mapeado a la clase de TERRENOS_ENERGYPLUS más cercana) -- antes quedaba fijo
@@ -909,7 +908,7 @@ with tab_resultados:
                     media_confirmada, 10, _r0["altura_buje"], terreno=_terreno_dst, terreno_met="country")
                 st.write(
                     f"El viento de referencia (10m, aeropuerto/EPW) y el sitio real donde va la "
-                    f"turbina casi nunca tienen la misma rugosidad -- hasta Hallazgo 20 esta app usaba "
+                    f"turbina casi nunca tienen la misma rugosidad -- antes esta app usaba "
                     f"un solo z0 para los dos, lo que sobreestimaba la velocidad en buje 16-24% (según "
                     f"el método) en el caso de San José, y como P∝v³ eso es ~1.6-1.9x de más en energía. "
                     f"Ahora se usa z0 del sitio destino (seleccionable arriba en esta pestaña) "
@@ -946,9 +945,9 @@ with tab_resultados:
             st.plotly_chart(crear_curva_duracion_plotly(serie_total_w), use_container_width=True)
 
             st.caption(
-                "Motor: `flower_turbines_curves.py` (validado Hallazgo 12) + corrección de densidad de aire "
-                "por elevación (Hallazgo 17). Fuente climática: EPW real, estación elegida o subida por "
-                "el usuario (Hallazgo 36) -- sin sensibilización espacial por GWA/NASA POWER/ERA5."
+                "Motor: `flower_turbines_curves.py` (validado) + corrección de densidad de aire "
+                "por elevación. Fuente climática: EPW real, estación elegida o subida por "
+                "el usuario -- sin sensibilización espacial por GWA/NASA POWER/ERA5."
             )
     else:
         st.info("Configurá el proyecto en la pestaña \"Equipos y configuración\" y presioná "
@@ -1015,25 +1014,11 @@ with tab_financiero:
                 c["modelo"] for c in st.session_state.clusters for _ in range(int(c["N"]))
             ]
 
-            st.markdown("**Parámetros del proyecto**")
-            col_f1, col_f2 = st.columns(2)
-            with col_f1:
-                consumo_diario_kWh = st.number_input(
-                    "Consumo diario del sitio (kWh/día)", min_value=0.1, value=20.0, step=1.0,
-                    help="Dimensiona el banco de baterías (BESS) según las horas de autonomía deseadas.",
-                    key="fin_consumo_diario",
-                )
-            with col_f2:
-                horas_autonomia = st.number_input(
-                    "Horas de autonomía deseadas", min_value=1, max_value=48, value=12, step=1,
-                    key="fin_horas_autonomia")
-
-            sistema_tipo_label = st.radio(
-                "Tipo de sistema",
-                ["Standalone (con banco de baterías)", "Hybrid (sin banco de baterías)"],
-                horizontal=True,
-            )
-            sistema_tipo = "Standalone" if sistema_tipo_label.startswith("Standalone") else "Hybrid"
+            # sistema_tipo es sólo una etiqueta informativa en el resultado (no afecta
+            # ningún cálculo de Payback/ROI/NPV) -- la app hoy sólo valora turbinas, sin
+            # dimensionar inversor ni banco de baterías, así que ya no hace falta
+            # pedirle este dato al usuario.
+            sistema_tipo = "Standalone"
 
             st.markdown("**Tarifa eléctrica**")
             modo_tarifa = st.radio(
@@ -1043,11 +1028,11 @@ with tab_financiero:
                 horizontal=True,
                 key="fin_modo_tarifa",
                 help="La tarifa horaria cruza la producción REAL hora por hora de la turbina "
-                     "contra los periodos Punta/Valle/Nocturno de CNFL/ICE (Hallazgo 54) -- un "
+                     "contra los periodos Punta/Valle/Nocturno de CNFL/ICE -- un "
                      "kWh generado en horario Punta vale varias veces más que uno generado de "
                      "noche, algo que una tarifa plana no puede reflejar. La tarifa comercial "
                      "(T-CO) es para gimnasios/estadios/comercios -- precio plano por kWh según "
-                     "el consumo mensual del sitio, sin periodos horarios (Hallazgo 55).",
+                     "el consumo mensual del sitio, sin periodos horarios.",
             )
 
             resultado_tou = None
@@ -1175,7 +1160,7 @@ with tab_financiero:
             _cantidad_turbinas_total = len(turbinas_seleccionadas)
 
             st.divider()
-            st.markdown("**Costeo real del proyecto (Hallazgo 53 -- dejar de adivinar)**")
+            st.markdown("**Costeo real del proyecto**")
             st.caption(
                 "En vez de estimar el CAPEX con costo de fábrica + margen + flete supuestos, "
                 "ingresá acá los números reales de tu cotización: cuánto cuestan los equipos, a "
@@ -1327,12 +1312,12 @@ with tab_financiero:
                     )
 
             st.caption(
-                "Motor: `financial_engine_eolico.py` (Hallazgo 53: CAPEX, mantenimiento y precio "
+                "Motor: `financial_engine_eolico.py` (CAPEX, mantenimiento y precio "
                 "de venta ingresados directo por el usuario) + `tarifas_electricas_cr.py` "
-                "(Hallazgo 54: tarifas horarias reales de CNFL/ICE cruzadas contra la producción "
-                "hora por hora; Hallazgo 55: tarifa comercial T-CO), en vez de una tarifa plana "
+                "(tarifas horarias reales de CNFL/ICE cruzadas contra la producción "
+                "hora por hora; tarifa comercial T-CO), en vez de una tarifa plana "
                 "adivinada. El inversor/BESS (Sol-Ark/EG4) no se dimensiona ni se costea acá por "
-                "ahora -- Hallazgo 57."
+                "ahora."
             )
 
 
@@ -1450,14 +1435,14 @@ with tab_especificacion:
             _msg_inversor_fuera_alcance = (
                 "Fuera de alcance por ahora -- a pedido explícito de Pablo, la app sólo valora "
                 "equipo Flower Turbines (turbinas); el inversor Sol-Ark no se dimensiona ni se "
-                "costea acá (Hallazgo 57)."
+                "costea acá."
             )
             st.info(_msg_inversor_fuera_alcance)
             _datos_pdf["inversor_no_compatible_msg"] = _msg_inversor_fuera_alcance
 
             st.divider()
             st.markdown("### Banco de baterías (BESS)")
-            st.write("No aplica por ahora -- ver nota de Inversor arriba (Hallazgo 57).")
+            st.write("No aplica por ahora -- ver nota de Inversor arriba.")
 
             st.caption(
                 "Fuente de los datos: fichas técnicas oficiales de fábrica de Flower Turbines -- "
