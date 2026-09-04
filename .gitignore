@@ -10,3 +10,11 @@ __pycache__/
 *.tif
 *.zip
 datos_clima/koppen/
+
+# Secretos locales (BCCR_BEARER_TOKEN, etc.) -- nunca se commitean, ver
+# .env.example para la plantilla. La caché del tipo de cambio se regenera
+# sola con cada llamada exitosa al BCCR, tampoco se versiona.
+.env
+.env.*
+!.env.example
+data/cache_tipo_cambio.json
