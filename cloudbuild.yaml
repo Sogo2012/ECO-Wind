@@ -61,6 +61,17 @@ steps:
       - "--cpu"
       - "1"
       - "--cpu-boost"
+      # Segunda causa posible del mismo síntoma (Hallazgo 60): por default,
+      # Cloud Run sólo asigna CPU completa mientras está procesando una
+      # petición HTTP entrante -- el resto del tiempo la recorta. Streamlit
+      # mantiene la conexión abierta por WebSocket; el trabajo pesado de
+      # "Generar informe ejecutivo" (lanzar Chromium real) pasa DESPUÉS del
+      # click, dentro de esa conexión ya abierta -- si Cloud Run no lo cuenta
+      # como "petición activa", le recorta la CPU justo cuando más la
+      # necesita, lo que puede verse igual que la sesión colgándose y
+      # reconectando. --no-cpu-throttling le da CPU completa todo el tiempo
+      # que el contenedor esté vivo, no sólo durante una petición HTTP.
+      - "--no-cpu-throttling"
       - "--timeout"
       - "3600s"
       # NOTA: NO agregar "--set-env-vars PORT=8080" ni ninguna variable

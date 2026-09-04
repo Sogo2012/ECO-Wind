@@ -3893,6 +3893,18 @@ dentro de los límites normales de Cloud Run, no hace falta subir CPU también.
   `gcloud builds submit --config=cloudbuild.yaml` para que Cloud Run reciba la
   nueva configuración de memoria.
 
+**Actualización (mismo día):** Pablo reportó que sigue "brincando" igual. No se
+pudo confirmar si ya había corrido `gcloud builds submit` con el cambio de memoria
+antes de probar de nuevo -- pendiente de confirmar con él. En paralelo, se agregó
+una SEGUNDA causa posible del mismo síntoma: por default Cloud Run sólo asigna CPU
+completa mientras procesa una petición HTTP entrante, y la recorta el resto del
+tiempo -- Streamlit mantiene la conexión abierta por WebSocket, así que el trabajo
+pesado de lanzar Chromium (que pasa DESPUÉS del click, dentro de esa conexión ya
+abierta) puede no contar como "petición activa" para Cloud Run, y quedarse sin CPU
+justo cuando más la necesita -- mismo síntoma visible (la sesión se cuelga y
+reconecta). Se agregó `--no-cpu-throttling` en `cloudbuild.yaml` junto con el
+4Gi. Sigue siendo hipótesis, no certeza confirmada con logs reales.
+
 ---
 
 ## 6. Pendientes activos / bloqueos
