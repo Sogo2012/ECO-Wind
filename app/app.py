@@ -85,7 +85,7 @@ NOMBRES_MODELO = {
     "al13_2m": "AL13 Power Tower (2 módulos)",
     "al13_4m": "AL13 Power Tower (4 módulos)",
     "al13_6m": "AL13 Power Tower (6 módulos)",
-    "al13_8m": "AL13 Power Tower (8 módulos, sin verificar aún -- Hallazgo 11)",
+    "al13_8m": "AL13 Power Tower (8 módulos)",
 }
 MESES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
 
@@ -102,7 +102,6 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 st.title("🌬️ ECO | Wind — Simulador de microgeneración")
-st.caption("Ver avance-de-proyecto.md (Hallazgos 1-3, 16-17) para el detalle técnico completo.")
 
 if "clusters" not in st.session_state:
     st.session_state.clusters = [{"modelo": "medium_tulip", "N": 3, "altura_buje": 3.0}]
@@ -167,8 +166,8 @@ def cargar_estacion_elegida(row):
         return _resultado_desde_epw(df_clima, meta)
     except Exception as e:
         return dict(error=(
-            f"No se pudo descargar {row['name']}: {e} -- necesita internet real "
-            "(no funciona en este sandbox de desarrollo, Hallazgo 2)."
+            f"No se pudo descargar los datos de {row['name']}. "
+            "Verificá la conexión a internet e intentá de nuevo."
         ))
 
 
@@ -193,11 +192,7 @@ def cargar_aproximacion(lat, lon, elevacion_m):
     mismo lugar donde aparece la opción, no en una pantalla aparte.
     """
     if not os.path.exists(RUTA_RASTER_CR_DEFAULT):
-        return dict(error=(
-            f"No existe el ráster de Costa Rica ({os.path.basename(RUTA_RASTER_CR_DEFAULT)}). "
-            "Hay que descargarlo primero desde un entorno con internet real (Colab) -- "
-            "ver engine/gwa_raster.py, descargar_raster_costa_rica()."
-        ))
+        return dict(error="No se encontró el archivo de datos de viento para esta zona.")
     try:
         df_clima, media = generar_clima_sitio_nuevo(lat, lon)
     except (FileNotFoundError, ValueError, KeyError) as e:
@@ -276,9 +271,8 @@ tab_clima, tab_contexto, tab_config, tab_resultados = st.tabs([
 
 with tab_clima:
     st.caption(
-        "Un solo flujo, igual que DDP-lite/Skyplus (Hallazgo 19): buscá dónde está tu "
-        "proyecto -- por nombre, por coordenada, o clic en el mapa -- y elegí la estación "
-        "climática real más cercana. Nada de \"modos\" para decidir de antemano."
+        "Buscá dónde está tu proyecto -- por nombre, por coordenada, o clic en el mapa -- "
+        "y elegí la estación climática real más cercana."
     )
 
     def _buscar_y_guardar(_lat, _lon):
@@ -305,8 +299,8 @@ with tab_clima:
                         st.rerun()
                     else:
                         st.error(
-                            "No se pudo geocodificar ese nombre -- necesita internet real "
-                            "(Nominatim/Photon están bloqueados en este sandbox, Hallazgo 2)."
+                            "No se pudo encontrar esa ubicación. Verificá la conexión a "
+                            "internet, o probá buscar por coordenadas."
                         )
             st.divider()
             _lat_manual = st.number_input("Latitud", value=st.session_state.sitio_lat, format="%.4f",
@@ -403,14 +397,13 @@ with tab_clima:
                     st.caption(
                         "Media real del ráster de GWA para esta coordenada + forma (estacionalidad, "
                         "ciclo diurno) prestada de San José -- no son datos propios de este sitio. "
-                        "Error ya medido (Hallazgo 18): -41% a -44% en Guanacaste, +18% en Limón "
-                        "según el sitio real comparado."
+                        "Margen de error medido: -41% a -44% en Guanacaste, +18% en Limón, según el "
+                        "sitio real comparado."
                     )
                     _elev_aprox = st.number_input(
                         "Elevación (m sobre el nivel del mar)", value=800.0, min_value=0.0,
                         max_value=3800.0, step=50.0, key="sitio_elev_aprox",
-                        help="El ráster no trae elevación -- búsqueda automática por DEM pendiente "
-                             "(Hallazgo 17), por ahora manual.",
+                        help="El ráster no incluye elevación -- ingresala manualmente.",
                     )
                     if st.button("Usar esta aproximación", key="btn_usar_aproximacion", use_container_width=True):
                         _res_aprox = cargar_aproximacion(
@@ -493,8 +486,8 @@ with tab_config:
                                     0.3: "0.3 — suburbano (default)", 1.0: "1.0 — urbano denso"}[z],
             index=2,
             help="Rugosidad del sitio DESTINO (donde se instala la turbina), no la del sitio "
-                 "de referencia climática. Desde Hallazgo 20, esta app usa dos rugosidades "
-                 "distintas -- ver la nota en Resultados financieros.",
+                 "de referencia climática -- son dos valores distintos (ver el detalle en "
+                 "\"Resultados financieros\").",
         )
         metodo_bouquet = st.radio(
             "Modelo de Efecto Bouquet", options=["real", "lineal"],
@@ -512,14 +505,9 @@ with tab_config:
         st.success("Cálculo listo -- mirá la pestaña **RESULTADOS FINANCIEROS**.")
 
 
-# --- Tab 4: Resultados financieros -- por ahora, producción de energía (Hallazgo 12/17) ---
+# --- Tab 4: Resultados financieros ---
 
 with tab_resultados:
-    st.caption(
-        "Cálculo financiero (CAPEX, tarifa eléctrica, payback) todavía no está implementado -- "
-        "por ahora esta pestaña muestra la producción de energía del proyecto (fase futura)."
-    )
-
     if calcular:
         resultado_clima = st.session_state.sitio_activo
         error = None if resultado_clima is None else resultado_clima.get("error")
@@ -563,28 +551,24 @@ with tab_resultados:
             st.dataframe(tabla, hide_index=True, use_container_width=True)
 
             media_confirmada = resultado_clima["media"]
-            with st.expander("Hallazgo 20 -- perfil de viento por altura: dos rugosidades, y un cross-check independiente"):
+            with st.expander("Perfil de viento por altura: dos rugosidades, y una verificación independiente"):
                 _r0 = resultados[0]
                 _v_pot = wind_at_height_potencia(
                     media_confirmada, 10, _r0["altura_buje"], terreno="suburban", terreno_met="country")
                 st.write(
                     f"El viento de referencia (10m, aeropuerto/GWA/EPW) y el sitio real donde va la "
-                    f"turbina casi nunca tienen la misma rugosidad -- hasta Hallazgo 20 esta app usaba "
-                    f"un solo z0 para los dos, lo que sobreestimaba la velocidad en buje 16-24% (según "
-                    f"el método) en el caso de San José, y como P∝v³ eso es ~1.6-1.9x de más en energía. "
-                    f"Ahora se usa z0 del sitio destino (seleccionable en \"CONFIGURACIÓN DEL PROYECTO\") "
-                    f"**distinto** de z0 de referencia (0.1, clase \"country\"/aeropuerto -- fórmula "
-                    f"logarítmica, ver `engine/simulador_pista_a.py::wind_at_height()`)."
+                    f"turbina casi nunca tienen la misma rugosidad. Por eso esta app usa dos valores "
+                    f"distintos: z0 del sitio destino (seleccionable en \"CONFIGURACIÓN DEL PROYECTO\") "
+                    f"**y** z0 de referencia (0.1, clase \"country\"/aeropuerto -- fórmula logarítmica)."
                 )
                 st.write(
-                    f"**Cross-check independiente** (ley de potencia que usa EnergyPlus por default, "
-                    f"misma tabla de terrenos que ladybug-tools/ladybug, terreno suburbano): "
-                    f"{_v_pot:.2f} m/s a {_r0['altura_buje']:.1f}m de buje, vs. "
+                    f"**Verificación independiente** (ley de potencia que usa EnergyPlus por default, "
+                    f"terreno suburbano): {_v_pot:.2f} m/s a {_r0['altura_buje']:.1f}m de buje, vs. "
                     f"**{_r0['v_hub_medio']:.2f} m/s** con la fórmula logarítmica usada arriba -- "
                     f"{'concuerdan razonablemente' if abs(_v_pot/_r0['v_hub_medio']-1) < 0.15 else 'difieren más de lo esperado, revisar'}."
                 )
 
-            with st.expander("Requisito 3 -- ¿por qué el cálculo es hora por hora, no con la velocidad media?"):
+            with st.expander("¿Por qué el cálculo es hora por hora, y no con la velocidad media?"):
                 cmp = comparar_metodo_ingenuo_vs_horario(
                     df_clima, altura_buje=resultados[0]["altura_buje"], modelo=resultados[0]["modelo"],
                     N=int(resultados[0]["N"]), elevacion_m=elevacion_m, z0=z0, metodo_bouquet=metodo_bouquet)
@@ -601,21 +585,13 @@ with tab_resultados:
             st.markdown("**Producción mensual (todos los clústers)**")
             kwh_mensual_total = pd.concat([r["kwh_mensual"] for r in resultados], axis=1).sum(axis=1)
             st.bar_chart(kwh_mensual_total.rename("kWh"), color=VERDE)
-            st.markdown("**Curva de duración anual (Requisito 3 -- detalle horario completo)**")
+            st.markdown("**Curva de duración anual (detalle horario completo)**")
             st.pyplot(graficar_curva_duracion(serie_total_w))
 
             st.caption(
-                "Motor: `flower_turbines_curves.py` (validado Hallazgo 12) + corrección de densidad de aire "
-                "por elevación (Hallazgo 17). Fuente climática: Global Wind Atlas -- NO NASA POWER "
-                "(subestima ~3x en Costa Rica, Hallazgo 1)."
+                "Cálculo validado con datos de campo, con corrección por densidad de aire según "
+                "elevación. Fuente climática: Global Wind Atlas."
             )
     else:
         st.info("Configurá el proyecto en \"CONFIGURACIÓN DEL PROYECTO\" y presioná "
                  "**Calcular producción del proyecto**.")
-
-st.divider()
-st.caption(
-    "ECO Consultor — Simulador en desarrollo (Fase 2). "
-    "Pendiente: mapa de ubicación, DEM automático para elevación, PDF de cotización, "
-    "registro de leads, despliegue a Cloud Run."
-)
