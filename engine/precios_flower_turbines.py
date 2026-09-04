@@ -8,8 +8,15 @@ Precios"). Ver Hallazgo 56/57 en avance-de-proyecto.md para el detalle completo.
 
 FUENTE Y CRITERIO DE SELECCIÓN
 -------------------------------
-El precio de cada artículo es el precio de venta final ("Precio 3", columna S de la
-hoja original) que Pablo indicó explícitamente usar.
+El precio de cada artículo es el "Precio 1" del plan de pago 75/25 (columna Q de la
+hoja original: margen de utilidad del 30% sobre el Plan 75/25 -- 75% de adelanto,
+25% contra entrega).
+
+CORREGIDO (revisión del 2026-09-04): la carga original de este catálogo había
+tomado por error la columna S ("Precio 3" del mismo Plan 75/25, margen del 20%) en
+los ~35 artículos, sin excepción -- el precio de venta real que corresponde usar es
+la columna Q ("Precio 1", margen del 30%), no la S. Se recalcularon los 35 valores
+directo del CSV original para esta corrección.
 
 CONFIDENCIALIDAD: la hoja original de Pablo trae, además de este precio, columnas
 de costo de fábrica y de márgenes de utilidad que son confidenciales. Este módulo
@@ -52,65 +59,65 @@ tienen fila correspondiente -- lista vacía hasta que Pablo confirme un precio r
 
 from typing import Dict, List, Optional, Tuple
 
-# (Artículo, Precio_3 USD) -- el primero de cada lista es el default (unidad
-# simple, on-grid con inversor incluido).
+# (Artículo, Precio_1 USD -- Plan 75/25, margen 30%) -- el primero de cada lista es
+# el default (unidad simple, on-grid con inversor incluido).
 CATALOGO_FLOWER_TURBINES: Dict[str, List[Tuple[str, float]]] = {
     "small_tulip": [
-        ("1-meter tulip on grid with inverter", 5850.0),
-        ("1-meter tulip off grid with charger", 2475.0),
-        ("1-meter tulip on grid bouquet of 2 with inverter", 8250.0),
-        ("1-meter tulip on grid bouquet of 3 with inverter", 10725.0),
-        ("1-meter tulip on grid bouquet of 4 with inverter", 13200.0),
-        ("1-meter tulip on grid bouquet of 5 with inverter", 15675.0),
-        ("1-meter tulip on grid bouquet of 6 with inverter", 15900.0),
-        ("1-meter tulip 1-meter pole", 300.0),
-        ("1-meter tulip 2 meter pole", 375.0),
-        ("1m foundation. Full assembly 1050x500", 630.0),
+        ("1-meter tulip on grid with inverter", 6686.0),
+        ("1-meter tulip off grid with charger", 2829.0),
+        ("1-meter tulip on grid bouquet of 2 with inverter", 9429.0),
+        ("1-meter tulip on grid bouquet of 3 with inverter", 12257.0),
+        ("1-meter tulip on grid bouquet of 4 with inverter", 15086.0),
+        ("1-meter tulip on grid bouquet of 5 with inverter", 17914.0),
+        ("1-meter tulip on grid bouquet of 6 with inverter", 18171.0),
+        ("1-meter tulip 1-meter pole", 343.0),
+        ("1-meter tulip 2 meter pole", 429.0),
+        ("1m foundation. Full assembly 1050x500", 720.0),
     ],
     "medium_tulip": [
-        ("2-meter on grid with inverter", 17925.0),
-        ("2-meter tulip off grid with charger", 16185.0),
-        ("2-meter on grid with inverter bouquet of 2", 34425.0),
-        ("2-meter heat reduction system per turbine", 1200.0),
-        ("2-meter extra anti-corrosion measures per turbine", 450.0),
+        ("2-meter on grid with inverter", 20486.0),
+        ("2-meter tulip off grid with charger", 18497.0),
+        ("2-meter on grid with inverter bouquet of 2", 39343.0),
+        ("2-meter heat reduction system per turbine", 1371.0),
+        ("2-meter extra anti-corrosion measures per turbine", 514.0),
     ],
     "three_m_tulip": [
-        ("3-meter tulip on grid with inverter 1 kilowatt", 23985.0),
-        ("3-meter tulip off grid with charger 1 kilowatt", 22485.0),
-        ("3-meter tulip on grid with inverter 3 kilowatts", 26985.0),
-        ("3-meter tulip off grid with charger 3 kilowatts", 25485.0),
-        ("3-meter tulip hurricane reinforcements per blade set", 1800.0),
-        ("3-meter extra anti-corrosion measures per turbine", 600.0),
+        ("3-meter tulip on grid with inverter 1 kilowatt", 27411.0),
+        ("3-meter tulip off grid with charger 1 kilowatt", 25697.0),
+        ("3-meter tulip on grid with inverter 3 kilowatts", 30840.0),
+        ("3-meter tulip off grid with charger 3 kilowatts", 29126.0),
+        ("3-meter tulip hurricane reinforcements per blade set", 2057.0),
+        ("3-meter extra anti-corrosion measures per turbine", 686.0),
     ],
     "large_tulip": [
-        ("5-meter tulip on grid with inverter 5 kilowatts", 52500.0),
-        ("5-meter tulip off grid with charger 5 kilowatts", 45000.0),
-        ("5-meter tulip on grid with inverter 10 kilowatts", 60000.0),
+        ("5-meter tulip on grid with inverter 5 kilowatts", 60000.0),
+        ("5-meter tulip off grid with charger 5 kilowatts", 51429.0),
+        ("5-meter tulip on grid with inverter 10 kilowatts", 68571.0),
     ],
     "al13_2m": [
-        ("2-meter blade height turbine on grid with inverter 1 kilowatt", 19500.0),
+        ("2-meter blade height turbine on grid with inverter 1 kilowatt", 22286.0),
     ],
     "al13_4m": [
-        ("4-meter blade height turbine on grid with inverter 3 kilowatts", 25350.0),
+        ("4-meter blade height turbine on grid with inverter 3 kilowatts", 28971.0),
     ],
     "al13_6m": [
-        ("6-meter blade height turbine on grid with inverter 5 kilowatts", 29738.0),
+        ("6-meter blade height turbine on grid with inverter 5 kilowatts", 33986.0),
     ],
     "al13_8m": [
-        ("8-meter blade height turbine on grid with inverter 10 kilowatts", 45000.0),
-        ("8-meter blade height turbine on grid with inverter 5 kilowatts", 37500.0),
+        ("8-meter blade height turbine on grid with inverter 10 kilowatts", 51429.0),
+        ("8-meter blade height turbine on grid with inverter 5 kilowatts", 42857.0),
     ],
     "ecoroof_flat_3": [
-        ("ecoroof with 3 1-meter turbines on grid with inverter", 16485.0),
-        ("ecoroof with 3 1-meter turbines off grid with chargers", 12225.0),
-        ("ecoroof with 3 1-meter turbines on grid with inverter plus solar panels", 17985.0),
-        ("ecoroof with 3 1-meter turbines off grid with chargers plus solar panels", 13725.0),
+        ("ecoroof with 3 1-meter turbines on grid with inverter", 18840.0),
+        ("ecoroof with 3 1-meter turbines off grid with chargers", 13971.0),
+        ("ecoroof with 3 1-meter turbines on grid with inverter plus solar panels", 20554.0),
+        ("ecoroof with 3 1-meter turbines off grid with chargers plus solar panels", 15686.0),
     ],
     "ecoroof_flat_5": [
-        ("ecoroof with 5 1-meter turbines on grid with inverter", 20985.0),
-        ("ecoroof with 5 1-meter turbines off grid with chargers", 17985.0),
-        ("ecoroof with 5 1-meter turbines on grid with inverter plus solar panels", 22485.0),
-        ("ecoroof with 5 1-meter turbines off grid with chargers plus solar panels", 19485.0),
+        ("ecoroof with 5 1-meter turbines on grid with inverter", 23983.0),
+        ("ecoroof with 5 1-meter turbines off grid with chargers", 20554.0),
+        ("ecoroof with 5 1-meter turbines on grid with inverter plus solar panels", 25697.0),
+        ("ecoroof with 5 1-meter turbines off grid with chargers plus solar panels", 22269.0),
     ],
     "ecoroof_slanted": [],
     "survival_unit": [],

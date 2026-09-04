@@ -293,8 +293,7 @@ def generar_pdf_lista_precios(logo_path=None):
         "comercial. El flete asume pedir lo suficiente para llenar 1 pallet o 1 contenedor "
         "completo (lo que salga más barato por unidad) -- tarifas de mercado ($2,000 unidad / "
         "$3,500 pallet / $10,000 contenedor de 40'), NO una cotización de un forwarder real. "
-        "Usar como orden de magnitud para el cliente, confirmar antes de cotizar en firme "
-        "(ver Hallazgo 50 en avance-de-proyecto.md).",
+        "Usar como orden de magnitud para el cliente, confirmar antes de cotizar en firme.",
         estilos["cuerpo"],
     ))
     story.append(Spacer(1, 8))
