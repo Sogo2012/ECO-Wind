@@ -3845,6 +3845,56 @@ se pierden datos. `py_compile` limpio, 50/50 pruebas pasando.
 
 ---
 
+### Hallazgo 60 — Segundo bug real detrás del informe ejecutivo: sin memoria suficiente en Cloud Run, generar el PDF hace que la app entera "brinque"/se reinicie
+
+Después de Hallazgo 59 (el botón que evita que el informe ejecutivo tumbe la app en
+cualquier pestaña), Pablo probó en la app real desplegada (`wind.ecoconsultor.com`)
+y mandó capturas: el botón "Generar informe ejecutivo (PDF)" ya no rompe el resto
+de la app (confirmado -- el fix de Hallazgo 59 sí llegó a producción, y el tipo de
+cambio BCCR real se veía ₡453.79 antes del click, prueba de que el secreto BCCR
+también está andando), pero al apretarlo la sesión entera "brinca" -- la pestaña
+"Especificación Técnica" vuelve a pedir recalcular desde cero, y el tipo de cambio
+en el sidebar cae al valor de emergencia (₡515.00), como si el contenedor se
+hubiera reiniciado de cero (todo el `session_state`, que vive en memoria, se pierde
+con un contenedor nuevo).
+
+**Diagnóstico (no se pudo confirmar 100% sin acceso a los logs de Cloud Run desde
+este entorno -- no hay `gcloud` disponible acá):** el patrón encaja con que el
+contenedor se quede sin memoria (OOM) justo al generar el informe. Generar el PDF
+lanza un Chromium real (kaleido necesita un navegador de verdad para exportar cada
+gráfico Plotly a PNG) -- ese Chromium se suma a Streamlit + pandas + numpy + plotly
++ folium que ya están cargados en memoria para el resto de la app. Cloud Run
+estaba configurado con 2Gi (subido de 1Gi en Hallazgo 45 por un problema DISTINTO,
+de arranque lento) -- probablemente no alcanza para sumar un Chromium completo
+encima de todo lo demás. Cuando Cloud Run mata un contenedor por memoria, el
+usuario ve exactamente esto: la conexión se corta, el navegador se reconecta a una
+instancia nueva, y todo lo que vivía en memoria (incluido el session_state y el
+tipo de cambio BCCR cacheado) se pierde -- coincide exacto con lo que reportó
+Pablo.
+
+**Corregido (a falta de poder confirmar con logs reales):** se sube la memoria de
+Cloud Run de 2Gi a 4Gi en `cloudbuild.yaml`. No se tocó la cantidad de CPU (sigue
+en 1, con `--cpu-boost` sólo para el arranque) -- 4Gi con 1 CPU es una combinación
+dentro de los límites normales de Cloud Run, no hace falta subir CPU también.
+
+**Pendiente -- esto es la hipótesis más probable, no una certeza confirmada:**
+- Pablo (o quien tenga acceso a la consola de Google Cloud) debería revisar los
+  logs de Cloud Run del servicio `eco-wind` justo en el momento del "brinco" -- si
+  el log muestra algo como "Memory limit exceeded" o el contenedor terminando con
+  código 137, confirma el diagnóstico. Si el log muestra otra causa, este fix no
+  la va a resolver y hay que investigar de nuevo con esa información real (no
+  adivinar una segunda vez).
+- Si 4Gi tampoco alcanza, la siguiente palanca es bajar la resolución de los
+  gráficos exportados al PDF (`fig_a_png()` en `app.py`, hoy pide 1000x560px con
+  escala 2 -- efectivamente 2000x1120px por imagen, 5 imágenes por informe) --
+  reduce la carga de renderizado de Chromium a costa de calidad de imagen en el
+  PDF impreso.
+- Este cambio en `cloudbuild.yaml` no toma efecto solo -- hace falta correr
+  `gcloud builds submit --config=cloudbuild.yaml` para que Cloud Run reciba la
+  nueva configuración de memoria.
+
+---
+
 ## 6. Pendientes activos / bloqueos
 
 - [x] ~~Conseguir A/k reales del Global Wind Atlas~~ — resuelto, y con datos más ricos de lo
