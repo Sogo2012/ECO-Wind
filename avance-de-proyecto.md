@@ -3557,6 +3557,85 @@ regresión.
 
 ---
 
+### Hallazgo 56 — "Dejar de adivinar" el costo de equipos: precio de venta real de Flower Turbines por modelo, cargado en la app en vez de estimado
+
+Pedido explícito de Pablo, en pausa del trabajo de tarifas eléctricas (Hallazgo 54/
+55, que sigue exactamente igual): dejar de estimar el costo de fábrica de las
+turbinas con fórmulas (costo + margen + flete, la cadena de `turbine_specs.py` /
+`price_calculator.py` ya en desuso desde Hallazgo 53) y en su lugar cargar el
+precio de venta EXWORKS real de cada modelo, tomado de un catálogo oficial de
+Flower Turbines que Pablo compartió como hoja de cálculo.
+
+**Qué se hizo:**
+- Nuevo módulo `engine/precios_flower_turbines.py`: diccionario `PRECIOS_EXWORKS_USD`
+  con el precio de venta final (el que Pablo indicó usar) por cada uno de los 12
+  modelos de turbina que ya maneja la app, y función `get_precio_exworks_usd(modelo)`.
+- `app.py`, pestaña "Equipos y configuración": cada clúster ya configurado (modelo +
+  cantidad N) muestra su precio unitario y el total del clúster; debajo del botón
+  "Agregar clúster" se muestra el precio total del proyecto (suma de todos los
+  clústeres) con una aclaración explícita de qué NO incluye (ver "Pendiente" abajo).
+- **Cómo se asoció cada modelo con su fila del catálogo:** no por parecido de nombre,
+  sino comparando datos físicos reales de `turbine_specs.py` contra la descripción
+  de cada artículo del catálogo -- `altura_pala_m` para la familia Tulip (ej.
+  `large_tulip` con `altura_pala_m=5.0` = la fila del catálogo de la tulipán de 5
+  metros) y `potencia_nominal_w` para la familia AL13 (`al13_2m`/`al13_6m`/`al13_8m`
+  con 1000W/5000W/10000W = las filas "1 kilowatt"/"5 kilowatts"/"10 kilowatts" del
+  catálogo). Dos modelos (`ecoroof_slanted`, `survival_unit`) no tienen fila
+  correspondiente en el catálogo -- quedan en `None` ("precio no disponible
+  todavía") hasta que Pablo confirme una cifra real para ellos.
+
+**Confidencialidad -- restricción explícita de Pablo, ya aplicada:** el catálogo
+original trae, además del precio de venta, columnas de costo de fábrica y de
+distintos márgenes de utilidad que Pablo marcó como confidenciales. La regla
+seguida es: **del catálogo sólo se toma y se guarda el precio de venta final por
+modelo** -- ni el código (`precios_flower_turbines.py` sólo tiene esos precios
+finales, nada de costos ni márgenes) ni este documento exponen esas otras columnas.
+Un archivo de verificación intermedio que sí incluía dos columnas de costo (usadas
+sólo para confirmar que el parseo del catálogo no tenía errores de formato, ver
+"Bug real" abajo) se compartió por error con Pablo y ya se identificó, se le avisó
+y se borró del entorno de trabajo -- no llegó a ningún archivo del repositorio.
+
+**Bug real encontrado y corregido antes de tomar cualquier número:** la hoja de
+Pablo usa el PUNTO como separador de miles (formato latino), no la coma -- un
+script de carga que Pablo ya tenía (hecho con otra IA) asumía formato con coma de
+miles, lo que habría dejado todos los precios ~1000 veces más chicos de lo real.
+Se corrigió antes de usar ningún dato, y se verificó fila por fila contra la
+relación matemática interna del catálogo entre el precio final y el costo total
+del plan de pago (exacta en las 61 filas, con redondeo de \$1 en un solo caso) --
+confirma que no quedó ningún error de parseo.
+
+**Verificado:** `py_compile` limpio en `app.py` y en el nuevo módulo. Bug real de
+LaTeX encontrado y corregido en el nuevo caption de precio por clúster (mismo
+patrón del Hallazgo 48: dos símbolos "\$" en el mismo `st.caption()` se
+interpretaban como delimitadores de fórmula -- se escaparon como "\\\$"). Probado
+en vivo con Playwright: con un clúster de 3× Medium Tulip configurado, la pestaña
+muestra "Precio: \$17,925 c/u -- Total del clúster (3x): \$53,775" y
+"Precio total del proyecto (equipos, EXWORKS): \$53,775" como texto plano, sin
+corrupción de fórmula.
+
+**Pendiente, no resuelto en este hallazgo (decisión de Pablo, no adivinada):**
+- **Posible doble conteo del inversor.** Cada precio del catálogo es "turbina +
+  inversor/cargador" ya incluido (la variante "on grid with inverter" del
+  catálogo). El resto de la app (`dimensionador_sistema_eolico.py`) selecciona y
+  cobra un inversor Sol-Ark POR SEPARADO según la potencia total del arreglo -- si
+  se usa este precio como costo de la turbina Y la app además suma el Sol-Ark
+  aparte, el inversor se estaría cobrando dos veces. No se tocó esa lógica en este
+  hallazgo porque falta que Pablo decida entre desactivar el costeo separado del
+  Sol-Ark para estos casos, o aceptar el posible doble conteo por ahora.
+- **El total no refleja el descuento real de un bouquet.** El precio de cada
+  modelo es de UNIDAD SIMPLE; la app lo multiplica por N. En el catálogo, un
+  bouquet real de varias turbinas del mismo tipo con un solo inversor compartido
+  sale con descuento de fábrica frente a unidad×N -- así que el total que muestra
+  la app para clústeres grandes puede quedar un poco por encima del precio real de
+  un pedido consolidado. Se avisa explícitamente en la app, pero no se corrigió.
+- `ecoroof_slanted` y `survival_unit` siguen sin precio real cargado (no hay fila
+  correspondiente en el catálogo que Pablo compartió).
+- Este precio de equipos es EXWORKS (precio de fábrica) -- no incluye flete,
+  importación ni instalación, que ECO Consultor cotiza aparte y que este hallazgo
+  no cubre.
+
+---
+
 ## 6. Pendientes activos / bloqueos
 
 - [x] ~~Conseguir A/k reales del Global Wind Atlas~~ — resuelto, y con datos más ricos de lo

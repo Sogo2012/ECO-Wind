@@ -71,6 +71,7 @@ from engine.epw_real import (
 )
 from engine.financial_engine_eolico import FinancialEngineEolico
 from engine.tarifas_electricas_cr import calcular_ahorro_tarifa_horaria_usd, calcular_ahorro_tarifa_comercial_usd
+from engine.precios_flower_turbines import get_precio_exworks_usd
 from engine.dimensionador_sistema_eolico import dimensionar_sistema_eolico_completo, VOLTAJE_TURBINAS_V
 from engine.solark_specs import get_solark_df
 from engine.eg4_specs import get_eg4_df
@@ -731,6 +732,17 @@ with tab_config:
                 st.session_state.clusters.pop(i)
                 st.rerun()
 
+            _precio_unitario = get_precio_exworks_usd(c["modelo"])
+            if _precio_unitario is None:
+                st.caption("Precio: no disponible todavía para este modelo.")
+            else:
+                # Dos "$" en el mismo st.caption() arman un par que Streamlit interpreta
+                # como LaTeX ($...$) -- se escapan con "\$" (mismo bug real de Hallazgo 48).
+                st.caption(
+                    f"Precio: \\${_precio_unitario:,.0f} c/u -- "
+                    f"Total del clúster ({int(c['N'])}x): \\${_precio_unitario * c['N']:,.0f}"
+                )
+
             _specs = SPECS_TURBINAS.get(c["modelo"])
             _ruta_img = RUTA_IMAGEN.get(c["modelo"])
             with st.expander(f"Ficha técnica -- {NOMBRES_MODELO.get(c['modelo'], c['modelo'])}"):
@@ -762,6 +774,23 @@ with tab_config:
     if st.button("+ Agregar clúster"):
         st.session_state.clusters.append({"modelo": "medium_tulip", "N": 1, "altura_buje": 3.0})
         st.rerun()
+
+    st.divider()
+    _precio_total_proyecto = sum(
+        (get_precio_exworks_usd(c["modelo"]) or 0) * c["N"] for c in st.session_state.clusters
+    )
+    _algun_modelo_sin_precio = any(
+        get_precio_exworks_usd(c["modelo"]) is None for c in st.session_state.clusters
+    )
+    st.metric("Precio total del proyecto (equipos, EXWORKS)", f"${_precio_total_proyecto:,.0f}")
+    st.caption(
+        "Precio de venta de fábrica de Flower Turbines (turbina + inversor/cargador incluido, "
+        "catálogo real -- Hallazgo 56). NO incluye flete, importación ni instalación -- eso lo "
+        "agrega ECO Consultor aparte. Es el precio de UNIDAD SIMPLE × cantidad -- un bouquet "
+        "grande real de fábrica suele salir con descuento, así que este total puede quedar un "
+        "poco por encima del precio real de un pedido consolidado."
+        + (" Al menos un modelo elegido todavía no tiene precio real cargado." if _algun_modelo_sin_precio else "")
+    )
 
     st.divider()
 
