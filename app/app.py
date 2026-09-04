@@ -74,7 +74,7 @@ from engine.financial_engine_eolico import FinancialEngineEolico
 from engine.tarifas_electricas_cr import calcular_ahorro_tarifa_horaria_usd, calcular_ahorro_tarifa_comercial_usd
 from engine.precios_flower_turbines import get_articulos_disponibles, get_precio_exworks_usd
 from engine.dimensionador_sistema_eolico import VOLTAJE_TURBINAS_V
-from engine.pdf_reporte import generar_pdf_especificacion
+from engine.pdf_reporte import generar_pdf_informe_ejecutivo
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -451,6 +451,17 @@ def crear_perfil_viento_plotly(velocidad_10m, z0=Z0_DEFAULT, z0_met=Z0_MET_DEFAU
     return fig
 
 
+def fig_a_png(fig, ancho_px=1000, alto_px=560, escala=2):
+    """Exporta una figura Plotly a bytes PNG (vía kaleido) para embeberla en el PDF
+    ejecutivo -- fondo blanco explícito (los gráficos en pantalla usan fondo
+    transparente para calzar con el tema de Streamlit; en el PDF necesitan fondo
+    sólido). Clona el layout antes de tocarlo para no alterar la figura que ya se
+    mostró en pantalla con `st.plotly_chart`."""
+    fig_export = go.Figure(fig)
+    fig_export.update_layout(paper_bgcolor='white', plot_bgcolor='white')
+    return fig_export.to_image(format="png", width=ancho_px, height=alto_px, scale=escala)
+
+
 def crear_mapa_estaciones(lat_sitio, lon_sitio, df_estaciones=None):
     """Crea un mapa interactivo Folium con el sitio y estaciones disponibles."""
     m = folium.Map(
@@ -812,6 +823,11 @@ with tab_resultados:
         "payback) está en la pestaña \"Análisis Financiero\"."
     )
 
+    # Se resetea acá y sólo se sobreescribe en el camino exitoso de abajo -- así el
+    # informe ejecutivo (pestaña "Especificación Técnica") nunca arrastra un resultado
+    # de una configuración anterior si algo en el medio dejó de ser válido.
+    st.session_state["ultimo_resultado_produccion"] = None
+
     if st.session_state.get("calculo_listo"):
         resultado_clima = st.session_state.sitio_activo
         error = None if resultado_clima is None else resultado_clima.get("error")
@@ -905,6 +921,15 @@ with tab_resultados:
                 "Cálculo validado con datos de campo, con corrección por densidad de aire según "
                 "elevación. Fuente climática: EPW real de la estación elegida o subida por el usuario."
             )
+
+            # Mismos datos que se acaban de calcular y mostrar arriba, disponibles para
+            # el informe ejecutivo en "Especificación Técnica" sin volver a simular nada.
+            st.session_state["ultimo_resultado_produccion"] = {
+                "resultados": resultados, "serie_total_w": serie_total_w,
+                "kwh_total": kwh_total, "n_total": n_total,
+                "kwh_mensual_total": kwh_mensual_total,
+                "correccion_densidad_pct": (1 - resultados[0]["factor_correccion_densidad"]) * 100,
+            }
     else:
         st.info("Configurá el proyecto en la pestaña \"Equipos y configuración\" y presioná "
                  "**Calcular producción del proyecto**.")
@@ -917,6 +942,11 @@ with tab_financiero:
         "Viabilidad económica del proyecto (CAPEX, Payback, ROI, NPV) -- usa las turbinas ya "
         "configuradas en \"Equipos y configuración\" y la producción ya calculada en \"Resultados\"."
     )
+
+    # Igual que en "Resultados": se resetea acá y sólo se sobreescribe si el cálculo
+    # financiero termina en un resultado válido, para que el informe ejecutivo nunca
+    # muestre un CAPEX/Payback de una configuración vieja.
+    st.session_state["ultimo_resultado_financiero"] = None
 
     modulo_financiero_activo = st.toggle(
         "Activar módulo financiero (viabilidad económica)",
@@ -1295,6 +1325,18 @@ with tab_financiero:
                 )
                 c4.metric("Viabilidad", viabilidad_economica)
 
+                # Mismo resultado que se acaba de mostrar arriba, disponible para el
+                # informe ejecutivo en "Especificación Técnica" sin recalcular nada.
+                st.session_state["ultimo_resultado_financiero"] = {
+                    "capex": fin["capex"], "payback_years": fin["payback_years"],
+                    "roi_percentage": fin["roi_percentage"], "npv_usd": fin["npv_usd"],
+                    "ahorro_anual_USD": fin["ahorro_anual_USD"],
+                    "mantenimiento_anual_USD": fin["mantenimiento_anual_USD"],
+                    "viable": viabilidad_economica == "VIABLE",
+                    "modo_tarifa": modo_tarifa, "vida_util_anos": int(vida_util_anos),
+                    "tasa_descuento_pct": tasa_descuento_pct,
+                }
+
                 if fin["npv_usd"] is not None:
                     st.caption(
                         f"NPV a {int(vida_util_anos)} años, tasa de descuento {tasa_descuento_pct:.1f}%: "
@@ -1347,17 +1389,15 @@ with tab_especificacion:
             st.error("Elegí primero una estación (o subí un EPW) en la pestaña \"Selección de clima\".")
         elif error:
             st.error(error)
+        elif not st.session_state.get("ultimo_resultado_produccion"):
+            # Misma condición de arriba (calculo_listo + sitio válido) ya corrió en
+            # "Resultados" en este mismo rerun -- si igual no hay nada guardado, algo
+            # puntual falló ahí (revisar esa pestaña) en vez de repetir el cálculo acá.
+            st.error("No se pudo leer el resultado de producción -- revisá la pestaña \"Resultados\".")
         else:
-            df_clima = resultado_clima["df_clima"]
+            _prod = st.session_state["ultimo_resultado_produccion"]
             elevacion_m = resultado_clima["elevacion_m"]
-            z0 = st.session_state.z0_avanzado
-            metodo_bouquet = st.session_state.metodo_bouquet_radio
-
-            kwh_anual_total = sum(
-                simular(df_clima, altura_buje=c["altura_buje"], modelo=c["modelo"], N=int(c["N"]),
-                        elevacion_m=elevacion_m, z0=z0, metodo_bouquet=metodo_bouquet)["kwh_anual"]
-                for c in st.session_state.clusters
-            )
+            kwh_anual_total = _prod["kwh_total"]
             turbinas_seleccionadas = [
                 c["modelo"] for c in st.session_state.clusters for _ in range(int(c["N"]))
             ]
@@ -1366,13 +1406,14 @@ with tab_especificacion:
                 for c in st.session_state.clusters
             )
 
-            # Va acumulando los mismos datos que se muestran en pantalla para poder
-            # generar el PDF al final sin tener que volver a calcular nada (Hallazgo 49).
+            # Va acumulando los mismos datos que se muestran en pantalla (más los gráficos,
+            # exportados a PNG) para armar el informe ejecutivo completo al final.
             _datos_pdf = {
                 "sitio_nombre": st.session_state.get("sitio_nombre_activo") or "--",
                 "potencia_pico_kw": potencia_pico_W / 1000,
                 "energia_anual_kwh": kwh_anual_total,
                 "elevacion_m": elevacion_m,
+                "n_turbinas_total": len(turbinas_seleccionadas),
                 "voltaje_bus_v": VOLTAJE_TURBINAS_V,
                 "turbinas": [],
             }
@@ -1424,7 +1465,7 @@ with tab_especificacion:
                             hide_index=True, use_container_width=True,
                         )
                         _datos_pdf["turbinas"].append({
-                            "nombre": _specs["nombre"], "cantidad": _cantidad,
+                            "nombre": _specs["nombre"], "cantidad": _cantidad, "clave": _clave,
                             "numero_parte": _specs["numero_parte"], "filas": _filas_turbina,
                         })
 
@@ -1434,11 +1475,73 @@ with tab_especificacion:
             )
 
             st.divider()
-            _pdf_bytes = generar_pdf_especificacion(_datos_pdf, logo_path=LOGO_ECO if os.path.exists(LOGO_ECO) else None)
+            st.markdown("### Informe ejecutivo")
+            st.caption(
+                "Resumen de las 6 pestañas -- clima, equipos, producción y viabilidad "
+                "financiera (si ya la completaste) -- en un solo PDF listo para imprimir o "
+                "enviar al cliente."
+            )
+
+            with st.spinner("Armando el informe ejecutivo..."):
+                # Contexto climático: mismos gráficos que la pestaña "Contexto climático",
+                # generados de nuevo acá (no reutiliza el objeto ya mostrado en pantalla)
+                # para poder exportarlos a PNG sin tocar lo que el usuario está viendo.
+                _media_confirmada = resultado_clima["media"]
+                _z0_actual = st.session_state.get("z0_avanzado", Z0_DEFAULT)
+                _altura_explorar = max(st.session_state.get("altura_explorar_slider", 10.0), 1.0)
+
+                if "meta" in resultado_clima:
+                    _meta = resultado_clima["meta"]
+                    _fuente_texto = (
+                        f"Estación real: {_meta['estacion']} ({_meta['pais']}, WMO {_meta['wmo']}) -- "
+                        f"lat={_meta['lat']:.4f}, lon={_meta['lon']:.4f}, elevación={_meta['elevacion_m']:.0f}m. "
+                        f"Media anual real: {_media_confirmada:.2f} m/s."
+                    )
+                else:
+                    _fuente_texto = f"Media anual real del viento en el sitio: {_media_confirmada:.2f} m/s."
+
+                _fig_heatmap_pdf, _ = crear_heatmap_plotly(
+                    resultado_clima["hm_json"], media_anual=_media_confirmada,
+                    altura_m=_altura_explorar, z0=_z0_actual,
+                )
+
+                _datos_pdf["clima"] = {
+                    "fuente_texto": _fuente_texto,
+                    "img_rosa": fig_a_png(crear_rosa_vientos_plotly(resultado_clima["rosa_detallada"])),
+                    "img_heatmap": fig_a_png(_fig_heatmap_pdf) if _fig_heatmap_pdf else None,
+                    "img_perfil": fig_a_png(crear_perfil_viento_plotly(
+                        _media_confirmada, z0=_z0_actual,
+                        altura_max=max(_altura_explorar * 1.15, 10.0), altura_marcada=_altura_explorar,
+                    )),
+                }
+
+                _datos_pdf["produccion"] = {
+                    "filas_tabla": [
+                        (NOMBRES_MODELO.get(r["modelo"], r["modelo"]), r["N"], r["altura_buje"],
+                         f"{r['kwh_anual']:,.0f}", f"{r['v_hub_medio']:.2f}",
+                         f"{r['pct_horas_bajo_cutin']:.1f}")
+                        for r in _prod["resultados"]
+                    ],
+                    "correccion_densidad_pct": _prod["correccion_densidad_pct"],
+                    "img_mensual": fig_a_png(crear_produccion_mensual_plotly(_prod["kwh_mensual_total"])),
+                    "img_duracion": fig_a_png(crear_curva_duracion_plotly(_prod["serie_total_w"])),
+                }
+
+                _datos_pdf["financiero"] = st.session_state.get("ultimo_resultado_financiero")
+
+                _pdf_bytes = generar_pdf_informe_ejecutivo(
+                    _datos_pdf, logo_path=LOGO_ECO if os.path.exists(LOGO_ECO) else None)
+
+            if not _datos_pdf["financiero"]:
+                st.caption(
+                    "El informe no va a incluir CAPEX/Payback/ROI/NPV todavía -- completá el "
+                    "precio de venta y la tarifa eléctrica en \"Análisis Financiero\" para sumarlos."
+                )
+
             st.download_button(
-                "Descargar ficha técnica en PDF",
+                "📄 Descargar informe ejecutivo (PDF)",
                 data=_pdf_bytes,
-                file_name=f"ECO-Wind_especificacion_tecnica_{date.today().isoformat()}.pdf",
+                file_name=f"ECO-Wind_informe_ejecutivo_{date.today().isoformat()}.pdf",
                 mime="application/pdf",
                 type="primary",
             )

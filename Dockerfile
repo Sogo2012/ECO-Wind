@@ -2,11 +2,17 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Instalar dependencias del sistema (incluyendo glibc para ADC)
+# Instalar dependencias del sistema (incluyendo glibc para ADC).
+# chromium: kaleido>=1.0 (exporta los gráficos Plotly a PNG para el informe ejecutivo
+# en PDF) necesita un Chrome/Chromium instalado -- ya no trae uno embebido en el
+# paquete pip como las versiones <1.0. En Debian (esta imagen) el paquete "chromium"
+# instala el binario nativo en /usr/bin/chromium, que es exactamente donde kaleido lo
+# busca primero -- no hace falta configurar ninguna variable de entorno.
 RUN apt-get update && apt-get install -y \
     build-essential \
     curl \
     ca-certificates \
+    chromium \
     && rm -rf /var/lib/apt/lists/*
 
 # Copiar requirements
