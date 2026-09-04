@@ -12,6 +12,7 @@ Verifica:
 import pytest
 from engine.price_calculator import (
     calcular_precio_final,
+    convertir_a_colones,
     desglose_precio,
     calcular_bom_turbinas,
     calcular_bom_sistema_completo,
@@ -20,6 +21,8 @@ from engine.price_calculator import (
     IMPORT_COST_USD,
     MARGIN_PCT,
 )
+
+TIPO_CAMBIO_PRUEBA = 520.00  # valor fijo de ejemplo, no viene del BCCR real
 
 
 class TestCalcularPrecioFinal:
@@ -60,6 +63,17 @@ class TestCalcularPrecioFinal:
             calcular_precio_final(1000, margen_pct=1.5)
 
 
+class TestConvertirAColones:
+    """Pruebas para convertir_a_colones"""
+
+    def test_conversion_basica(self):
+        """USD × tipo_cambio = CRC"""
+        assert convertir_a_colones(100, 520.00) == pytest.approx(52000.00, abs=0.01)
+
+    def test_redondea_a_dos_decimales(self):
+        assert convertir_a_colones(33.333, 500.00) == round(33.333 * 500.00, 2)
+
+
 class TestDesglosePrecio:
     """Pruebas para desglose_precio"""
 
@@ -81,6 +95,23 @@ class TestDesglosePrecio:
         assert resultado["subtotal_usd"] == 1000.0
         assert resultado["margen_usd"] == pytest.approx(300, abs=0.01)
         assert resultado["precio_final_usd"] == pytest.approx(1300, abs=0.01)
+
+    def test_sin_tipo_cambio_no_agrega_llaves_crc(self):
+        """Comportamiento por default (sin tipo_cambio): igual que antes de este cambio"""
+        resultado = desglose_precio(1000, agregar_importacion=True, margen_pct=0.30)
+
+        assert not any(k.endswith("_crc") for k in resultado)
+
+    def test_con_tipo_cambio_agrega_los_mismos_montos_en_colones(self):
+        resultado = desglose_precio(
+            1000, agregar_importacion=True, margen_pct=0.30, tipo_cambio=TIPO_CAMBIO_PRUEBA
+        )
+
+        assert resultado["tipo_cambio_crc_por_usd"] == TIPO_CAMBIO_PRUEBA
+        assert resultado["precio_final_crc"] == pytest.approx(
+            resultado["precio_final_usd"] * TIPO_CAMBIO_PRUEBA, abs=0.01
+        )
+        assert resultado["costo_base_crc"] == pytest.approx(1000 * TIPO_CAMBIO_PRUEBA, abs=0.01)
 
 
 class TestCalcularBomTurbinas:
@@ -114,6 +145,27 @@ class TestCalcularBomTurbinas:
         assert detalle["cantidad"] == 1
         assert detalle["costo_unitario_base_usd"] == 5000.0
 
+    def test_bom_turbinas_sin_tipo_cambio_no_agrega_crc(self):
+        turbinas = [{"modelo": "FT 1.15M", "cantidad": 1, "costo_base_usd": 5000}]
+        resultado = calcular_bom_turbinas(turbinas)
+
+        assert "precio_final_total_crc" not in resultado
+        assert not any(k.endswith("_crc") for k in resultado["detalles"][0])
+
+    def test_bom_turbinas_con_tipo_cambio(self):
+        turbinas = [{"modelo": "FT 1.15M", "cantidad": 2, "costo_base_usd": 5000}]
+
+        resultado = calcular_bom_turbinas(turbinas, tipo_cambio=TIPO_CAMBIO_PRUEBA)
+
+        detalle = resultado["detalles"][0]
+        assert detalle["subtotal_final_crc"] == pytest.approx(
+            detalle["subtotal_final_usd"] * TIPO_CAMBIO_PRUEBA, abs=0.01
+        )
+        assert resultado["precio_final_total_crc"] == pytest.approx(
+            resultado["precio_final_total_usd"] * TIPO_CAMBIO_PRUEBA, abs=0.01
+        )
+        assert resultado["desglose"]["tipo_cambio_crc_por_usd"] == TIPO_CAMBIO_PRUEBA
+
 
 class TestCalcularBomSistemaCompleto:
     """Pruebas para calcular_bom_sistema_completo"""
@@ -146,6 +198,30 @@ class TestCalcularBomSistemaCompleto:
         # Costo base total: 20000 + 5000 + 0 = 25000
         assert resultado["costo_base_total_usd"] == 25000.0
         assert resultado["detalles_equipos"]["bess"]["costo_base_total_usd"] == 0.0
+
+    def test_bom_sistema_sin_tipo_cambio_no_agrega_crc(self):
+        resultado = calcular_bom_sistema_completo(
+            turbinas_base_usd=20000, cantidad_turbinas=4,
+            inversor_base_usd=5000, bess_base_usd=8000,
+        )
+
+        assert "precio_final_total_crc" not in resultado
+        assert not any(k.endswith("_crc") for k in resultado["detalles_equipos"]["turbinas"])
+
+    def test_bom_sistema_con_tipo_cambio(self):
+        resultado = calcular_bom_sistema_completo(
+            turbinas_base_usd=20000, cantidad_turbinas=4,
+            inversor_base_usd=5000, bess_base_usd=8000,
+            tipo_cambio=TIPO_CAMBIO_PRUEBA,
+        )
+
+        assert resultado["precio_final_total_crc"] == pytest.approx(
+            resultado["precio_final_total_usd"] * TIPO_CAMBIO_PRUEBA, abs=0.01
+        )
+        turbinas = resultado["detalles_equipos"]["turbinas"]
+        assert turbinas["precio_final_total_crc"] == pytest.approx(
+            turbinas["precio_final_total_usd"] * TIPO_CAMBIO_PRUEBA, abs=0.01
+        )
 
 
 class TestCalcularPrecioKwhInstalado:

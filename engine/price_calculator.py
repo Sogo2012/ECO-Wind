@@ -22,6 +22,18 @@ IMPORT_COST_USD = 2500.0  # Costo fijo de importación (USD)
 MARGIN_PCT = 0.30  # Margen comercial (30%)
 
 
+def convertir_a_colones(monto_usd: float, tipo_cambio: float) -> float:
+    """
+    Convierte un monto en USD a colones (CRC).
+
+    tipo_cambio: colones por dólar -- el tipo de cambio de "venta" del BCCR
+    (ej. lo que devuelve engine.tipo_cambio_bccr.obtener_tipo_cambio_bccr()).
+    Es el que corresponde para pasar un costo/precio en USD a lo que se le
+    cobraría en colones a un cliente en Costa Rica.
+    """
+    return round(monto_usd * tipo_cambio, 2)
+
+
 def calcular_precio_final(costo_base_usd: float,
                          agregar_importacion: bool = True,
                          margen_pct: float = MARGIN_PCT) -> float:
@@ -56,7 +68,8 @@ def calcular_precio_final(costo_base_usd: float,
 
 def desglose_precio(costo_base_usd: float,
                    agregar_importacion: bool = True,
-                   margen_pct: float = MARGIN_PCT) -> Dict[str, float]:
+                   margen_pct: float = MARGIN_PCT,
+                   tipo_cambio: Optional[float] = None) -> Dict[str, float]:
     """
     Retorna desglose completo de precio (base, importación, margen, total).
 
@@ -64,17 +77,24 @@ def desglose_precio(costo_base_usd: float,
         costo_base_usd      : Costo base del equipo (USD)
         agregar_importacion : Si True, suma IMPORT_COST_USD
         margen_pct          : Margen comercial
+        tipo_cambio         : Colones por dólar (ej. de
+                              engine.tipo_cambio_bccr.obtener_tipo_cambio_bccr()).
+                              Si se da, el resultado agrega las mismas cifras
+                              también en colones (sufijo _crc). Si se omite
+                              (default None), el resultado es igual que antes
+                              -- no rompe a quien ya llama esta función.
 
     Returns:
         dict con: costo_base, costo_importacion, subtotal,
                   margen_usd, precio_final, margen_pct_aplicado
+                  (y sus equivalentes _crc si se pasó tipo_cambio)
     """
     costo_import = IMPORT_COST_USD if agregar_importacion else 0.0
     subtotal = costo_base_usd + costo_import
     margen_usd = subtotal * margen_pct
     precio_final = subtotal + margen_usd
 
-    return {
+    resultado = {
         "costo_base_usd": round(costo_base_usd, 2),
         "costo_importacion_usd": round(costo_import, 2),
         "subtotal_usd": round(subtotal, 2),
@@ -83,14 +103,27 @@ def desglose_precio(costo_base_usd: float,
         "precio_final_usd": round(precio_final, 2),
     }
 
+    if tipo_cambio is not None:
+        resultado["tipo_cambio_crc_por_usd"] = tipo_cambio
+        resultado["costo_base_crc"] = convertir_a_colones(costo_base_usd, tipo_cambio)
+        resultado["costo_importacion_crc"] = convertir_a_colones(costo_import, tipo_cambio)
+        resultado["subtotal_crc"] = convertir_a_colones(subtotal, tipo_cambio)
+        resultado["margen_crc"] = convertir_a_colones(margen_usd, tipo_cambio)
+        resultado["precio_final_crc"] = convertir_a_colones(precio_final, tipo_cambio)
 
-def calcular_bom_turbinas(turbinas_list: List[Dict]) -> Dict:
+    return resultado
+
+
+def calcular_bom_turbinas(turbinas_list: List[Dict], tipo_cambio: Optional[float] = None) -> Dict:
     """
     Calcula precio total de BOM (Bill of Materials) de turbinas.
 
     Args:
         turbinas_list: Lista de dicts con estructura:
                       {"modelo": str, "cantidad": int, "costo_base_usd": float}
+        tipo_cambio  : Colones por dólar; si se da, agrega los mismos montos
+                      también en colones (sufijo _crc). Default None -- mismo
+                      resultado que antes.
 
     Returns:
         dict con desglose total y por turbina
@@ -106,29 +139,36 @@ def calcular_bom_turbinas(turbinas_list: List[Dict]) -> Dict:
         subtotal_base = costo_base * cantidad
         costo_base_total += subtotal_base
 
-        detalles.append({
+        precio_unitario_final = calcular_precio_final(costo_base)
+        subtotal_final = precio_unitario_final * cantidad
+
+        detalle = {
             "modelo": modelo,
             "cantidad": cantidad,
             "costo_unitario_base_usd": round(costo_base, 2),
             "subtotal_base_usd": round(subtotal_base, 2),
-            "precio_unitario_final_usd": round(
-                calcular_precio_final(costo_base), 2
-            ),
-            "subtotal_final_usd": round(
-                calcular_precio_final(costo_base) * cantidad, 2
-            ),
-        })
+            "precio_unitario_final_usd": round(precio_unitario_final, 2),
+            "subtotal_final_usd": round(subtotal_final, 2),
+        }
+        if tipo_cambio is not None:
+            detalle["precio_unitario_final_crc"] = convertir_a_colones(precio_unitario_final, tipo_cambio)
+            detalle["subtotal_final_crc"] = convertir_a_colones(subtotal_final, tipo_cambio)
+        detalles.append(detalle)
 
     # Precio final total
     precio_total = calcular_precio_final(costo_base_total)
 
-    return {
+    resultado = {
         "costo_base_total_usd": round(costo_base_total, 2),
         "detalles": detalles,
         "cantidad_turbinas_total": sum(t.get("cantidad", 1) for t in turbinas_list),
         "precio_final_total_usd": precio_total,
-        "desglose": desglose_precio(costo_base_total),
+        "desglose": desglose_precio(costo_base_total, tipo_cambio=tipo_cambio),
     }
+    if tipo_cambio is not None:
+        resultado["precio_final_total_crc"] = convertir_a_colones(precio_total, tipo_cambio)
+
+    return resultado
 
 
 def calcular_bom_sistema_completo(
@@ -136,6 +176,7 @@ def calcular_bom_sistema_completo(
     cantidad_turbinas: int,
     inversor_base_usd: float,
     bess_base_usd: float = 0.0,
+    tipo_cambio: Optional[float] = None,
 ) -> Dict:
     """
     Calcula precio total de sistema completo (turbinas + inversor + BESS).
@@ -145,6 +186,9 @@ def calcular_bom_sistema_completo(
         cantidad_turbinas   : Número de turbinas (para referencia)
         inversor_base_usd   : Costo base de inversor (USD)
         bess_base_usd       : Costo base de BESS (USD); default 0
+        tipo_cambio         : Colones por dólar; si se da, agrega los mismos
+                              montos también en colones (sufijo _crc). Default
+                              None -- mismo resultado que antes.
 
     Returns:
         dict con desglose de sistema completo
@@ -171,14 +215,20 @@ def calcular_bom_sistema_completo(
 
     # Turbinas (tratamiento especial: total ya incluido)
     turb_specs = equipos["turbinas"]
+    costo_turb_unitario = turb_specs["costo_base_total"] / turb_specs["cantidad"] if turb_specs["cantidad"] > 0 else 0
     costo_turb_total = turb_specs["costo_base_total"]
+    precio_turb_unitario_final = calcular_precio_final(costo_turb_unitario) if turb_specs["cantidad"] > 0 else 0
+    precio_turb_total_final = calcular_precio_final(costo_turb_total)
     detalles["turbinas"] = {
         "cantidad": turb_specs["cantidad"],
-        "costo_base_unitario_usd": round(costo_turb_total / turb_specs["cantidad"] if turb_specs["cantidad"] > 0 else 0, 2),
+        "costo_base_unitario_usd": round(costo_turb_unitario, 2),
         "costo_base_total_usd": round(costo_turb_total, 2),
-        "precio_final_unitario_usd": round(calcular_precio_final(costo_turb_total / turb_specs["cantidad"]) if turb_specs["cantidad"] > 0 else 0, 2),
-        "precio_final_total_usd": round(calcular_precio_final(costo_turb_total), 2),
+        "precio_final_unitario_usd": round(precio_turb_unitario_final, 2),
+        "precio_final_total_usd": round(precio_turb_total_final, 2),
     }
+    if tipo_cambio is not None:
+        detalles["turbinas"]["precio_final_unitario_crc"] = convertir_a_colones(precio_turb_unitario_final, tipo_cambio)
+        detalles["turbinas"]["precio_final_total_crc"] = convertir_a_colones(precio_turb_total_final, tipo_cambio)
     costo_total_base += costo_turb_total
 
     # Inversor y BESS (precios unitarios)
@@ -198,18 +248,25 @@ def calcular_bom_sistema_completo(
             "precio_final_unitario_usd": round(precio_final_unit, 2),
             "precio_final_total_usd": round(precio_final_total, 2),
         }
+        if tipo_cambio is not None:
+            detalles[equipo_tipo]["precio_final_unitario_crc"] = convertir_a_colones(precio_final_unit, tipo_cambio)
+            detalles[equipo_tipo]["precio_final_total_crc"] = convertir_a_colones(precio_final_total, tipo_cambio)
 
         costo_total_base += costo_base_total
 
     # Precio final total
     precio_final_total = calcular_precio_final(costo_total_base)
 
-    return {
+    resultado = {
         "detalles_equipos": detalles,
         "costo_base_total_usd": round(costo_total_base, 2),
         "precio_final_total_usd": round(precio_final_total, 2),
-        "desglose_general": desglose_precio(costo_total_base),
+        "desglose_general": desglose_precio(costo_total_base, tipo_cambio=tipo_cambio),
     }
+    if tipo_cambio is not None:
+        resultado["precio_final_total_crc"] = convertir_a_colones(precio_final_total, tipo_cambio)
+
+    return resultado
 
 
 def calcular_precio_kwh_instalado(
@@ -329,3 +386,17 @@ if __name__ == "__main__":
     print(f"  Total proyecto: ${total_proyecto:,.2f}")
     print(f"\nDiferencia: ${total_sku - total_proyecto:,.2f} -- por eso queda como parámetro, no")
     print("hardcodeado, hasta tener un dato real de flete/aduana consolidado.")
+
+    print("\n" + "=" * 90)
+    print("Ejemplo de conversión a colones (tipo_cambio es un valor de ejemplo acá,")
+    print("no viene del BCCR real -- en la app sí viene de obtener_tipo_cambio_bccr()):")
+    print("=" * 90)
+    TIPO_CAMBIO_EJEMPLO = 520.00
+    sistema = calcular_bom_sistema_completo(
+        turbinas_base_usd=20000, cantidad_turbinas=4,
+        inversor_base_usd=5000, bess_base_usd=8000,
+        tipo_cambio=TIPO_CAMBIO_EJEMPLO,
+    )
+    print(f"\nTipo de cambio usado: ₡{TIPO_CAMBIO_EJEMPLO:,.2f} por USD")
+    print(f"Precio final del sistema: ${sistema['precio_final_total_usd']:,.2f} "
+          f"= ₡{sistema['precio_final_total_crc']:,.2f}")
