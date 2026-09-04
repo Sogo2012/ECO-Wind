@@ -2653,6 +2653,1083 @@ EPW-only y todo el trabajo de UI (Hallazgo 36-39) llegó intacto a este punto.
 
 ---
 
+### Hallazgo 44 — Pablo consiguió los 5 datasheets reales de Sol-Ark: los 4 inversores residenciales quedan con specs verificadas, y una confirmación adicional del 18K
+
+Pablo subió 5 PDFs oficiales de Sol-Ark: PS-00034 Rev.3 (9K), SK150-0003 Rev.3 (12K
+estándar), PS-00060 v1.1 (12K-2P-LL), PS-00001 Rev.7 (15K), y PS-00044 Rev.2 (18K, para
+recontrastar el que ya se tenía). Se leyeron con `pymupdf` (los otros 4 se habían leído
+directo con el lector de PDF; el del 18K, de 17 páginas nominales pero 2 páginas de
+contenido real, necesitó extracción de texto porque `pdftoppm`/poppler-utils no está
+disponible en este sandbox — apt-get bloqueado por la política de red).
+
+**Se confirma que los datos que Hallazgo 43 había marcado `Specs_Verificadas=False`
+efectivamente estaban fabricados, con diferencias reales grandes** — no un simple
+redondeo:
+
+| Campo | 9K (fabricado → real) | 12K-LL (fab. → real) | 12K está. (fab. → real) | 15K (fab. → real) |
+|---|---|---|---|---|
+| Potencia FV máx. | 18,000 → **13,000W** | 24,000 → **19,200W** | 24,000 → **12,000W** | 30,000 → **23,400W** |
+| Corriente carga/descarga bat. | 200 → **185A** | 250 → **220A** | 250 → **185A** | 300 → **275A** |
+| Passthrough | 200 → 200A (ok) | 200 → **100A** | 200 → **63A** | 200 → 200A (ok) |
+| Dimensiones (mm) | 863x464x282 → **807x494x306** | 863x464x282 → **654x452x254** | 863x464x282 → **750x450x254** | 863x464x282 → **838x494x306** |
+| Peso | 55 → **61.2kg** | 58 → **29.5kg** | 58 → **35.4kg** | 60 → **61.2kg** |
+| Rango voltaje batería | 41-63V → **43-63V** | 41-63V → **43-59V** | 41-63V → **43-63V** | 41-63V → **43-59V** |
+
+Los 4 modelos son físicamente distintos entre sí en los datos reales (dimensiones,
+peso y corrientes todos diferentes) — confirma la sospecha de Hallazgo 43 de que el
+patrón de escalado lineal que tenían los datos fabricados no correspondía a 4
+productos reales medidos por separado. El **precio** de los 4 (único dato que
+Hallazgo 43 había aceptado) no cambió — sigue siendo el de la cotización real.
+
+**Otros hallazgos menores del lote de PDFs:**
+- El "12K" en realidad son DOS productos distintos con el mismo número: el "12K-2P-N"
+  estándar (SK150-0003) y el "12K-2P-LL" Limitless (PS-00060) — no una variante de
+  firmware del mismo hardware. Ya estaban separados como dos filas desde Hallazgo 43
+  (por precio), y ahora también tienen specs técnicas propias y distintas.
+- El "12K" estándar tiene una particularidad de nameplate real: su potencia nominal de
+  9,000W CA continua + 3,000W CC de baterías = 12,000W "total" -- no son 12,000W de
+  salida CA continua como en los otros modelos. Documentado en `Notas_Tecnicas`.
+  También es el único de los 4 que sólo admite batería de Litio (no Plomo-Ácido).
+- Se corrige de paso un error real que ya traía el 18K desde antes de este hallazgo
+  (no introducido por Hallazgo 43): `Stackable=False` contradecía al propio datasheet
+  PS-00044 Rev.2 ("Apilable en Paralelo: Yes; Max 12"). Corregido a `True`.
+
+**Verificado:** `py_compile` limpio, las 32 pruebas existentes siguen pasando,
+`dimensionador_sistema_eolico.py` y `sistema_eolico_completo.py` corren end-to-end y
+seleccionan correctamente el inversor más chico que alcanza según la nueva capacidad
+real de cada uno (ej.: un arreglo de 1,600W ahora resuelve con el 9K real, 8,880W de
+capacidad de batería, en vez de con datos fabricados).
+
+**Pendiente, no resuelto en este hallazgo:** la reconciliación del PDF del 18K arrastró
+una ambigüedad de extracción de texto (una tabla a 3 columnas hizo aparecer un valor
+suelto "275A" que no correspondía a ningún campo del 18K) — se resolvió por
+triangulación (5 valores del bloque de batería calzan exactamente con las 5 etiquetas
+en el orden correcto, dando 350A, que además coincide con el dato ya verificado antes)
+pero no se guardó el PDF renderizado a imagen para confirmarlo visualmente. Si en algún
+momento hay dudas sobre el 18K, vale la pena revisar esa página con un lector de PDF
+que sí renderice imagen (este sandbox no pudo, ver arriba).
+
+---
+
+### Hallazgo 45 — Deploy a Cloud Run falla con "STARTUP TCP probe... DEADLINE_EXCEEDED": imagen de Docker con ~105MB de datos que la app en producción no usa, más ajuste de memoria/CPU de arranque
+
+Pablo reportó (captura del Explorador de registros de Cloud Run) que la revisión
+`eco-wind-00006-2pq` fallaba al arrancar: *"Default STARTUP TCP probe failed... The
+instance was not started. Connection failed with status DEADLINE_EXCEEDED"* — el
+contenedor nunca llegó a escuchar en el puerto 8080 dentro del tiempo que Cloud Run le
+da al arranque. Esto pasó DESPUÉS del fix de la otra sesión (commit `747382b`, unificar
+ENTRYPOINT+CMD) — o sea, ese fix no alcanzó solo.
+
+**Auditoría del código primero** (antes de tocar config de Cloud Run a ciegas): se
+revisó todo lo que `app.py` importa, directa e indirectamente, buscando trabajo pesado
+a nivel de módulo (que corre una sola vez al arrancar, antes de que Streamlit levante
+el servidor) — no se encontró ningún catálogo ni archivo grande leído en el momento del
+`import` (el catálogo de 5,276 estaciones y los EPW se leen dentro de funciones, no al
+importar el módulo). El código de la app en sí arranca rápido — confirmado localmente
+otra vez con `streamlit run app/app.py` (Hallazgo 43), responde 200 en unos 10s.
+
+**El problema real encontrado: la imagen de Docker carga ~105MB de datos que la app
+jamás usa en producción**, lo que hace más lento el "cold pull" de la imagen en cada
+arranque de instancia nueva (justo la ventana de tiempo que el probe de arranque está
+midiendo):
+- `documentos_tecnicos/` (83MB, los 91 manuales técnicos de Flower Turbines/Sol-Ark) —
+  sólo lo referencia `engine/estructural_asce7.py`, un módulo de investigación de la
+  Pista B/estructural que `app.py` NO importa (confirmado: ningún import, directo ni
+  transitivo, lo alcanza).
+- `datos_clima/gwa_costa_rica_10m.tif` (22MB) y `datos_clima/gwa_juan_santamaria/`
+  (92KB) — el ráster real de GWA de la línea de investigación que Hallazgo 36 decidió
+  abandonar por completo (EPW-only). Confirmado con `grep` que ya no queda ningún
+  `import rasterio` en todo el repo — este dato ya no lo usa nada.
+
+**Corrección:** se agregan ambas rutas a `.dockerignore` — los archivos NO se borran
+del repositorio (siguen disponibles para consulta/investigación en git), sólo dejan de
+viajar dentro de la imagen que se despliega. Además, dos ajustes de resiliencia en
+`cloudbuild.yaml` que no cuestan más en régimen normal pero sí ayudan directamente
+contra un arranque lento: memoria 1Gi → 2Gi (Streamlit + pandas + numpy + plotly +
+folium es una pila de imports pesada; si el proceso se queda sin memoria durante el
+arranque, Cloud Run lo ve exactamente igual que un timeout, porque el contenedor nunca
+llega a abrir el puerto) y `--cpu-boost` (CPU completa sólo durante el arranque, se
+apaga después).
+
+**Bug real encontrado de paso, no relacionado al timeout pero sí a Hallazgo 43:**
+`requirements.txt` (el que de verdad usa el `Dockerfile`) no tenía `geopy` — la
+librería que `engine/epw_real.py` usa para geocodificación por nombre (`Nominatim`,
+`Photon`). El import está protegido con `try/except ImportError` así que no rompe nada,
+pero en producción la búsqueda de sitio "por nombre" quedaría silenciosamente
+deshabilitada sin ningún aviso. Se agrega `geopy` a `requirements.txt`. De paso se
+quitan `matplotlib` y `scipy`: confirmado con `grep` que ningún módulo que `app.py`
+alcanza (directa o transitivamente) los importa de verdad — sólo aparecían en un
+comentario/docstring de `flower_turbines_curves.py` mencionando que `scipy.optimize`
+se usó para AJUSTAR los coeficientes durante el desarrollo, no en tiempo de ejecución.
+
+**Pendiente:** esto no se pudo probar contra el Cloud Run real de Pablo (sin acceso a
+su proyecto de GCP desde este sandbox) — es la corrección más probable según la
+auditoría del código y el patrón de falla reportado (imagen pesada + probe de TCP que
+se agota), pero si el siguiente deploy sigue fallando, el log de Cloud Build (no sólo
+el de Cloud Run) durante el `docker build` diría si el problema está en otro lado.
+
+---
+
+### Hallazgo 46 — El log de Cloud BUILD (no el de Cloud Run) revela el verdadero bloqueo: el heredoc de `config.toml` nunca llegó a construir la imagen
+
+Pablo pegó el log de Cloud **Build** (el paso de `docker build`, distinto del log de
+Cloud Run de Hallazgo 45) y ahí aparece el error real, uno anterior a todo lo demás:
+
+```
+Error response from daemon: dockerfile parse error line 31: unknown instruction: [SERVER]
+```
+
+La línea 31 es `[server]`, el encabezado de sección del `RUN cat > ~/.streamlit/config.toml
+<< 'EOF' ... EOF` (heredoc) que ya traía el Dockerfile desde antes de Hallazgo 45 (de
+hecho desde el commit `7b2f262`, y el fix `747382b` de la otra sesión sólo unificó
+ENTRYPOINT+CMD, no tocó este heredoc). **La imagen nunca llegó a construirse** en
+ningún deploy hasta ahora -- el `DEADLINE_EXCEEDED` de Hallazgo 45 y este error de
+parseo son dos síntomas de la misma raíz, pero el de Hallazgo 45 alcanzó a levantar
+*alguna* imagen vieja cacheada; este último ya ni eso.
+
+**Causa real:** un heredoc dentro de un Dockerfile (`<< 'EOF'`) es una función de
+BuildKit, no de Docker clásico -- necesita que el motor de Docker que ejecuta el build
+tenga BuildKit activo para interpretarlo como "contenido de archivo" en vez de leer
+cada línea como si fuera una instrucción de Dockerfile normal. El builder que usa Cloud
+Build (`gcr.io/cloud-builders/docker`) no lo tiene activo por defecto, y agregar
+`# syntax=docker/dockerfile:1` arriba del archivo (que sí estaba, desde el fix de la
+otra sesión) NO alcanza para forzarlo si el motor por debajo no corre con BuildKit --
+por eso Docker leyó `[server]` línea por línea y lo interpretó como una instrucción
+`[SERVER]` que no existe.
+
+**Corrección, sin heredoc (0% dependiente de BuildKit):** se crea `.streamlit/config.toml`
+como archivo normal del repositorio (mismo contenido que tenía el heredoc, sin el
+`port = 8080` hardcodeado -- el puerto real siempre lo define `$PORT` vía la bandera
+`--server.port` de la línea `CMD`, tenerlo también en el TOML sólo confundía) y el
+Dockerfile ahora sólo hace `COPY . .` (que ya trae el archivo, `.dockerignore` no lo
+excluye) -- Streamlit encuentra la configuración de proyecto sola en
+`<directorio de trabajo>/.streamlit/config.toml` sin necesitar ninguna instrucción
+extra. `COPY` es una instrucción clásica de Dockerfile, funciona igual con o sin
+BuildKit. Se quita también el `# syntax=docker/dockerfile:1` (ya no hace falta nada
+de BuildKit en este Dockerfile).
+
+**Verificado:** el TOML nuevo parsea limpio (`tomllib.load`), `streamlit run app/app.py`
+sigue arrancando y respondiendo 200 con la config nueva en su lugar. No se pudo correr
+`docker build` real en este sandbox (el daemon de Docker no está corriendo acá, sólo el
+binario) -- el Dockerfile resultante usa únicamente instrucciones clásicas
+(`FROM/WORKDIR/RUN/COPY/ENV/EXPOSE/HEALTHCHECK/CMD`), sin heredocs ni ninguna otra
+sintaxis que dependa de BuildKit, así que no hay ningún elemento nuevo que el builder
+de Cloud Build no sepa interpretar.
+
+---
+
+### Hallazgo 47 — Revisión de identidad visual (Antigravity/Gemini): favicon y fondo forzado corregidos, un hallazgo de la otra IA estaba desactualizado
+
+Pablo le pidió a otra herramienta de IA (Antigravity, sobre Gemini, sacando su propio
+clon del repositorio) que auditara `app.py` contra unos lineamientos de identidad
+corporativa de ECO Consultor. Reportó 4 incumplimientos. Se verificó cada uno contra el
+estado real del repo (no se aceptó el reporte a ciegas, mismo criterio de todo este
+proyecto) antes de tocar nada:
+
+- **Favicon con emoji** (`page_icon="🌬️"`) -- confirmado real. Corregido a
+  `page_icon=LOGO_ECO` (`Recursos Visuales/eco_logo.png`, 800x800 con transparencia, ya
+  importado en `app.py` desde Hallazgo 32) -- verificado con Playwright que el navegador
+  ahora sirve ese PNG como favicon real, no el emoji.
+- **Fondo forzado que rompe modo oscuro** (`.stApp {{ background-color: {FONDO}; }}`
+  inyectado a mano) -- confirmado real. Se quita esa única regla; el fondo ahora lo
+  aplica Streamlit de forma nativa desde `.streamlit/config.toml::theme.backgroundColor`
+  (que ya existe desde Hallazgo 46, aunque se agregó por una razón distinta -- arreglar
+  el build de Docker, no este tema de diseño). Verificado con Playwright: el color de
+  fondo del `body` sigue siendo exactamente `#E8F0F3`, mismo resultado visual, screenshot
+  comparado sin ninguna diferencia -- sólo cambió QUIÉN lo aplica (Streamlit vs. CSS a
+  mano con `!important`).
+- **Sin tipografía propia** -- confirmado real, sin resolver todavía: no hay una fuente
+  de marca definida por Pablo/ECO Consultor para importar (queda pendiente, es una
+  decisión de marca, no algo que se pueda inventar).
+- **`.streamlit/config.toml` no existe** -- este hallazgo de Antigravity estaba
+  DESACTUALIZADO: el archivo ya existe en el repo desde Hallazgo 46 (el clon que usó
+  Antigravity debe haber sido de antes de ese merge). Aclarado con Pablo antes de actuar
+  sobre el resto del reporte, para no perseguir un problema que ya no existía.
+
+El resto de estilos en el bloque CSS (header de marca, botones del menú lateral,
+etiquetas de sección) NO se tocan -- son componentes propios de la app que el sistema
+de `theme` de Streamlit no cubre (sólo controla primaryColor/backgroundColor/
+secondaryBackgroundColor/textColor/font, nada de clases custom), así que sí necesitan
+CSS igual que antes; no había nada más redundante con `config.toml` que quitar.
+
+**Pendiente, explícitamente no resuelto:** el documento de "Lineamientos de Identidad
+Corporativa" que propuso Antigravity como mejora deja huecos a propósito (nombre de
+fuente, familia de iconos) que son decisiones de marca de ECO Consultor, no técnicas --
+no se completan por cuenta propia.
+
+**Verificado:** `py_compile` limpio, las 32 pruebas existentes pasan, `streamlit run
+app/app.py` arranca y responde 200; captura de pantalla con Playwright confirma que la
+apariencia visual es idéntica a antes del cambio (logos, colores, layout), sólo cambia
+el mecanismo interno.
+
+---
+
+### Hallazgo 48 — Se conecta por fin la pestaña "💰 Análisis Financiero" a `app.py`, y se encuentran 2 bugs reales probando en vivo con Playwright
+
+Toda la capa de datos/lógica de Hallazgo 40-47 (`price_calculator.py`, `eg4_specs.py`,
+`dimensionador_sistema_eolico.py`, `financial_engine_eolico.py`,
+`sistema_eolico_completo.py`, `turbine_specs.py`/`solark_specs.py` unificados) llevaba
+horas lista pero sin ninguna pantalla que la mostrara -- Pablo corrió la app localmente
+con Docker y no encontró nada nuevo, lo cual expuso que nunca se había comunicado con
+suficiente claridad que ese trabajo era sólo "backend". Se agrega la 5ta pestaña.
+
+**Qué hace la pestaña:** reutiliza los clústers ya configurados en "⚙️ Equipos y
+configuración" y recalcula el kWh/año (mismo cálculo que "📈 Resultados", Hallazgo
+12/17, para no depender de que esa pestaña ya se haya visitado). Pide 3 parámetros
+financieros arriba (consumo diario, horas de autonomía, tarifa eléctrica) + un radio
+Standalone/Hybrid, y dentro de "Parámetros avanzados": % de instalación, vida útil,
+tasa de descuento, y el modo de importación (`por_sku`/`por_proyecto`, parametrizado
+desde Hallazgo 41, ahora por fin expuesto en la UI). Llama a
+`analizar_sistema_eolico_completo()` y muestra CAPEX/Payback/ROI/Viabilidad, la
+arquitectura elegida (inversor + BESS, con aviso si el inversor todavía no tiene specs
+verificadas -- Hallazgo 43/44), el desglose de costos, y las recomendaciones.
+
+**2 bugs reales encontrados probando en vivo con Playwright (subiendo el EPW real de
+San José y recorriendo los 4 combos Standalone/Hybrid × por_sku/por_proyecto) --
+ninguno se habría visto sólo revisando el código:**
+
+1. **Texto roto por `$` sin escapar.** Un `st.caption()` con dos signos `$` en el mismo
+   texto (`"...ahorro: $X/año vs. mantenimiento: $Y/año..."`) se renderizaba con partes
+   en una tipografía itálica rara y el texto cortado -- Streamlit interpreta un PAR de
+   `$...$` en cualquier texto markdown (`st.caption`, `st.write`, `st.warning`, etc.)
+   como fórmula LaTeX, no como texto literal. Corregido escapando a `\$`. Ni
+   `st.metric()` ni las tablas de pandas (`st.dataframe`) tienen este problema -- sólo
+   texto libre con 2+ signos `$` en la misma llamada.
+2. **BESS cobraba un fee de importación fantasma en modo Hybrid.** Al armar el
+   desglose de costos por categoría (turbinas/inversor/BESS) para pasarlo a
+   `calcular_precio_venta_proyecto()`, en modo Hybrid (sin BESS) se pasaba el costo del
+   BESS como `$0` en vez de excluir la línea -- y la fórmula igual le sumaba el fee de
+   importación completo a esa línea ($0 + $2,500 fee) × margen = **$3,250 cobrados por
+   "importar nada"**. Se corrige excluyendo la línea de BESS por completo del cálculo
+   cuando el sistema es Hybrid, en vez de pasarla como cero (`sistema_eolico_completo.py`).
+   Verificado numéricamente antes y después del fix, y visualmente con Playwright en
+   los 4 combos.
+
+**Verificado:** `py_compile` limpio, las 32 pruebas existentes pasan, flujo completo
+probado en vivo con Playwright (subir EPW real → configurar 3 turbinas → calcular
+producción → pestaña financiera → los 4 combos Standalone/Hybrid × por_sku/por_proyecto,
+con capturas de pantalla comparadas) -- los números cierran matemáticamente en los 4
+casos (verificado a mano la diferencia exacta entre por_sku y por_proyecto).
+
+**Pendiente, no resuelto en este hallazgo:** con los parámetros por default (tarifa
+$0.15/kWh, arreglo pequeño en San José) el resultado da "NO VIABLE" -- el mantenimiento
+anual (2% del CAPEX) supera el ahorro eléctrico. Es un resultado honesto del motor, no
+un bug, pero valdría la pena en algún momento sensibilizar ese 2% con un dato real de
+mantenimiento en vez del valor por default de `financial_engine_eolico.py`.
+
+---
+
+### Hallazgo 49 — Reunión con cliente al día siguiente: 6ta pestaña "Especificación Técnica" + PDF corporativo, identidad de marca real (libro de marca), y se confirma que "NO VIABLE" es economía real, no un bug del 2% de mantenimiento
+
+Pablo compartió el libro de marca oficial de ECO Consultor (`libro_de_marca_de_Eco_consultor.pdf`)
+y pidió, para una reunión con cliente al día siguiente: (1) una 6ta pestaña con la ficha
+técnica completa de cada equipo del sistema, exportable a PDF con el tono corporativo de
+ECO; (2) quitar todos los emojis y darle más protagonismo al logo de ECO (quitando el
+co-branding con Flower Turbines, decisión de producto de Pablo, no del libro de marca);
+(3) resolver una queja concreta sobre la pestaña financiera: no se veía en grande cuánto
+dinero (no kWh) ahorra el sistema, y el texto de recomendaciones no aclaraba si "990
+kWh/kW/año" era de una turbina o del arreglo completo.
+
+**1. Identidad de marca real (del libro de marca, no aproximada).** Los 3 colores
+corporativos son Pantone 309 C `#173D4A` (azul), Pantone 575 C `#66913E` (verde) y
+Pantone 432 C `#414549` (gris) -- los que usaba la app hasta ahora (`#003C52`, `#4A7C2F`,
+`#4A5568`) eran aproximaciones a ojo. Actualizados en `app.py` y `.streamlit/config.toml`.
+La tipografía de marca es Gotham (de pago, no está en Google Fonts -- se usa Montserrat
+como sustituto estándar) + Dosis para texto secundario/"descripción" (ésta sí es real y
+gratuita) -- cargadas vía `@import` de Google Fonts en el CSS de `app.py`, porque el
+`[theme]` de Streamlit en `config.toml` sólo acepta `sans serif`/`serif`/`monospace`, no
+un nombre de fuente propio. Cierra el pendiente de Hallazgo 47 sobre tipografía.
+
+**2. Emojis eliminados y logo de ECO con más protagonismo.** Se quitaron todos los emojis
+de `app.py` (títulos de pestaña, mensajes, headers) vía reemplazo directo de los
+caracteres Unicode, verificado después con un escaneo por rango Unicode que confirmó cero
+emojis restantes (se conservó "✕", el símbolo de la "x" para borrar un clúster, por ser
+tipográfico funcional, no decorativo). El logo de Flower Turbines se quita del header
+(decisión de Pablo: "puede eliminar el logo de Flower turbines y dar mas protagonismo a
+l logo de eco") y el logo de ECO pasa de 90px a 170px, solo, centrado.
+
+**3. Pestaña financiera: 2 correcciones de presentación (no de cálculo).** El dato ya
+existía (`fin['ahorro_anual_USD']`) pero estaba en una nota chica -- se agregó un
+`st.metric()` grande y prominente para "Ahorro anual (electricidad no comprada)" junto a
+la energía anual generada y el mantenimiento anual estimado, antes del bloque de
+CAPEX/Payback/ROI. El texto de "Productividad kWh/kW/año" se reescribió explícito: **"no
+es de una sola turbina, es el total del arreglo"** -- se verificó en el código
+(`productividad = energia_anual_kwh / (potencia_pico_w / 1000)`) que el cálculo YA usaba
+los valores totales del sistema; el problema real era que el texto no lo aclaraba y
+generaba la duda razonable de Pablo.
+
+**4. Se sensibilizó el % de mantenimiento (Hallazgo 48) y se investigó a fondo el "NO
+VIABLE".** `FinancialEngineEolico` ya soportaba `costo_mantenimiento_pct_anual` como
+parámetro, pero `analizar_sistema_eolico_completo()` nunca lo exponía -- quedaba
+hardcodeado en 2%. Se agrega como parámetro de punta a punta (motor → función → slider en
+"Parámetros avanzados", 0-5%). Con eso ya sensibilizable, se probó bajarlo hasta 0% con
+un arreglo real (5× three_m_tulip, costo de fábrica real $12,905.75/turbina) en San José:
+**el payback seguía siendo ≈171 años.** Conclusión honesta, no un bug: para arreglos
+chicos, el costo de fábrica de las turbinas domina tanto el CAPEX que ni eliminando el
+mantenimiento el sistema compite por ahorro puro de factura eléctrica -- se agregó un
+`st.info()` en la pestaña financiera que se lo dice así de claro a Pablo, con la
+sugerencia de presentar el valor como respaldo/resiliencia energética en vez de ahorro
+puro (ese valor todavía no se cuantifica en dólares en esta app).
+
+**5. Pestaña "Especificación Técnica" (nueva, 6ta pestaña).** Reutiliza los clústers de
+"Equipos y configuración" y el consumo/horas de autonomía ya cargados en "Análisis
+Financiero" (vía `st.session_state`, claves `fin_consumo_diario`/`fin_horas_autonomia`,
+con default de 20 kWh/día y 12h si esa pestaña no se visitó todavía). Llama a
+`dimensionar_sistema_eolico_completo()` y muestra: datos generales (sitio, potencia pico,
+energía anual, elevación, arquitectura del bus DC a 48V), una ficha por cada modelo de
+turbina distinto (imagen + tabla completa de specs, vía `SPECS_TURBINAS`), la ficha del
+inversor (tabla completa vía `get_solark_df().query(...)`) y la de cada módulo BESS (vía
+`get_eg4_df().query(...)`).
+
+**3 bugs reales encontrados probando en vivo con Playwright (no se habrían visto solo
+revisando el código):**
+
+1. **`st.image(..., use_container_width=True)` no existe en Streamlit 1.35.0** (la
+   versión fijada en `requirements.txt`) -- ese parámetro se agregó en una versión más
+   nueva de Streamlit. Tiraba `TypeError: ImageMixin.image() got an unexpected keyword
+   argument 'use_container_width'` y rompía toda la pestaña. Corregido a
+   `use_column_width=True`, el mismo patrón que ya usaba el resto de `app.py`.
+2. **Datos "nan" mostrados crudos al cliente.** Algunas filas de `solark_specs.py` (ej.
+   los inversores comerciales 30K/60K, sin `Garantia_Anos` todavía) y de `eg4_specs.py`
+   (el EG4 WallMount Indoor, sin `Corriente_BMS_Max_A`/`Ciclos_80pct_DoD`/dimensiones/peso
+   todavía) tienen campos sin dato -- pandas los deja en `NaN`, y la tabla se los mostraba
+   tal cual ("nan A", "nan kg") en un reporte que se supone profesional. Se agregaron 3
+   helpers (`_ndv`, `_ndv_rango`, `_ndv_dims`) que muestran "No verificado todavía" en su
+   lugar, mismo criterio que ya se usaba para `costo_usd=None` en `turbine_specs.py`.
+3. **El PDF desbordaba el margen con un nombre de sitio largo.** El nombre de un EPW
+   subido por el usuario (ej. `CRI_AL_San.Jose-Santamaria.Intl.AP.787620_TMYx.2007-
+   2021.epw`) es una cadena sin espacios -- en la tabla del PDF (`reportlab`) el texto
+   plano no envuelve dentro de la columna y se salía de la página. Corregido envolviendo
+   cada celda en un `Paragraph` con `wordWrap="CJK"` (que sí rompe una palabra larga sin
+   espacios), en vez de texto plano.
+
+**6. Exportación a PDF corporativo (`engine/pdf_reporte.py`, nuevo).** Usa `reportlab`
+(agregado a `requirements.txt`) -- puro Python, sin binarios del sistema, mismo criterio
+que el resto de las dependencias. El PDF usa los 3 colores exactos de marca, el logo de
+ECO al inicio, y el mismo contenido que la pestaña (datos generales + fichas de turbinas,
+inversor y BESS). **Limitación conocida, no resuelta:** usa las tipografías estándar de
+reportlab (Helvetica), no Montserrat/Dosis -- para eso se necesitaría el archivo `.ttf`
+real de esas fuentes (Montserrat es gratis y se puede bajar de Google Fonts; Dosis
+también), que hoy no está en el repositorio. Los colores sí son los de marca exactos. Se
+agrega un botón "Descargar ficha técnica en PDF" (`st.download_button`) al final de la
+pestaña.
+
+**Verificado:** `py_compile` limpio en los 3 archivos tocados, las 32 pruebas existentes
+siguen pasando, flujo completo probado en vivo con Playwright (subir el EPW real de San
+José → configurar clústers → calcular → recorrer las 6 pestañas → descargar el PDF real
+generado por el botón y confirmarlo visualmente página por página) -- sin tracebacks ni
+"nan" visibles en ningún punto del flujo.
+
+**Pendiente, no resuelto en este hallazgo:**
+- Fuente real de marca (Montserrat/Dosis) en el PDF -- hoy usa Helvetica, sólo los
+  colores son de marca.
+- Cuantificar en dólares el valor de respaldo/resiliencia energética (mencionado en el
+  punto 4) -- hoy es una recomendación en texto, no un número.
+- Si la pestaña "Análisis Financiero" nunca se visitó en la sesión, "Especificación
+  Técnica" arma el inversor/BESS con un consumo/autonomía por default (20 kWh/día, 12h)
+  sin avisarle al usuario que son valores por default y no los que él configuró.
+
+---
+
+### Hallazgo 50 — El fee de importación plano de $2,500/línea sobreestimaba el flete real hasta ~300x: reemplazado por un modelo de flete consolidado por peso (unidad/pallet/contenedor)
+
+Pablo, revisando los resultados financieros para su reunión, señaló que el CAPEX no
+podía estar bien: "un contenedor de 40 pies de EE.UU. a Costa Rica no va a costar más
+de $10,000". Dio 3 tarifas de mercado (no cotización de forwarder, pero sí un dato real
+de referencia, corregido en la conversación de $35,000→$5,000→**$3,500** para el
+pallet tras detectar él mismo la inconsistencia con su propio ejemplo numérico):
+
+- **Unidad** (envío suelto, carga chica): $2,000
+- **Pallet**: $3,500
+- **Contenedor de 40'**: $10,000
+
+**El problema real que esto exponía:** desde Hallazgo 40/41, `price_calculator.py`
+tenía un `IMPORT_COST_USD=$2,500` FIJO aplicado por cada LÍNEA del pedido (modo
+"por_sku": cada turbina individual, el inversor, y cada módulo de BESS pagaban su
+propio fee de $2,500) o por todo el proyecto (modo "por_proyecto", 1 solo fee). Ninguno
+de los dos modos tenía relación con el flete real: una Small Tulip de 20kg pagaba el
+mismo fee que un contenedor entero. Verificado con las 4 turbinas de costo real
+verificado: el fee plano sobreestimaba el flete real entre **16x (3-Meter Tulip) y
+~300x (Small Tulip)**.
+
+**Solución implementada:** nuevo modelo de flete CONSOLIDADO por peso real del
+embarque, en `engine/price_calculator.py`:
+- `calcular_flete_consolidado_usd(peso_total_kg)`: dado el peso total de un embarque
+  (turbinas + inversor + BESS juntos), elige el modo más barato entre 1 unidad suelta
+  (≤200kg, techo razonable), N pallets (≤1,000kg c/u) o N contenedores (≤26,000kg
+  c/u) -- los 3 límites de peso son supuestos de ingeniería (peso como factor
+  limitante, no volumen; válido si la fábrica embarca las turbinas
+  desarmadas/en secciones, típico para mástiles/torres, pero NO verificado con una
+  ficha de empaque real de Flower Turbines).
+- `calcular_precio_venta_proyecto_por_peso(costos, pesos)`: reemplaza
+  `calcular_precio_venta_proyecto()` en los 2 lugares donde de verdad se usaba
+  (`dimensionador_sistema_eolico.py` a nivel de unidad física, y
+  `sistema_eolico_completo.py` a nivel de categoría turbinas/inversor/BESS) --
+  calcula el flete UNA vez sobre el peso total y lo reparte proporcional al costo
+  base de cada línea, igual que ya hacía el viejo modo "por_proyecto" pero con el
+  costo real en vez del fee inventado.
+- Se agregó `peso_kg`/`peso_total_kg` a `seleccionar_inversor_solark()`,
+  `seleccionar_bess_48v()` y `calcular_costo_arreglo_turbinas()` (de
+  `solark_specs.py`/`eg4_specs.py`/`turbine_specs.py`, ya existían esos datos, sólo no
+  se exponían) -- un peso en `None` (ej. EG4 WallMount Indoor sin ficha completa,
+  Hallazgo 49) se trata como 0kg, subestima un poco el flete en vez de inventar un dato.
+- **Se elimina el parámetro `modo_importacion`** ("por_sku"/"por_proyecto") de
+  `dimensionar_sistema_eolico_completo()` y `analizar_sistema_eolico_completo()`, y
+  el radio button correspondiente en la pestaña "Análisis Financiero" -- ya no hay
+  ambigüedad que sensibilizar, el modelo de peso reemplaza a los dos modos viejos.
+  `IMPORT_COST_USD`/`MODO_IMPORTACION_DEFAULT`/`calcular_precio_venta_proyecto()`
+  quedan en el archivo sólo por compatibilidad con las funciones viejas de PR #18
+  (`calcular_precio_final`, `calcular_bom_turbinas`, etc.) que ya no forman parte del
+  cálculo real de la app -- sus pruebas existentes siguen intactas.
+- La app ahora le muestra a Pablo, en el desglose de costos de "Análisis Financiero",
+  qué modo de flete se usó y cuánto costó ("Flete de importación incluido arriba: modo
+  **pallet** (1 -- $3,500 total)...").
+
+**Resultado verificado** (mismo caso default, 3× Medium Tulip en San José): el CAPEX
+total baja de **$72,261 a $65,241** (−9.7%) con el mismo arreglo -- sigue "NO VIABLE"
+(el costo de fábrica de las turbinas sigue dominando, ver Hallazgo 49), pero es un
+número más honesto. Probado también con un arreglo grande (20× 3-Meter Tulip, cae en
+modo "contenedor" con múltiples unidades) y en modo Hybrid (sin BESS) -- ningún caso
+rompe ni da un flete negativo/fantasma.
+
+**Verificado:** `py_compile` limpio en los 3 archivos de motor + `app.py`, las 32
+pruebas existentes siguen pasando sin modificarlas, y pruebas manuales de los límites
+de peso (`calcular_flete_consolidado_usd` en 50/200/500/1000/1500/5000/26000/30000/
+60000 kg) confirman que siempre elige el modo más barato, incluyendo el caso donde
+un pallet parcial sale más caro que consolidar en un contenedor. Flujo completo
+probado en vivo con Playwright (EPW real → clústers → calcular → Financiero →
+Especificación Técnica → descarga de PDF) sin tracebacks.
+
+**Pendiente, no resuelto en este hallazgo:**
+- Las 3 tarifas de flete y los 2 límites de peso (pallet/contenedor) son datos de
+  mercado dados por Pablo, NO una cotización de un forwarder real -- confirmar antes
+  de cotizar en firme a un cliente.
+- Los límites de peso asumen que las turbinas se embarcan desarmadas/en secciones
+  (razonable para mástiles de varios metros, pero no confirmado con una ficha de
+  empaque real de Flower Turbines) -- si el volumen real es el factor limitante en
+  vez del peso, estos números podrían quedar cortos.
+- El "modo unidad" (≤200kg) es un supuesto propio, no un techo real de ningún
+  forwarder consultado.
+
+**Seguimiento del mismo día:** Pablo pidió una lista de precios en PDF para llevar a
+la reunión sin depender de la app en vivo. Se agrega `generar_pdf_lista_precios()` en
+`engine/pdf_reporte.py`: una tabla por modelo de turbina (costo de fábrica + flete
+estimado + margen, misma fórmula y mismas tarifas de flete que ya usa el resto de la
+app desde este Hallazgo), separando los 4 modelos con costo verificado de los 5 con
+costo NO verificado (con advertencia explícita de no repetirlos como precio firme). El
+flete por modelo asume pedir lo suficiente para llenar 1 pallet o 1 contenedor
+completo (lo que salga más barato por unidad) -- referencia de orden de magnitud, no
+el flete de un pedido puntual real (para eso, `calcular_flete_consolidado_usd()` con
+el peso real del proyecto, que es lo que usa el resto de la app). PDF entregado
+directo a Pablo, generado y verificado visualmente (`pymupdf`) antes de enviarlo.
+
+---
+
+### Hallazgo 51 — Se sube el límite de altura de buje de 15m a 150m para poder evaluar instalación en techo de edificios altos, y se descubre que las turbinas "Eco-Roof" no son seleccionables en el simulador
+
+Pablo preguntó si se podía ampliar el perfil de viento a 60m, para evaluar poner
+turbinas en el techo de un edificio de 15 pisos.
+
+**Respuesta técnica, antes de tocar código:** sí, sin necesitar ningún dato nuevo del
+EPW. El EPW sólo trae viento medido a 10m -- la extrapolación a cualquier otra altura
+(3m o 60m, da lo mismo) ya la hace `wind_at_height()` (ley logarítmica, Hallazgo 20),
+que no tiene ningún límite matemático en la altura destino; el techo de 15m era sólo
+un límite puesto a mano en los widgets de Streamlit, no una limitación de la fórmula
+ni del dato. Verificado con el cross-check independiente que la app ya tenía (ley de
+potencia de EnergyPlus, `wind_at_height_potencia()`): entre 10m y 100m los dos métodos
+se mantienen consistentes entre sí (6-10% de diferencia en todo el rango, sin
+dispararse) -- no hay señal de que la extrapolación se vuelva absurda a 60m.
+
+**Cambio real:** se sube `max_value` de 15.0 a 150.0 en 2 widgets de `app.py` -- el
+slider "Altura de buje a explorar" (Contexto climático, sólo visual/exploratorio) y el
+`number_input` "Buje (m)" de cada clúster (Equipos y configuración, el que sí alimenta
+el cálculo real de energía). Se agrega ayuda explícita en ambos: para una instalación
+en techo, la altura de buje = altura del edificio + altura del mástil sobre el techo
+(NO la cantidad de pisos) -- un edificio de 15 pisos ronda 45-55m según la altura de
+entrepiso.
+
+**Salvedad honesta, no resuelta:** la ley logarítmica con un z0 regional (el mismo que
+ya usa la app para el sitio destino) da la velocidad REGIONAL esperada a esa altura --
+es la extrapolación estándar de un primer análisis de recurso eólico, pero NO modela el
+efecto aerodinámico LOCAL de estar encima de un edificio puntual (aceleración del flujo
+sobre el borde del techo, turbulencia por parapetos/equipos de HVAC, estela de
+edificios vecinos más altos) -- esos efectos están bien documentados en la literatura
+de turbinas integradas a edificios (BIWT) y pueden tanto ayudar como perjudicar el
+resultado real frente a esta extrapolación "limpia". Modelarlos requeriría datos
+específicos del edificio (CFD, túnel de viento, o factores de corrección publicados)
+que este proyecto no tiene todavía.
+
+**Hallazgo colateral, sin resolver:** las turbinas "Eco-Roof Energy Hub" (3 modelos en
+`turbine_specs.py`: `ecoroof_flat_3`, `ecoroof_flat_5`, `ecoroof_slanted`) -- el
+producto que Flower Turbines vende específicamente para techo, sin cimentación -- NO
+están en `CURVE_COEFFICIENTS` (`flower_turbines_curves.py`), así que el selector
+"Modelo" de "Equipos y configuración" no las puede elegir: tienen ficha técnica y costo
+completos, pero ningún cálculo de energía las puede simular. Mismo problema para
+`survival_unit`. Workaround inmediato usado con Pablo: para el caso de techo, usar un
+modelo Tulip existente (ej. `small_tulip`, que es literalmente la turbina individual
+que arma el Eco-Roof Flat-3/5 en plataforma) con la altura de buje = altura del
+edificio + mástil -- la curva de potencia es por MODELO de turbina, no por tipo de
+montaje, así que es válido físicamente aunque no aparezca como "Eco-Roof" en la
+interfaz.
+
+**Verificado:** `py_compile` limpio, las 32 pruebas existentes siguen pasando, y
+prueba en vivo con Playwright (EPW real de San José, slider a 60m, clúster con buje
+55m, calcular producción) -- sin errores, y el punto marcado en el gráfico (4.64 m/s a
+60m) coincide exacto con el cálculo hecho a mano en Python antes de tocar la UI.
+
+**Pendiente, no resuelto en este hallazgo:**
+- Agregar coeficientes de curva de potencia para `ecoroof_flat_3`, `ecoroof_flat_5`,
+  `ecoroof_slanted` y `survival_unit` a `CURVE_COEFFICIENTS` para que sean
+  seleccionables de verdad en "Equipos y configuración" -- hoy existen en
+  `turbine_specs.py` pero son inertes en el simulador.
+- Cuantificar (o al menos documentar con una fuente publicada) el efecto aerodinámico
+  local de un techo de edificio (aceleración/turbulencia) en vez de usar sólo la
+  extrapolación regional limpia.
+
+---
+
+### Hallazgo 52 — Se cierra (con evidencia, no por decisión sin probar) el intento de resucitar el ajuste espacial vía GWA-50m/ERA5-Land/Köppen-Gower/TPI; se corrige el último valor hardcodeado del cross-check de altura
+
+Pablo trajo dos pistas nuevas para el problema de fondo de Hallazgo 35/36 (viento
+confiable por punto exacto en Costa Rica): un ráster real de GWA a **50m** (en vez de
+10m) para Heredia, y un documento técnico ("Alternativas Simulador Viento Global")
+proponiendo resucitar el mecanismo de razón de escala con 4 mejoras: selección de
+donante por Distancia de Gower + Köppen-Geiger, ERA5-Land (9km) vía Open-Meteo en vez
+de GWA, corrección orográfica TPI/EN 1991-1-4, y rugosidad z0 dinámica vía ESA
+WorldCover. Se investigaron las dos pistas a fondo, con pruebas reales, no sólo teoría.
+
+**GWA a 50m para Heredia (lat=9.9996, lon=-84.1231):** mejora medible pero no resuelve
+el problema. Contra los mismos 3 chequeos que hundieron la versión de 10m
+(Hallazgo 35): el ruido por coordenada dentro del mismo aeropuerto Santamaría bajó de
++126% a +30%, y el ruido espacial del barrido 25x25 del Valle Central bajó de 78% a
+36% de la media -- una mejora real, pero el orden relativo Santamaría/La Sabana sigue
+sin resolverse de forma consistente (depende de qué coordenada "oficial" de Santamaría
+se use). Aparte: el EPW "EstadioHerediahour.epw" que Pablo subió resultó ser sintético
+(encabezado `fuente=MN8, WMO=999`, no una estación real) y su propia media a 10m
+(5.31 m/s) diverge +32% de la estación real de Santamaría a sólo 11km -- el mismo
+síntoma de "Valle Central sin dato confiable" pero en una tercera fuente distinta.
+
+**Evaluación de "ECO-Wind V2" (el documento con Gower/Köppen/ERA5-Land/TPI/WorldCover):
+ninguna de las 4 piezas sobrevive el contraste con datos reales.**
+1. *Köppen + Gower para elegir donante* -- irrelevante por geometría, no por código: la
+   estación no-costarricense más cercana a Heredia está a 147-168 km (35x más lejos
+   que las opciones locales) sobre las 5,276 estaciones del catálogo completo. Ningún
+   filtro climático cambia un donante que ya está a 150km de cualquier alternativa
+   (confirma y cierra el pendiente de Hallazgo 27, que sólo lo había probado con 4
+   sitios).
+2. *ERA5-Land vía Open-Meteo* -- no se pudo probar: `archive-api.open-meteo.com` y
+   `api.open-meteo.com` están bloqueados en este sandbox (confirmado por 3 vías
+   independientes). Se encontró que esto ya se había intentado antes (notebook
+   `sensibilizar_punto_exacto.ipynb`, Parte 5, para los 4 sitios conocidos) con el
+   mismo error, sin llegar nunca a documentarse como Hallazgo -- queda formalmente
+   pendiente, no descartado ni confirmado.
+3. *Corrección orográfica TPI/EN 1991-1-4* -- no aplica al problema real. El propio
+   Eurocódigo exige pendiente >3° para activarse; la pendiente real entre Santamaría/
+   La Sabana/Heredia da 1.0-2.1° con las elevaciones reales conocidas. El ruido de
+   ±126% dentro del mismo aeropuerto (Hallazgo 35) no puede ser orográfico -- es la
+   misma pista plana. (Sí es válida en Guanacaste real -- Tilarán, Papagayo Jet -- pero
+   no en el Valle Central).
+4. *Rugosidad z0 vía ESA WorldCover* -- el acceso SÍ funciona (bucket público AWS S3,
+   sin fricción), pero reproduce el mismo patrón de ruido de GWA en otra variable: las
+   3 coordenadas de Santamaría dan z0 entre 0.03 y 0.55-1.0 (18-30x de salto), y en
+   Heredia el píxel exacto cae en "cuerpo de agua" (z0≈0.0005) pese a que el 90% de la
+   ventana de 210x210m alrededor es zona urbana.
+5. Extra probado de paso: subir GWA de 10m a 50m (sin las otras 3 piezas) empeoró el
+   error en los 7 de 7 sitios conocidos -- consistente con que el problema no es de
+   qué altura del ráster se usa.
+
+**Conclusión, sin ambigüedad:** el problema no es la fuente de datos (GWA, WorldCover,
+o -- si algún día se puede probar -- ERA5-Land) sino que cualquier dato remoto de
+resolución moderada leído en un punto exacto tiene ruido de píxel/registro mayor que
+la variación física real del viento en el Valle Central urbano-mixto. La única salida
+real es medición local (anemómetro en sitio + correlación contra Santamaría,
+"measure-correlate-predict"), no una fuente o corrección matemática mejor. **No se
+retoma ninguna de las 4 líneas de V2** -- se cierra con este hallazgo documentado en
+vez de dejarlo abierto para que alguien lo reintente sin esta evidencia.
+
+**Decisión de producto de Pablo, aplicada en código:** "si coloco un EPW del sitio,
+respetamos lo que dice aunque sea sintético -- la altura de las turbinas y el tipo de
+terreno los selecciona el usuario, no quiero nada hardcodeado." Confirmado que la app
+ya cumple esto en casi todo (ningún EPW se trata distinto por su fuente/WMO; altura de
+buje y z0 ya eran inputs del usuario desde antes) -- **con una excepción real
+encontrada y corregida:** el cross-check de ley de potencia en "Resultados" (expander
+"Hallazgo 20") tenía `terreno="suburban"` fijo en el código, sin importar qué z0 
+eligiera el usuario arriba. Se agrega `terreno_mas_cercano_por_z0()` en
+`engine/simulador_pista_a.py`, que mapea el z0 numérico elegido a la clase de
+`TERRENOS_ENERGYPLUS` más cercana **en escala logarítmica** (no lineal -- con distancia
+lineal, z0=0.3 queda exactamente empatado entre "country" y "suburban" y el desempate
+de `min()` caía silenciosamente en la clase equivocada). El texto de la UI ahora
+también refleja el z0 real usado, no un valor fijo.
+
+**Verificado:** `py_compile` limpio, las 32 pruebas existentes siguen pasando, mapeo
+verificado para los 4 z0 del selector (0.03→water, 0.1→country, 0.3→suburban,
+1.0→city -- los 4 dan el resultado físicamente correcto), y prueba en vivo con
+Playwright cambiando z0 a "urbano denso" y confirmando que el cross-check usa "city"
+y el z0=1.0 correcto en el texto mostrado, sin errores.
+
+---
+
+### Hallazgo 53 — "Dejemos de adivinar": el módulo financiero pasa de estimar el CAPEX con costo de fábrica + margen + flete supuestos a pedir el precio de venta real, y se agrega un switch para apagarlo entero
+
+Pablo pidió reestructurar el análisis financiero: "vamos a dejar de adivinar" -- un
+switch para encender/apagar todo el módulo financiero, y adentro, campos para meter
+directo el costo de los equipos, el precio de venta al cliente y la tarifa eléctrica,
+para que Payback/ROI/NPV/Viabilidad salgan de datos reales en vez de la cadena de
+supuestos (costo de fábrica de `turbine_specs.py` + flete por peso de Hallazgo 50 +
+margen de importación fijo del 35%) que la app venía adivinando desde Hallazgo 40.
+
+**Qué SÍ se sigue calculando automático, y por qué:** la arquitectura técnica
+(selección de inversor Sol-Ark y banco EG4 vía
+`dimensionador_sistema_eolico_completo()`) sigue siendo automática -- es selección de
+equipo compatible según la electricidad real del arreglo (regla de voltaje/corriente
+confirmada con ambos fabricantes, Hallazgo 40/41), no un precio inventado. Lo único
+que se adivinaba, y ahora se pide directo al usuario, es el PRECIO del proyecto.
+
+**Cambios en el motor (`engine/financial_engine_eolico.py`):**
+- Se extrae `_calcular_viabilidad(capex, ahorro_anual_usd, mantenimiento_anual_usd,
+  vida_util_anos, tasa_descuento_pct)`: el núcleo de Payback/ROI/NPV que antes vivía
+  sólo dentro de `_calcular_punto_financiero()` (la ruta basada en % de instalación/
+  mantenimiento), ahora es una función compartida. `_calcular_punto_financiero()` se
+  reescribió para llamarla en vez de duplicar el cálculo -- su comportamiento externo
+  (y las 32 pruebas que lo verifican con inputs basados en %) queda idéntico, no se
+  tocó ninguna de las dos ramas de retorno temprano (capex/n_turbinas inválidos, u
+  opex neto ≤0).
+- Se agrega `FinancialEngineEolico.calcular_punto_capex_directo(capex_usd,
+  energia_anual_kWh, mantenimiento_anual_usd, potencia_pico_W=0, n_turbinas=0,
+  sistema_tipo="Standalone")`: calcula el ahorro anual (`energia_anual_kWh × tarifa`)
+  y llama a `_calcular_viabilidad()` con el CAPEX y el mantenimiento que el usuario
+  ingresó directo en dólares -- sin pasar por costo de fábrica, flete ni margen.
+  Devuelve el mismo diccionario (mismas llaves: `capex`, `ahorro_anual_USD`,
+  `payback_years`, `roi_percentage`, `npv_usd`, etc.) que el método viejo
+  `calcular_punto_unico()`, para que la UI no tenga que distinguir entre los dos.
+
+**Cambios en la UI (`app/app.py`, pestaña "Análisis Financiero"):**
+- Nuevo `st.toggle("Activar módulo financiero", value=True)`: apagado, la pestaña
+  muestra sólo un mensaje informativo y no calcula nada -- para cuando a Pablo sólo le
+  interesa el dimensionamiento técnico (pestaña "Especificación Técnica") todavía.
+- La pestaña ya NO llama a `analizar_sistema_eolico_completo()` (la función que
+  encadenaba costo de fábrica → flete consolidado → margen → `calcular_punto_unico()`)
+  -- ahora llama directo a `dimensionar_sistema_eolico_completo()` sólo para mostrar
+  "Arquitectura del sistema" (inversor + BESS), y a
+  `calcular_punto_capex_directo()` para la viabilidad.
+- 3 campos nuevos, todos en dólares reales (no %): "Costo de los equipos" (turbinas +
+  inversor + BESS -- sólo informativo, para ver el margen), "Precio de venta al
+  cliente" (este SÍ es el CAPEX real que entra al cálculo de Payback/ROI/NPV), y
+  "Mantenimiento anual (USD/año)" -- reemplaza el slider de "% del CAPEX" que
+  admitía en su propio texto de ayuda no venir de un dato real verificado.
+  Se muestra el margen (precio de venta − costo de equipos) como referencia.
+- Se eliminan de "Parámetros avanzados" los sliders "Costo de instalación (% de
+  equipos)" y "Mantenimiento anual (% del CAPEX)" -- ya no aplican, el precio de venta
+  ingresado por el usuario ya es el precio llave en mano. Se mantienen "Vida útil" y
+  "Tasa de descuento para NPV": son supuestos financieros estándar (no un costo
+  adivinado) y siguen siendo ajustables.
+- Se elimina la tabla "Desglose de costos" (basada en `costos_con_margen_importacion`
+  y el `flete` de Hallazgo 50) y el expander de "Recomendaciones" (generaba texto a
+  partir del mismo pipeline de % que se está reemplazando) -- ver Pendiente abajo.
+
+**Nada del backend de costeo por %/flete/margen se borró** -- `sistema_eolico_completo.py`,
+`price_calculator.py` y `_calcular_punto_financiero()`/`calcular_punto_unico()` siguen
+intactos y con sus pruebas pasando; sólo dejaron de ser la ruta que usa esta pestaña.
+
+**Verificado:** `py_compile` limpio en los archivos modificados, las 32 pruebas
+existentes siguen pasando sin tocarlas, cálculo manual de un caso (CAPEX=$300,
+mantenimiento=$10/año, ahorro≈$26.7/año con el arreglo default) confirma Payback=11.2
+años, ROI=257%, NPV=$19 a 40 años/8% -- coincide con la fórmula. Probado en vivo con
+Playwright: switch apagado oculta todo el módulo sin errores; con datos reales (costo
+equipos $10,000, precio de venta $15,000, mantenimiento $300/año) muestra margen 50%
+($5,000) y "NO VIABLE" con N/A correctamente cuando el mantenimiento supera el ahorro
+anual; modo Hybrid muestra "BESS: no aplica" igual que antes; la pestaña
+"Especificación Técnica" (que ya usaba `dimensionar_sistema_eolico_completo()` por su
+cuenta desde Hallazgo 49) sigue funcionando sin cambios.
+
+**Pendiente, no resuelto en este hallazgo:**
+- Se quitó el texto de "Recomendaciones" (payback/ROI/NPV interpretados en prosa) al
+  quitar `analizar_sistema_eolico_completo()` -- si Pablo lo quiere de vuelta, hay que
+  adaptar `_generar_recomendaciones()` (hoy privada en `sistema_eolico_completo.py`)
+  para que reciba el diccionario de `calcular_punto_capex_directo()`.
+- No hay validación cruzada entre "costo de los equipos" y "precio de venta" más allá
+  de mostrar el margen -- si el usuario mete un precio de venta MENOR al costo de
+  equipos (margen negativo), la app no avisa, sólo muestra un margen en rojo... en
+  realidad ni siquiera eso, sólo el número negativo sin resaltar.
+- El campo "Costo de los equipos" es puramente informativo hoy (no entra en ningún
+  cálculo de viabilidad) -- si más adelante Pablo quiere ver el margen como % de
+  utilidad sobre el precio de venta (en vez de sobre el costo), hay que agregar ese
+  segundo cálculo.
+
+---
+
+### Hallazgo 54 — Tarifas eléctricas reales de Costa Rica (CNFL/ICE) con horarios Punta/Valle/Nocturno, cruzadas contra la producción hora por hora de la turbina, en vez de una tarifa plana
+
+Pablo pasó 4 tablas de tarifas reales de CNFL/ICE (horarias residenciales, escalonadas,
+media tensión + excedentes de generación distribuida, y comerciales) y pidió
+integrarlas en vez de seguir usando una tarifa plana ($/kWh) para calcular el ahorro
+-- y, específicamente, "planifica los horarios de las tarifas con los potenciales de
+producción de los equipos según el análisis de potencia horaria": cruzar A QUÉ HORA
+del día genera la turbina contra los periodos Punta/Valle/Nocturno reales, no sólo
+sumar kWh/año y multiplicar por un promedio.
+
+**Investigación previa (Hallazgo 54, antes de programar nada):** los pliegos primarios
+de ARESEP/ICE/CNFL están bloqueados por la política de red de este entorno (403/
+EGRESS_BLOCKED en aresep.go.cr, grupoice.com, cnfl.go.cr) -- se investigó vía búsqueda
+web (que sí funciona) para (1) confirmar el horario exacto de cada periodo y (2)
+verificar los valores CRC/kWh que dio Pablo contra la fuente oficial más reciente.
+Resultado, con fuentes citadas en el código (`engine/tarifas_electricas_cr.py`):
+
+- **Horario, idéntico para T-RH (ICE), T-REH (CNFL) y T-MT (ICE, sólo la parte de
+  energía)** -- confirmado por múltiples búsquedas independientes que coinciden entre
+  sí (confianza alta para el rango horario, no se pudo abrir el PDF primario letra por
+  letra):
+  - Punta: 10:00-12:30 y 17:30-20:00, **sólo Lunes a Viernes**.
+  - Valle: 06:00-10:00 y 12:30-17:30 en L-V; **fin de semana completo (sábado y
+    domingo) las ventanas de Punta se reclasifican como Valle** -- queda un solo
+    bloque 06:00-20:00 los sábados/domingos.
+  - Nocturno: 20:00-06:00 (cruza medianoche), todos los días por igual, sin excepción
+    de fin de semana.
+  - No se encontró variación estacional (verano/invierno, seco/lluvioso) en ninguna
+    fuente. Feriados: ninguna fuente los menciona explícitamente -- se asume que se
+    tratan como fin de semana (sin Punta), **sin confirmar**.
+- **Valores CRC/kWh que dio Pablo:** los de CNFL (T-REH 0-500/>500, T-RE escalonada
+  completa, T-CO ≤3000 kWh) coinciden EXACTOS con el pliego "Tarifas Vigentes" de CNFL
+  vigente desde el 1/ene/2026. Los de ICE T-RE (bloques 0-140 y 141-195) son
+  consistentes -- casi al colón -- con aplicar la rebaja de -14.92% que ARESEP fijó
+  para la tarifa residencial de ICE en 2026 sobre la base 2024/2025. El resto (ICE
+  T-RH horaria, ICE T-MT, ICE T-CO, T-A, bloques altos de T-RE de ICE, CNFL T-CO
+  >3000 kWh completo, y el valor nocturno de T-TCVE) no se pudo confirmar cifra a
+  cifra por el bloqueo de red -- no hay evidencia de que estén mal, sólo no se
+  verificaron. Dato importante: **2026 trajo una rebaja tarifaria general en Costa
+  Rica** (ICE residencial -14.92%, CNFL residencial -14.55%) -- cualquier tarifa 2025
+  que se tuviera guardada está entre 5% y 17% por encima de la vigente.
+
+**Qué se conectó al cálculo real (motor nuevo: `engine/tarifas_electricas_cr.py`):**
+- Las 4 tablas de Pablo se guardaron tal cual (`TARIFAS_HORARIAS_CR`,
+  `TARIFAS_ESCALONADAS_CR`, `TARIFAS_MT_GD_CR`, `TARIFAS_COMERCIALES_CR`) con
+  `get_..._df()` para cada una, siguiendo el mismo patrón que `solark_specs.py`/
+  `eg4_specs.py`.
+- `clasificar_periodo(timestamp, proveedor, tarifa)`: dado un timestamp y el horario
+  ARESEP de `PERIODOS_HORARIOS_CR`, devuelve "Punta"/"Valle"/"Nocturno" -- maneja
+  rangos que cruzan medianoche (Nocturno) y reglas separadas por día de semana/fin de
+  semana.
+- `calcular_ahorro_tarifa_horaria_usd(serie_horaria_kwh, proveedor, tarifa,
+  tipo_cambio_crc_por_usd)`: clasifica CADA HORA de la serie horaria real de
+  producción del proyecto (no un promedio), la valora al precio CRC/kWh del periodo
+  correspondiente, suma, y convierte a USD -- devuelve el ahorro total y el desglose
+  kWh/₡/USD por periodo (Punta/Valle/Nocturno), para que se vea de dónde sale el
+  número, no sólo el total.
+- `FinancialEngineEolico.calcular_ahorro_y_viabilidad(capex_usd, ahorro_anual_usd,
+  mantenimiento_anual_usd, ...)`: nuevo método público, extraído de
+  `calcular_punto_capex_directo()` (que ahora es un wrapper de 3 líneas sobre este) --
+  recibe el ahorro anual YA resuelto en dólares, sin importar si vino de tarifa plana
+  o de la tarifa horaria real. `_calcular_punto_financiero()` y
+  `calcular_punto_unico()` (Hallazgo 40-53, basados en % de instalación/mantenimiento)
+  quedan intactos, ninguna prueba existente se tocó.
+- `app.py`, pestaña "Análisis Financiero": nueva sección "Tarifa eléctrica" con un
+  radio "Tarifa plana (USD/kWh)" vs "Tarifa horaria real de Costa Rica (ARESEP)". En
+  modo horario: selector de Proveedor (CNFL/ICE) x Tarifa (T-REH 0-500/>500, T-RH,
+  T-MT), campo de tipo de cambio ₡/USD editable, tabla de desglose por periodo, y
+  caption con la tarifa efectiva ponderada por la producción real (para comparar
+  contra el modo plano). La serie horaria del proyecto se arma sumando
+  `serie_horaria_W_por_turbina × N / 1000` de cada clúster (ya la devuelve `simular()`
+  por turbina, sólo faltaba escalarla y sumarla entre clústers).
+
+**Qué NO se conectó todavía, y por qué (honesto, no "adivinar" un mecanismo dudoso):**
+- **T-RE (escalonada, CNFL/ICE):** se guardó como dato de referencia, no se calculó
+  ningún ahorro con ella. No se pudo confirmar con la fuente oficial si el cargo
+  fijo/tarifa de cada bloque se cobra de forma progresiva (como un bracket de
+  impuesto) o como categoría (todo el consumo del mes a la tarifa del bloque más alto
+  alcanzado) -- son mecánicas de facturación distintas que dan resultados distintos, y
+  calcular un "ahorro" adivinando cuál es exactamente el error que este hallazgo
+  existe para evitar.
+- **T-TCVE (excedentes de generación distribuida) y T-A:** guardadas como referencia.
+  T-TCVE es lo que ICE paga por el excedente que el sistema INYECTA a la red cuando
+  genera más de lo que el sitio consume en ese instante -- vale mucho menos (~19-27
+  ₡/kWh) que la energía autoconsumida (~55-166 ₡/kWh según periodo). Calcularla de
+  verdad requiere un perfil de CONSUMO horario del sitio (hoy la app sólo pide un
+  kWh/día promedio, no una curva de carga horaria) para saber en qué horas hay
+  excedente real -- trabajo futuro explícito, no un cálculo que se pueda improvisar
+  con lo que la app ya pide hoy.
+- **T-CO (comercial, gimnasios/estadios):** guardada como referencia. Tiene cargos por
+  DEMANDA MÁXIMA (kW, no kWh) que requieren saber en qué instante ocurre el pico de
+  demanda del sitio -- un cálculo de "reducción de demanda pico" distinto al de
+  "ahorro de energía" que ya hace el resto de la app, no modelado.
+- El tipo de cambio CRC→USD es un campo editable con un valor por defecto (₡520 por
+  USD) -- **no hardcodeado como una constante confiable**: cambia a diario, y la
+  recomendación de la investigación es usar el Tipo de Cambio de Referencia que
+  publica el BCCR (bccr.fi.cr) antes de cotizar en firme, no el valor por defecto.
+
+**Verificado:** `py_compile` limpio en los 3 archivos modificados; las 32 pruebas
+existentes (`_calcular_punto_financiero`/`calcular_punto_unico`, basadas en tarifa
+plana/%) siguen pasando sin tocarlas. Mecánica de clasificación horaria verificada a
+mano con una semana sintética de 1 kWh/hora: de las 168 horas, 25 caen en Punta, 73 en
+Valle y 70 en Nocturno -- coincide exacto con el conteo manual (5 horas Punta/día ×
+5 días L-V, 9 horas Valle/día × 5 días + 14 horas/día × 2 días de fin de semana, 10
+horas Nocturno/día × 7 días). Probado en vivo con Playwright: modo plano sin cambios
+(regresión limpia); modo horario con CNFL T-REH y con ICE T-RH -- la tabla de
+desglose reparte los 245 kWh/año del caso default en Punta/Valle/Nocturno sumando
+exacto el total, cambiar de proveedor recalcula todo (CNFL daba $28/año de ahorro,
+ICE $42/año, consistente con que las tarifas Valle/Nocturno de ICE son más altas); un
+caso de prueba con números chicos (CAPEX=$300, mantenimiento=$10) dio Payback=839.4
+años/ROI=-95%/NPV=-$14,787, verificado a mano con la fórmula exacta. Se encontró y
+corrigió en el camino el mismo bug de Hallazgo 48 (dos "\$" en un `st.caption()` se
+interpretan como LaTeX) en el caption nuevo de tarifa efectiva.
+
+**Pendiente, no resuelto en este hallazgo:**
+- Ninguno de los rangos horarios ni de los valores no confirmados de esta sección se
+  verificó contra el PDF primario de ARESEP/ICE/CNFL (bloqueado por red en este
+  entorno) -- alguien con acceso sin restricciones debería confirmar línea por línea
+  antes de cotizar en firme a un cliente con la tarifa horaria (ver la lista completa
+  de "no confirmados" arriba).
+- El tratamiento de feriados (¿cuentan como fin de semana, sin Punta?) es una
+  suposición razonable, no una cifra confirmada en ningún pliego.
+- T-RE (escalonada), T-TCVE y T-A quedan como datos de referencia sin cálculo de
+  ahorro conectado -- ver la sección de arriba para el motivo de cada una. T-CO
+  (comercial) se conectó parcialmente en el Hallazgo 55 siguiente.
+- El desglose por periodo redondea cada fila de forma independiente antes de sumar
+  (ej. $11+$13+$3 puede mostrar $27 en la tabla mientras el total real, con más
+  decimales, es $28) -- es un artefacto de presentación, no un error de cálculo (el
+  ahorro real usado en Payback/ROI/NPV es el total sin redondear por fila).
+
+---
+
+### Hallazgo 55 — Investigación de la tabla oficial del calculador de Flower Turbines (se descarta el método de tabla) y se agrega la tarifa comercial T-CO (sólo componente de energía)
+
+Dos pedidos de Pablo en la misma conversación:
+
+**1) "¿Por qué el cálculo de kWh no usa la tabla del fabricante en vez de la fórmula?"**
+Se investigó a fondo: las 10 capturas PDF del calculador oficial de Flower Turbines
+que Pablo ya tenía guardadas en el repo
+(`documentos_tecnicos/resultados de calculador flower turbines/1 solo.pdf` .. `10.pdf`,
+N=1 a N=10) se leyeron completas -- son la fuente primaria real, 930 puntos (31
+velocidades × 10 N × 3 modelos: Small/Medium/Large Tulip) en Watts por turbina. Se
+comparó, punto por punto y también en un caso real (Heredia, Medium Tulip×3, buje
+25m), contra la fórmula ajustada que ya usa la app (`P=k·v³` + multiplicador de
+bouquet exponencial): la diferencia es de sólo **+0.18%** en el total anual (4,245.2
+kWh/año con la tabla interpolada vs. 4,237.6 kWh/año con la fórmula), consistente con
+que la fórmula ya tiene R²≈1.0 contra esta misma tabla (así se ajustó originalmente).
+**Decisión de Pablo, con la evidencia en mano: no vale la pena agregar un segundo
+método** -- la fórmula actual ya es prácticamente idéntica a la tabla oficial Y
+además cubre TODOS los modelos (la tabla del calculador sólo cubre Small/Medium/
+Large, no `three_m_tulip` ni los `al13_*`, que vienen de otras fuentes oficiales). La
+app queda exactamente igual que antes en este punto -- no se tocó ningún código de
+`flower_turbines_curves.py` ni de `simulador_pista_a.py`.
+
+**2) "¿Por qué no veo la tarifa comercial (T-CO) en la app?"**
+Repaso honesto de por qué faltaba: T-CO (gimnasios/estadios/comercios) tiene DOS
+componentes de cobro -- energía (₡/kWh) y demanda máxima (₡/kW) -- y el Hallazgo 54
+la había dejado completamente afuera porque el componente de demanda requiere el
+perfil de consumo horario del sitio (no sólo el kWh/día promedio que pide la app),
+algo que no se modela hoy. Pero el componente de ENERGÍA sí se puede calcular con lo
+que la app ya tiene, sin inventar ningún dato -- así que se conecta ESE componente:
+
+- `engine/tarifas_electricas_cr.py`: nueva función `calcular_ahorro_tarifa_comercial_usd(
+  kwh_anual, proveedor, tramo, tipo_cambio_crc_por_usd)` -- tramo "pequeno" (≤3000
+  kWh/mes, sin medidor de potencia: 98.28 CNFL / 99.70 ICE ₡/kWh) o "grande" (>3000
+  kWh/mes: 59.18 CNFL / 59.67 ICE ₡/kWh, la tarifa marginal sobre el excedente/
+  abonado con potencia -- se excluye a propósito la fila "bloque base 0-3000 kWh" de
+  CNFL, que tiene 0 ₡/kWh porque ese tramo se cobra con cargo fijo, no por energía).
+  A diferencia de T-REH/T-RH/T-MT, T-CO no tiene periodos horarios -- es un precio
+  plano, así que no hace falta cruzar contra la serie horaria, sólo el kWh/año total.
+- `app.py`: tercera opción en el radio de "Tarifa eléctrica" -- "Tarifa comercial de
+  Costa Rica (T-CO)", con selector de Proveedor y de tramo de consumo mensual. Usa
+  `FinancialEngineEolico.calcular_ahorro_y_viabilidad()` (el mismo método genérico del
+  Hallazgo 54), así que Payback/ROI/NPV se calculan igual que con las otras dos tarifas.
+- Aviso explícito en pantalla: "esta tarifa NO incluye el cargo por demanda máxima" --
+  el número que muestra es sólo el ahorro de energía, no el ahorro total de la
+  factura de un cliente T-CO real.
+
+**Verificado:** `py_compile` limpio, las 32 pruebas existentes siguen pasando.
+Cálculo de T-CO verificado a mano para los 4 combos (proveedor × tramo) con 1,000
+kWh: CNFL pequeño = ₡98,280 ($189.00), CNFL grande = ₡59,180 ($113.81), ICE pequeño =
+₡99,700 ($191.73), ICE grande = ₡59,670 ($114.75) -- coinciden exacto con
+`precio_crc_kwh × kwh / tipo_cambio`. Bug real encontrado y corregido en el camino:
+el primer caption mezclaba el símbolo "$" con un valor en colones ("$98.28 ₡/kWh",
+contradictorio) -- se corrigió a "₡98.28/kWh". Probado en vivo con Playwright:
+cambiar de tramo recalcula todo (₡98.28→₡59.18/kWh, ahorro $46→$28/año en el caso
+default), y los otros dos modos de tarifa (plana y horaria) siguen funcionando sin
+regresión.
+
+**Pendiente, no resuelto en este hallazgo:**
+- El cargo por demanda máxima de T-CO (₡/kW) sigue sin modelarse -- el número que
+  muestra la app para T-CO es sólo el ahorro de energía, nunca el ahorro total de
+  factura de un cliente con medidor de potencia real.
+- Los valores CRC/kWh de T-CO no se re-verificaron en este hallazgo (ya se habían
+  verificado en Hallazgo 54: CNFL exacto contra el pliego vigente 2026, ICE sin
+  confirmar cifra a cifra).
+
+---
+
+### Hallazgo 56 — "Dejar de adivinar" el costo de equipos: precio de venta real de Flower Turbines por modelo, cargado en la app en vez de estimado
+
+Pedido explícito de Pablo, en pausa del trabajo de tarifas eléctricas (Hallazgo 54/
+55, que sigue exactamente igual): dejar de estimar el costo de fábrica de las
+turbinas con fórmulas (costo + margen + flete, la cadena de `turbine_specs.py` /
+`price_calculator.py` ya en desuso desde Hallazgo 53) y en su lugar cargar el
+precio de venta EXWORKS real de cada modelo, tomado de un catálogo oficial de
+Flower Turbines que Pablo compartió como hoja de cálculo.
+
+**Qué se hizo:**
+- Nuevo módulo `engine/precios_flower_turbines.py`: diccionario `PRECIOS_EXWORKS_USD`
+  con el precio de venta final (el que Pablo indicó usar) por cada uno de los 12
+  modelos de turbina que ya maneja la app, y función `get_precio_exworks_usd(modelo)`.
+- `app.py`, pestaña "Equipos y configuración": cada clúster ya configurado (modelo +
+  cantidad N) muestra su precio unitario y el total del clúster; debajo del botón
+  "Agregar clúster" se muestra el precio total del proyecto (suma de todos los
+  clústeres) con una aclaración explícita de qué NO incluye (ver "Pendiente" abajo).
+- **Cómo se asoció cada modelo con su fila del catálogo:** no por parecido de nombre,
+  sino comparando datos físicos reales de `turbine_specs.py` contra la descripción
+  de cada artículo del catálogo -- `altura_pala_m` para la familia Tulip (ej.
+  `large_tulip` con `altura_pala_m=5.0` = la fila del catálogo de la tulipán de 5
+  metros) y `potencia_nominal_w` para la familia AL13 (`al13_2m`/`al13_6m`/`al13_8m`
+  con 1000W/5000W/10000W = las filas "1 kilowatt"/"5 kilowatts"/"10 kilowatts" del
+  catálogo). Dos modelos (`ecoroof_slanted`, `survival_unit`) no tienen fila
+  correspondiente en el catálogo -- quedan en `None` ("precio no disponible
+  todavía") hasta que Pablo confirme una cifra real para ellos.
+
+**Confidencialidad -- restricción explícita de Pablo, ya aplicada:** el catálogo
+original trae, además del precio de venta, columnas de costo de fábrica y de
+distintos márgenes de utilidad que Pablo marcó como confidenciales. La regla
+seguida es: **del catálogo sólo se toma y se guarda el precio de venta final por
+modelo** -- ni el código (`precios_flower_turbines.py` sólo tiene esos precios
+finales, nada de costos ni márgenes) ni este documento exponen esas otras columnas.
+Un archivo de verificación intermedio que sí incluía dos columnas de costo (usadas
+sólo para confirmar que el parseo del catálogo no tenía errores de formato, ver
+"Bug real" abajo) se compartió por error con Pablo y ya se identificó, se le avisó
+y se borró del entorno de trabajo -- no llegó a ningún archivo del repositorio.
+
+**Bug real encontrado y corregido antes de tomar cualquier número:** la hoja de
+Pablo usa el PUNTO como separador de miles (formato latino), no la coma -- un
+script de carga que Pablo ya tenía (hecho con otra IA) asumía formato con coma de
+miles, lo que habría dejado todos los precios ~1000 veces más chicos de lo real.
+Se corrigió antes de usar ningún dato, y se verificó fila por fila contra la
+relación matemática interna del catálogo entre el precio final y el costo total
+del plan de pago (exacta en las 61 filas, con redondeo de \$1 en un solo caso) --
+confirma que no quedó ningún error de parseo.
+
+**Verificado:** `py_compile` limpio en `app.py` y en el nuevo módulo. Bug real de
+LaTeX encontrado y corregido en el nuevo caption de precio por clúster (mismo
+patrón del Hallazgo 48: dos símbolos "\$" en el mismo `st.caption()` se
+interpretaban como delimitadores de fórmula -- se escaparon como "\\\$"). Probado
+en vivo con Playwright: con un clúster de 3× Medium Tulip configurado, la pestaña
+muestra "Precio: \$17,925 c/u -- Total del clúster (3x): \$53,775" y
+"Precio total del proyecto (equipos, EXWORKS): \$53,775" como texto plano, sin
+corrupción de fórmula.
+
+**Pendiente, no resuelto en este hallazgo (decisión de Pablo, no adivinada):**
+- **Posible doble conteo del inversor.** Cada precio del catálogo es "turbina +
+  inversor/cargador" ya incluido (la variante "on grid with inverter" del
+  catálogo). El resto de la app (`dimensionador_sistema_eolico.py`) selecciona y
+  cobra un inversor Sol-Ark POR SEPARADO según la potencia total del arreglo -- si
+  se usa este precio como costo de la turbina Y la app además suma el Sol-Ark
+  aparte, el inversor se estaría cobrando dos veces. No se tocó esa lógica en este
+  hallazgo porque falta que Pablo decida entre desactivar el costeo separado del
+  Sol-Ark para estos casos, o aceptar el posible doble conteo por ahora.
+- **El total no refleja el descuento real de un bouquet.** El precio de cada
+  modelo es de UNIDAD SIMPLE; la app lo multiplica por N. En el catálogo, un
+  bouquet real de varias turbinas del mismo tipo con un solo inversor compartido
+  sale con descuento de fábrica frente a unidad×N -- así que el total que muestra
+  la app para clústeres grandes puede quedar un poco por encima del precio real de
+  un pedido consolidado. Se avisa explícitamente en la app, pero no se corrigió.
+- `ecoroof_slanted` y `survival_unit` siguen sin precio real cargado (no hay fila
+  correspondiente en el catálogo que Pablo compartió).
+- Este precio de equipos es EXWORKS (precio de fábrica) -- no incluye flete,
+  importación ni instalación, que ECO Consultor cotiza aparte y que este hallazgo
+  no cubre.
+
+---
+
+### Hallazgo 57 — El cliente elige el artículo exacto del catálogo (no sólo el modelo), y se saca a Sol-Ark de la valoración por ahora
+
+Dos pedidos de Pablo sobre lo que se acababa de armar en Hallazgo 56:
+
+**1) Confidencialidad -- verificación pedida por Pablo.** Preguntó explícitamente si
+se habían usado sólo las 3 columnas autorizadas de su catálogo (Grupo/Cantidad,
+Artículo, Precio 3) o si se había expuesto algo más. Repaso honesto: un archivo de
+verificación intermedio (usado sólo para confirmar que el parseo no tenía errores,
+cruzando Precio_3 contra el costo total del plan 75/25) sí incluía de más dos
+columnas de costo -- se identificó, se avisó y se borró del entorno de trabajo, no
+llegó a ningún archivo del repositorio. También se encontró y se corrigió un
+docstring en `precios_flower_turbines.py` que describía la estructura de las
+columnas confidenciales (planes de pago, márgenes, la fórmula exacta de derivación)
+aunque no citaba ninguna cifra confidencial -- se reescribió para no revelar nada
+de esa estructura.
+
+**2) "El usuario elige el artículo, no la app."** Pablo pidió ir un paso más allá de
+Hallazgo 56: en vez de que la app fije un único precio por modelo, el GRUPO del
+catálogo se filtra automático según el modelo ya elegido en el clúster, pero el
+ARTÍCULO específico (unidad simple vs. bouquet, on-grid vs. off-grid, con o sin
+accesorio) lo elige el cliente a mano.
+
+- `engine/precios_flower_turbines.py`: se reemplaza el diccionario plano
+  `PRECIOS_EXWORKS_USD` (un precio fijo por modelo) por `CATALOGO_FLOWER_TURBINES`
+  -- por cada modelo, la lista completa de artículos reales de su grupo en el
+  catálogo (texto exacto de "Artículo" + su Precio_3), en el orden en que se
+  muestran. El primero de cada lista es el mismo precio que ya se usaba en
+  Hallazgo 56 (unidad simple, on-grid con inversor) para no cambiarle el número a
+  nadie que no toque nada. Nuevas funciones `get_articulos_disponibles(modelo)` y
+  `get_precio_exworks_usd(modelo, articulo=None)`.
+- `app.py`, pestaña "Equipos y configuración": cada clúster ahora tiene un
+  selectbox "Artículo (catálogo Flower Turbines)" -- lista los artículos reales del
+  grupo de ese modelo (texto en inglés, tal cual el catálogo, para que el cliente
+  vea exactamente qué está cotizando). El precio unitario/total del clúster y el
+  total del proyecto usan el artículo elegido, no un valor fijo.
+- No se incluyen las filas de descuento por volumen del catálogo (grupos "20",
+  "50", "100 and above", etc. -- precios especiales para pedidos de 20+/50+/100+
+  unidades de una vez): son un eje distinto (tamaño total del pedido) que este
+  selector por clúster no cubre todavía -- documentado en el docstring, no oculto.
+- **Riesgo abierto, avisado en pantalla, no resuelto:** si el cliente elige un
+  artículo tipo "bouquet de N" (varias turbinas con un solo inversor) pero la
+  cantidad (N) del clúster no coincide, el precio mostrado no tiene sentido -- la
+  app no lo detecta ni corrige solo (sería volver a adivinar), sólo avisa en el
+  caption que revise que la cantidad tenga sentido con el artículo elegido.
+
+**3) "Eliminar los datos de Sol-Ark -- por ahora sólo valoramos Flower Turbines."**
+Pedido explícito de Pablo: dejar de dimensionar y costear el inversor Sol-Ark (y
+el BESS EG4 que depende de él) en el flujo de valoración -- la selección de
+equipo la hace el usuario ahora, y el inversor no es parte de lo que se está
+cotizando en este momento.
+
+- Pestaña "Análisis Financiero": se quitó la llamada a
+  `dimensionar_sistema_eolico_completo()` y el bloque "Arquitectura del sistema"
+  (Inversor + BESS) que mostraba. La potencia pico y la cantidad total de turbinas
+  del arreglo -- los únicos dos datos de esa función que el motor financiero
+  realmente necesitaba -- se calculan ahora directo desde `SPECS_TURBINAS` y los
+  clústeres configurados, sin pasar por Sol-Ark. Confirmado en
+  `financial_engine_eolico.py`: esos dos valores son sólo informativos en el
+  resultado (no cambian Payback/ROI/NPV), así que el reemplazo es exacto.
+- Pestaña "Especificación Técnica": las secciones "Inversor" y "Banco de baterías
+  (BESS)" ya no llaman al dimensionador ni a `solark_specs.py`/`eg4_specs.py` --
+  muestran un aviso explícito ("fuera de alcance por ahora, Hallazgo 57") en vez
+  de datos de Sol-Ark/EG4. El PDF de ficha técnica sigue generándose sin error
+  (`generar_pdf_especificacion` ya manejaba el caso `inversor=None`/`bess=[]`, no
+  hizo falta tocarlo).
+- **No se borró ningún módulo de motor** (`dimensionador_sistema_eolico.py`,
+  `solark_specs.py`, `eg4_specs.py`, `price_calculator.py` siguen íntegros en el
+  repositorio) -- sólo se dejó de llamarlos desde `app.py`. Es una decisión de
+  alcance "por ahora", explícita de Pablo, no un descarte permanente de esa
+  ingeniería.
+
+**Verificado:** `py_compile` limpio, 33/33 pruebas existentes pasando. Probado en
+vivo con Playwright, flujo completo (subir EPW real → configurar clúster → elegir
+artículo "bouquet of 2" → precio se actualiza correctamente de \$17,925 a
+\$34,425 c/u → calcular producción → pestaña Análisis Financiero con precio de
+venta ingresado, Payback/ROI/Viabilidad calculan sin error → pestaña Especificación
+Técnica muestra el aviso de Inversor/BESS fuera de alcance, sin traceback → PDF de
+ficha técnica se descarga sin error).
+
+**Pendiente, no resuelto en este hallazgo:**
+- El selector de artículo no impide combinaciones sin sentido físico (ej. elegir
+  un artículo de 10kW para un modelo de la app que corre la curva de un 5kW) ni de
+  cantidad (bouquet vs. N del clúster, ver arriba) -- queda en manos del criterio
+  del usuario, a propósito (ver Hallazgo 55/56: "dejar de adivinar" aplicado ahora
+  también a la selección de producto).
+- Los descuentos por volumen del catálogo (grupos 20+/50+/100+) no están
+  disponibles todavía en este selector.
+- Sol-Ark/BESS siguen sin costearse -- si más adelante se retoma un sistema
+  Standalone con banco de baterías real, hay que decidir cómo reintegrar ese CAPEX
+  sin duplicar el precio de fábrica de Flower Turbines que ya incluye inversor en
+  varios artículos "on grid with inverter".
+
+---
+
 ## 6. Pendientes activos / bloqueos
 
 - [x] ~~Conseguir A/k reales del Global Wind Atlas~~ — resuelto, y con datos más ricos de lo
@@ -2894,12 +3971,12 @@ EPW-only y todo el trabajo de UI (Hallazgo 36-39) llegó intacto a este punto.
       automatizado (Playwright) en este sandbox — falta que Pablo lo vea y lo use él mismo para
       confirmar que el criterio de diseño ("mejor orden visual") quedó resuelto a su gusto, y no
       sólo funcionalmente correcto.
-- [ ] **Nuevo, de Hallazgo 41/42/43:** conseguir datasheet técnico real (o respuesta de soporte
-      Sol-Ark verificable, no una respuesta de chat) para los 4 inversores residenciales de la
-      cotización (9K-2P, 12K-2P, 12K-2P-LL, 15K-2P) — hoy tienen precio confirmado pero specs
-      técnicas marcadas `Specs_Verificadas: False` en `solark_specs.py` (Hallazgo 43: dimensiones
-      idénticas al 18K y corriente de batería escalada linealmente, patrón de estimación, no de
-      datasheet real). Pregunta ya enviada a Pablo en texto copiable (Hallazgo 42).
+- [x] ~~Nuevo, de Hallazgo 41/42/43: conseguir datasheet técnico real para los 4 inversores
+      residenciales de la cotización (9K-2P, 12K-2P, 12K-2P-LL, 15K-2P)~~ — resuelto (Hallazgo
+      44): Pablo consiguió los 5 PDFs oficiales de Sol-Ark (incluyendo uno nuevo del 18K para
+      recontrastar); `solark_specs.py` reemplazado con los valores reales de cada datasheet,
+      confirmando que los datos fabricados (Hallazgo 43) tenían errores grandes, no sólo de
+      redondeo (ej.: potencia FV del 12K estándar 24,000W fabricado vs. 12,000W real).
 - [ ] **Nuevo, de Hallazgo 41:** conseguir cotización de fábrica/mayorista real de EG4 (hoy el
       costo base usado en `eg4_specs.py` es precio retail de distribuidor en EE.UU., no de
       fábrica como Sol-Ark/Flower Turbines) — afecta la confiabilidad del precio de venta
@@ -2908,11 +3985,60 @@ EPW-only y todo el trabajo de UI (Hallazgo 36-39) llegó intacto a este punto.
       respuesta de chat) los precios de Flower Turbines marcados `costo_usd_fuente:
       "no_verificado"` en `turbine_specs.py` (large_tulip, al13_6m, al13_8m, ecoroof_flat_3,
       ecoroof_flat_5) y el paquete industrial AL13 de 30kW/60kW en `dimensionador_sistema_eolico.py`.
-- [ ] **Nuevo, de Hallazgo 40/41/42/43:** construir la pestaña "Análisis Financiero" en `app.py` —
-      todo el trabajo hecho hasta ahora (`price_calculator.py`, `eg4_specs.py`,
-      `sistema_eolico_completo.py`, `financial_engine_eolico.py`,
-      `dimensionador_sistema_eolico.py`, unificación de `turbine_specs.py`) es capa de datos/
-      lógica de backend; nada está conectado todavía a la interfaz de Streamlit.
+- [x] ~~Nuevo, de Hallazgo 40/41/42/43: construir la pestaña "Análisis Financiero" en
+      `app.py`~~ — resuelto (Hallazgo 48): conectada, con 2 bugs reales encontrados y
+      corregidos probando en vivo con Playwright (texto roto por `$` sin escapar en
+      markdown; BESS cobrando un fee de importación fantasma en modo Hybrid).
+- [x] ~~Nuevo, de Hallazgo 48: sensibilizar el % de mantenimiento anual por default de
+      `financial_engine_eolico.py` (2%)~~ — resuelto (Hallazgo 49): expuesto como slider
+      0-5% en "Parámetros avanzados". Probado hasta 0% con un arreglo real: el "NO VIABLE"
+      se sostiene (payback ≈171 años) — confirma que el 2% no era la causa, es el costo de
+      fábrica de las turbinas vs. el ahorro eléctrico de arreglos chicos.
+- [x] ~~Nuevo, de Hallazgo 47: definir la tipografía de marca de ECO Consultor~~ — resuelto
+      (Hallazgo 49): Montserrat + Dosis, confirmadas en el libro de marca oficial, cargadas
+      vía Google Fonts. Pendiente nuevo: el PDF exportado todavía usa Helvetica (ver
+      Hallazgo 49) por no tener el `.ttf` real en el repositorio.
+- [ ] **Nuevo, de Hallazgo 49:** embeber la fuente real de marca (Montserrat/Dosis, `.ttf`)
+      en el PDF de `engine/pdf_reporte.py` — hoy usa Helvetica estándar, sólo los colores
+      son de marca.
+- [ ] **Nuevo, de Hallazgo 49:** cuantificar en dólares el valor de respaldo/resiliencia
+      energética que se le sugiere a Pablo presentar cuando el sistema da "NO VIABLE" por
+      ahorro puro — hoy es sólo una recomendación en texto en la pestaña financiera.
+- [x] ~~Nuevo, de Hallazgo 49: sensibilizar el fee de importación plano de $2,500/línea,
+      muy por encima del flete real~~ — resuelto (Hallazgo 50): reemplazado por un modelo
+      de flete consolidado por peso (unidad $2,000/pallet $3,500/contenedor $10,000).
+- [ ] **Nuevo, de Hallazgo 50:** confirmar con un forwarder real (no un dato de mercado
+      dado de memoria) las 3 tarifas de flete y los límites de peso por pallet/contenedor
+      usados en `price_calculator.py::calcular_flete_consolidado_usd()`.
+- [ ] **Nuevo, de Hallazgo 50:** confirmar con Flower Turbines si las turbinas se
+      embarcan desarmadas/en secciones (supuesto usado para tratar el peso como el único
+      factor limitante) — si el volumen real limita antes que el peso, los límites de
+      pallet/contenedor podrían estar sobrestimando cuántas unidades entran.
+- [ ] **Nuevo, de Hallazgo 51:** agregar coeficientes de curva de potencia para
+      `ecoroof_flat_3`, `ecoroof_flat_5`, `ecoroof_slanted` y `survival_unit` a
+      `CURVE_COEFFICIENTS` (`flower_turbines_curves.py`) — hoy tienen ficha técnica y
+      costo en `turbine_specs.py` pero no son seleccionables en "Equipos y
+      configuración", así que ningún cálculo de energía las puede usar.
+- [ ] **Nuevo, de Hallazgo 51:** documentar o cuantificar el efecto aerodinámico LOCAL
+      de un techo de edificio (aceleración sobre el borde, turbulencia por
+      parapetos/HVAC, estela de edificios vecinos) para instalaciones tipo Eco-Roof —
+      hoy sólo se extrapola la velocidad REGIONAL a la altura del techo, sin ese
+      efecto local (ver literatura de turbinas integradas a edificios, BIWT).
+- [x] ~~Nuevo, de Hallazgo 51: investigar si GWA a 50/100m o ERA5-Land resuelve el
+      ruido espacial del Valle Central~~ — cerrado con evidencia (Hallazgo 52): GWA-50m
+      mejora el ruido a la mitad pero no lo resuelve, ERA5-Land sigue bloqueado de red
+      y sin poder probarse, y las 3 correcciones adicionales evaluadas (Gower/Köppen,
+      TPI/EN1991-1-4, WorldCover z0) no atacan la causa real o reproducen el mismo
+      ruido en otra variable. No se retoma ninguna línea de ajuste espacial remoto —
+      la salida real es medición local (measure-correlate-predict).
+- [ ] **Nuevo, de Hallazgo 52:** si en algún momento se puede probar ERA5-Land vía
+      Open-Meteo desde un entorno con internet real (Colab, como ya se hizo para CDS) —
+      el notebook `sensibilizar_punto_exacto.ipynb` (Parte 5) ya está escrito y listo
+      para correr, sólo bloqueado por red en este sandbox de desarrollo.
+- [ ] **Nuevo, de Hallazgo 52:** la coordenada de "Puntarenas" en
+      `datos_clima/epw_catalog_global.json` está mal (a 4.5-9.4 km de Heredia cuando la
+      ciudad real está a ~70-80 km) — mismo tipo de error ya conocido en Finca Favorita
+      (Hallazgo 35), confirmar y corregir la coordenada real del catálogo.
 
 ## 7. Cómo navegar el repositorio en este punto
 

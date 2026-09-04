@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 from engine.dimensionador_sistema_eolico import dimensionar_sistema_eolico_completo
 from engine.financial_engine_eolico import FinancialEngineEolico
 from engine.price_calculator import (
-    calcular_precio_final,
+    calcular_precio_venta_proyecto_por_peso,
     calcular_precio_kwh_instalado,
 )
 
@@ -23,6 +23,7 @@ def analizar_sistema_eolico_completo(
     costo_instalacion_pct: float = 0.35,
     vida_util_anos: int = 40,
     tasa_descuento_pct: float = 8.0,
+    costo_mantenimiento_pct_anual: float = 0.02,
 ) -> Dict:
     """
     Análisis técnico y financiero integrado de sistema eólico.
@@ -47,6 +48,11 @@ def analizar_sistema_eolico_completo(
         costo_instalacion_pct   : Costo instalación como % de equipos (default 35%)
         vida_util_anos          : Vida útil del proyecto (default 40)
         tasa_descuento_pct      : Tasa descuento para NPV (default 8%)
+        costo_mantenimiento_pct_anual: Mantenimiento anual como % del CAPEX (default
+                                  2%) -- antes quedaba fijo en `FinancialEngineEolico`
+                                  sin exponerse acá; es el parámetro que más pesa en
+                                  si un proyecto sale "VIABLE" o no (Hallazgo 49), así
+                                  que se deja ajustable en vez de escondido.
 
     Returns:
         dict con análisis técnico-financiero completo. Si el arreglo no tiene
@@ -92,19 +98,43 @@ def analizar_sistema_eolico_completo(
 
     costo_inversor_base = arquitectura["inversor_seleccionado"]["costo_USD"]
     costo_bess_base = arquitectura["bess_seleccionado"]["costo_total_USD"]
+    costo_bess_base_efectivo = costo_bess_base if sistema_tipo == "Standalone" else 0.0
 
-    # PASO 3: Aplicar margen y costo de importación
-    costo_turbinas_con_margen = calcular_precio_final(costo_turbinas_total)
-    costo_inversor_con_margen = calcular_precio_final(costo_inversor_base)
+    # PASO 3: Aplicar margen y flete de importación -- 2 o 3 líneas (turbinas/inversor,
+    # y BESS sólo si el sistema es Standalone). El flete se calcula UNA vez sobre el
+    # peso TOTAL real del embarque consolidado (calcular_precio_venta_proyecto_por_peso,
+    # Hallazgo 50) y se reparte proporcional al costo base de cada categoría --
+    # reemplaza el viejo fee plano de $2,500/línea (modo_importacion "por_sku"/
+    # "por_proyecto") que sobreestimaba el flete real hasta ~300x en turbinas chicas.
+    #
+    # OJO (bug real encontrado con Playwright, Hallazgo 48): en Hybrid, el BESS no
+    # existe -- si se pasa como un costo (y un peso) de 0 en la lista, el flete de
+    # todas formas se reparte una porción a esa línea (cobra "importar algo de $0"),
+    # inflando el CAPEX en el valor de un fee fantasma. Se excluye la línea de BESS
+    # por completo del cálculo cuando no aplica, en vez de pasarla como cero.
+    costos_categorias = [costo_turbinas_total, costo_inversor_base]
+    pesos_categorias = [
+        arquitectura["arreglo_turbinas"]["peso_total_kg"],
+        arquitectura["inversor_seleccionado"]["peso_kg"],
+    ]
     if sistema_tipo == "Standalone":
-        costo_bess_con_margen = calcular_precio_final(costo_bess_base)
+        costos_categorias.append(costo_bess_base_efectivo)
+        pesos_categorias.append(arquitectura["bess_seleccionado"]["peso_total_kg"])
+
+    precios_por_categoria, _, flete_info = calcular_precio_venta_proyecto_por_peso(
+        costos_categorias, pesos_categorias)
+
+    if sistema_tipo == "Standalone":
+        costo_turbinas_con_margen, costo_inversor_con_margen, costo_bess_con_margen = precios_por_categoria
     else:
+        costo_turbinas_con_margen, costo_inversor_con_margen = precios_por_categoria
         costo_bess_con_margen = 0.0
 
     # PASO 4: Análisis financiero
     fe = FinancialEngineEolico(
         tarifa_kwh_USD=tarifa_kwh_USD,
         costo_instalacion_pct=costo_instalacion_pct,
+        costo_mantenimiento_pct_anual=costo_mantenimiento_pct_anual,
         vida_util_anos=vida_util_anos,
         tasa_descuento_pct=tasa_descuento_pct,
     )
@@ -143,10 +173,9 @@ def analizar_sistema_eolico_completo(
         "costos_sin_margen": {
             "turbinas_usd": round(costo_turbinas_total, 2),
             "inversor_usd": round(costo_inversor_base, 2),
-            "bess_usd": round(costo_bess_base, 2) if sistema_tipo == "Standalone" else 0.0,
+            "bess_usd": round(costo_bess_base_efectivo, 2),
             "total_equipos_usd": round(
-                costo_turbinas_total + costo_inversor_base + (costo_bess_base if sistema_tipo == "Standalone" else 0),
-                2,
+                costo_turbinas_total + costo_inversor_base + costo_bess_base_efectivo, 2
             ),
         },
 
@@ -159,6 +188,11 @@ def analizar_sistema_eolico_completo(
                 2,
             ),
         },
+
+        # Flete consolidado por peso real del embarque (Hallazgo 50) -- modo elegido
+        # (unidad/pallet/contenedor), cuántas unidades de transporte y el costo total
+        # ya repartido arriba en costos_con_margen_importacion.
+        "flete": flete_info,
 
         "analisis_financiero": analisis_financiero,
 
@@ -184,6 +218,7 @@ def analizar_sistema_eolico_completo(
             energia_anual_kWh,
             tarifa_kwh_USD,
             sistema_tipo,
+            horas_autonomia,
         ),
     }
 
@@ -194,36 +229,37 @@ def _generar_recomendaciones(
     energia_anual_kwh: float,
     tarifa_kwh_usd: float,
     sistema_tipo: str,
+    horas_autonomia: int = 12,
 ) -> List[str]:
     """Genera recomendaciones basadas en análisis financiero."""
     recomendaciones = []
 
     if sistema_tipo == "Standalone":
         recomendaciones.append(
-            f"Sistema Standalone: Requiere banco de baterías para autonomía. "
-            f"Capacidad dimensionada para 12 horas de respaldo."
+            f"Sistema Standalone: requiere banco de baterías para autonomía. "
+            f"Capacidad dimensionada para {horas_autonomia} horas de respaldo."
         )
     else:
         recomendaciones.append(
-            f"Sistema Hybrid: Integración con paneles solares existentes. "
-            f"No requiere BESS pero puede beneficiarse de ella."
+            "Sistema Hybrid: integración con paneles solares existentes. "
+            "No requiere BESS pero puede beneficiarse de ella."
         )
 
     # Payback
     if analisis["payback_years"] is not None:
         if analisis["payback_years"] < 10:
             recomendaciones.append(
-                f"✓ Payback atractivo: {analisis['payback_years']} años. "
+                f"Payback atractivo: {analisis['payback_years']} años. "
                 f"Inversión se recupera en {int(analisis['payback_years'])} años."
             )
         elif analisis["payback_years"] < 20:
             recomendaciones.append(
-                f"⚠ Payback moderado: {analisis['payback_years']} años. "
+                f"Payback moderado: {analisis['payback_years']} años. "
                 f"Considera reducir costo de instalación o aumentar generación."
             )
         else:
             recomendaciones.append(
-                f"✗ Payback muy largo: {analisis['payback_years']} años. "
+                f"Payback muy largo: {analisis['payback_years']} años. "
                 f"Proyecto no es económicamente viable con parámetros actuales."
             )
 
@@ -231,49 +267,52 @@ def _generar_recomendaciones(
     if analisis["roi_percentage"] is not None:
         if analisis["roi_percentage"] > 100:
             recomendaciones.append(
-                f"✓ ROI excelente: {analisis['roi_percentage']:.1f}% en 40 años. "
+                f"ROI excelente: {analisis['roi_percentage']:.1f}% en la vida útil del proyecto. "
                 f"Proyecto altamente rentable."
             )
         elif analisis["roi_percentage"] > 0:
             recomendaciones.append(
-                f"✓ ROI positivo: {analisis['roi_percentage']:.1f}% en 40 años. "
+                f"ROI positivo: {analisis['roi_percentage']:.1f}% en la vida útil del proyecto. "
                 f"Proyecto viable económicamente."
             )
         else:
             recomendaciones.append(
-                f"✗ ROI negativo: {analisis['roi_percentage']:.1f}%. "
-                f"Proyecto no es rentable."
+                f"ROI negativo: {analisis['roi_percentage']:.1f}%. Proyecto no es rentable."
             )
 
     # NPV
     if analisis["npv_usd"] is not None:
         if analisis["npv_usd"] > 0:
             recomendaciones.append(
-                f"✓ NPV positivo: ${analisis['npv_usd']:,.0f} USD. "
-                f"Proyecto crea valor económico."
+                f"NPV positivo: ${analisis['npv_usd']:,.0f} USD. Proyecto crea valor económico."
             )
         else:
             recomendaciones.append(
-                f"✗ NPV negativo: ${analisis['npv_usd']:,.0f} USD. "
+                f"NPV negativo: ${analisis['npv_usd']:,.0f} USD. "
                 f"Considera aumentar tarifa proyectada o reducir costos."
             )
 
-    # Productividad
+    # Productividad -- del SISTEMA COMPLETO (energía anual total / potencia pico total del
+    # arreglo), no de una sola turbina; aclarado explícitamente (confusión real de Pablo,
+    # Hallazgo 49) porque el texto anterior no lo distinguía.
     productividad = energia_anual_kwh / (potencia_pico_w / 1000)
     if productividad > 8000:
         recomendaciones.append(
-            f"✓ Productividad excelente: {productividad:.0f} kWh/kW/año. "
-            f"Ubicación con recursos eólicos muy buenos."
+            f"Productividad del sistema completo excelente: {productividad:.0f} kWh/kW/año "
+            f"(no es de una sola turbina, es el total del arreglo). Ubicación con recursos "
+            f"eólicos muy buenos."
         )
     elif productividad > 4000:
         recomendaciones.append(
-            f"✓ Productividad buena: {productividad:.0f} kWh/kW/año. "
-            f"Ubicación con recursos eólicos moderados a buenos."
+            f"Productividad del sistema completo buena: {productividad:.0f} kWh/kW/año "
+            f"(no es de una sola turbina, es el total del arreglo). Ubicación con recursos "
+            f"eólicos moderados a buenos."
         )
     else:
         recomendaciones.append(
-            f"⚠ Productividad baja: {productividad:.0f} kWh/kW/año. "
-            f"Considerar aumentar número de turbinas o mejorar altura."
+            f"Productividad del sistema completo baja: {productividad:.0f} kWh/kW/año "
+            f"(no es de una sola turbina, es el total del arreglo). Considerar aumentar "
+            f"número de turbinas o mejorar altura de buje."
         )
 
     return recomendaciones
