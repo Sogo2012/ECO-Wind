@@ -536,7 +536,7 @@ with st.sidebar:
     st.divider()
     st.markdown(f"""
     <div style="font-size:0.62rem; color:{GRIS}; line-height:1.6;">
-        ECO Consultor
+        © {date.today().year} ECO Consultor. Todos los derechos reservados.
     </div>
     """, unsafe_allow_html=True)
 
