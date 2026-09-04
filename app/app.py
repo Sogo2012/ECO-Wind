@@ -71,10 +71,8 @@ from engine.epw_real import (
 )
 from engine.financial_engine_eolico import FinancialEngineEolico
 from engine.tarifas_electricas_cr import calcular_ahorro_tarifa_horaria_usd, calcular_ahorro_tarifa_comercial_usd
-from engine.precios_flower_turbines import get_precio_exworks_usd
-from engine.dimensionador_sistema_eolico import dimensionar_sistema_eolico_completo, VOLTAJE_TURBINAS_V
-from engine.solark_specs import get_solark_df
-from engine.eg4_specs import get_eg4_df
+from engine.precios_flower_turbines import get_articulos_disponibles, get_precio_exworks_usd
+from engine.dimensionador_sistema_eolico import VOLTAJE_TURBINAS_V
 from engine.pdf_reporte import generar_pdf_especificacion
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -732,10 +730,23 @@ with tab_config:
                 st.session_state.clusters.pop(i)
                 st.rerun()
 
-            _precio_unitario = get_precio_exworks_usd(c["modelo"])
-            if _precio_unitario is None:
-                st.caption("Precio: no disponible todavía para este modelo.")
+            _articulos_disponibles = get_articulos_disponibles(c["modelo"])
+            if not _articulos_disponibles:
+                st.caption("Precio: no disponible todavía para este modelo (no hay artículo cargado en el catálogo).")
             else:
+                _opciones_articulo = [art for art, _ in _articulos_disponibles]
+                _articulo_guardado = c.get("articulo")
+                _idx_articulo = (
+                    _opciones_articulo.index(_articulo_guardado)
+                    if _articulo_guardado in _opciones_articulo else 0
+                )
+                c["articulo"] = st.selectbox(
+                    "Artículo (catálogo Flower Turbines)", options=_opciones_articulo,
+                    index=_idx_articulo, key=f"articulo_{i}",
+                    help="Precio de venta real de fábrica -- elegí la variante exacta que vas a "
+                         "cotizar (unidad simple, bouquet, on/off-grid, con o sin accesorio).",
+                )
+                _precio_unitario = get_precio_exworks_usd(c["modelo"], c["articulo"])
                 # Dos "$" en el mismo st.caption() arman un par que Streamlit interpreta
                 # como LaTeX ($...$) -- se escapan con "\$" (mismo bug real de Hallazgo 48).
                 st.caption(
@@ -777,19 +788,20 @@ with tab_config:
 
     st.divider()
     _precio_total_proyecto = sum(
-        (get_precio_exworks_usd(c["modelo"]) or 0) * c["N"] for c in st.session_state.clusters
+        (get_precio_exworks_usd(c["modelo"], c.get("articulo")) or 0) * c["N"]
+        for c in st.session_state.clusters
     )
     _algun_modelo_sin_precio = any(
-        get_precio_exworks_usd(c["modelo"]) is None for c in st.session_state.clusters
+        get_precio_exworks_usd(c["modelo"], c.get("articulo")) is None for c in st.session_state.clusters
     )
     st.metric("Precio total del proyecto (equipos, EXWORKS)", f"${_precio_total_proyecto:,.0f}")
     st.caption(
-        "Precio de venta de fábrica de Flower Turbines (turbina + inversor/cargador incluido, "
-        "catálogo real -- Hallazgo 56). NO incluye flete, importación ni instalación -- eso lo "
-        "agrega ECO Consultor aparte. Es el precio de UNIDAD SIMPLE × cantidad -- un bouquet "
-        "grande real de fábrica suele salir con descuento, así que este total puede quedar un "
-        "poco por encima del precio real de un pedido consolidado."
-        + (" Al menos un modelo elegido todavía no tiene precio real cargado." if _algun_modelo_sin_precio else "")
+        "Precio de venta de fábrica del artículo elegido en cada clúster (catálogo real de "
+        "Flower Turbines -- Hallazgo 56/57). NO incluye flete, importación ni instalación -- eso "
+        "lo agrega ECO Consultor aparte. Es el precio del artículo elegido × cantidad de "
+        "turbinas del clúster -- si elegís un artículo de \"bouquet\" (varias turbinas con un "
+        "solo inversor), revisá que la cantidad (N) del clúster tenga sentido con ese artículo."
+        + (" Al menos un modelo elegido todavía no tiene ningún artículo cargado." if _algun_modelo_sin_precio else "")
     )
 
     st.divider()
@@ -1140,45 +1152,15 @@ with tab_financiero:
                     tasa_descuento_pct = st.number_input(
                         "Tasa de descuento para NPV (%)", min_value=0.0, value=8.0, step=0.5)
 
-            # Dimensionamiento técnico (inversor + BESS): sigue siendo AUTOMÁTICO -- es
-            # selección de equipo compatible según la electricidad real del arreglo
-            # (Hallazgo 40/41), no un costo adivinado. Lo que deja de adivinarse acá es
-            # el PRECIO del proyecto (Hallazgo 53 en avance-de-proyecto.md).
-            arquitectura = dimensionar_sistema_eolico_completo(
-                turbinas_seleccionadas=turbinas_seleccionadas,
-                consumo_diario_kWh=consumo_diario_kWh,
-                horas_autonomia=int(horas_autonomia),
-                energia_anual_kWh=kwh_anual_total,
+            # Hallazgo 57: se deja de dimensionar/costear el inversor Sol-Ark y el BESS acá --
+            # por ahora la app sólo valora equipo Flower Turbines (turbinas), a pedido explícito
+            # de Pablo. Sólo hace falta la potencia pico y la cantidad total de turbinas del
+            # arreglo (el motor financiero las usa sólo como dato informativo, no cambian
+            # Payback/ROI/NPV) -- eso no depende de qué inversor se use.
+            _potencia_pico_total_W = sum(
+                SPECS_TURBINAS[modelo]["potencia_nominal_w"] for modelo in turbinas_seleccionadas
             )
-
-            st.divider()
-
-            if arquitectura.get("pendiente_ingenieria_acople"):
-                st.warning(arquitectura["nota_pendiente"])
-            else:
-                inversor = arquitectura["inversor_seleccionado"]
-                if not inversor.get("specs_verificadas", True):
-                    st.warning(
-                        f"El inversor seleccionado ({inversor['modelo']}) todavía no tiene datasheet "
-                        "oficial verificado -- la corriente de carga de batería usada es una estimación "
-                        "(ver Hallazgo 43 en avance-de-proyecto.md).",
-                    )
-
-                st.markdown("**Arquitectura del sistema**")
-                col_arq1, col_arq2 = st.columns(2)
-                with col_arq1:
-                    st.write(f"**Inversor:** {inversor['modelo']}")
-                    st.write(
-                        f"Capacidad de carga de batería: {inversor['capacidad_bateria_max_W']:,.0f} W "
-                        f"(arreglo: {arquitectura['arreglo_turbinas']['potencia_pico_total_W']:,.0f} W pico)"
-                    )
-                with col_arq2:
-                    if sistema_tipo == "Standalone":
-                        bess = arquitectura["bess_seleccionado"]
-                        st.write(f"**BESS:** {', '.join(b['modelo'] for b in bess['bess_seleccionados'])}")
-                        st.write(f"Capacidad total: {bess['capacidad_total_kWh']:.1f} kWh")
-                    else:
-                        st.write("**BESS:** no aplica (sistema Hybrid, sin banco de baterías)")
+            _cantidad_turbinas_total = len(turbinas_seleccionadas)
 
             st.divider()
             st.markdown("**Costeo real del proyecto (Hallazgo 53 -- dejar de adivinar)**")
@@ -1245,8 +1227,8 @@ with tab_financiero:
                         capex_usd=precio_venta_usd,
                         energia_anual_kWh=kwh_anual_total,
                         mantenimiento_anual_usd=mantenimiento_anual_usd,
-                        potencia_pico_W=arquitectura["arreglo_turbinas"]["potencia_pico_total_W"],
-                        n_turbinas=arquitectura["arreglo_turbinas"]["cantidad"],
+                        potencia_pico_W=_potencia_pico_total_W,
+                        n_turbinas=_cantidad_turbinas_total,
                         sistema_tipo=sistema_tipo,
                     )
                 elif modo_tarifa == "Tarifa comercial de Costa Rica (T-CO)":
@@ -1263,8 +1245,8 @@ with tab_financiero:
                         ahorro_anual_usd=resultado_co["ahorro_anual_usd"],
                         mantenimiento_anual_usd=mantenimiento_anual_usd,
                         energia_anual_kWh=kwh_anual_total,
-                        potencia_pico_W=arquitectura["arreglo_turbinas"]["potencia_pico_total_W"],
-                        n_turbinas=arquitectura["arreglo_turbinas"]["cantidad"],
+                        potencia_pico_W=_potencia_pico_total_W,
+                        n_turbinas=_cantidad_turbinas_total,
                         sistema_tipo=sistema_tipo,
                     )
                 else:
@@ -1282,8 +1264,8 @@ with tab_financiero:
                         ahorro_anual_usd=resultado_tou["ahorro_anual_usd"],
                         mantenimiento_anual_usd=mantenimiento_anual_usd,
                         energia_anual_kWh=kwh_anual_total,
-                        potencia_pico_W=arquitectura["arreglo_turbinas"]["potencia_pico_total_W"],
-                        n_turbinas=arquitectura["arreglo_turbinas"]["cantidad"],
+                        potencia_pico_W=_potencia_pico_total_W,
+                        n_turbinas=_cantidad_turbinas_total,
                         sistema_tipo=sistema_tipo,
                     )
 
@@ -1333,11 +1315,12 @@ with tab_financiero:
                     )
 
             st.caption(
-                "Motor: `dimensionador_sistema_eolico.py` (arquitectura técnica, automática) + "
-                "`financial_engine_eolico.py` (Hallazgo 53: CAPEX, mantenimiento y precio de venta "
-                "ingresados directo por el usuario) + `tarifas_electricas_cr.py` (Hallazgo 54: "
-                "tarifas horarias reales de CNFL/ICE cruzadas contra la producción hora por hora; "
-                "Hallazgo 55: tarifa comercial T-CO), en vez de una tarifa plana adivinada."
+                "Motor: `financial_engine_eolico.py` (Hallazgo 53: CAPEX, mantenimiento y precio "
+                "de venta ingresados directo por el usuario) + `tarifas_electricas_cr.py` "
+                "(Hallazgo 54: tarifas horarias reales de CNFL/ICE cruzadas contra la producción "
+                "hora por hora; Hallazgo 55: tarifa comercial T-CO), en vez de una tarifa plana "
+                "adivinada. El inversor/BESS (Sol-Ark/EG4) no se dimensiona ni se costea acá por "
+                "ahora -- Hallazgo 57."
             )
 
 
@@ -1380,38 +1363,6 @@ with tab_especificacion:
                 SPECS_TURBINAS[c["modelo"]]["potencia_nominal_w"] * int(c["N"])
                 for c in st.session_state.clusters
             )
-
-            # Reusa consumo/autonomía ya definidos en "Análisis Financiero" (mismo sistema,
-            # sin volver a preguntarlos) -- si esa pestaña no se visitó todavía en esta
-            # sesión, usa valores por default razonables sólo para poder mostrar inversor/BESS.
-            _consumo_spec = st.session_state.get("fin_consumo_diario", 20.0)
-            _horas_spec = st.session_state.get("fin_horas_autonomia", 12)
-
-            arquitectura_spec = dimensionar_sistema_eolico_completo(
-                turbinas_seleccionadas=turbinas_seleccionadas,
-                consumo_diario_kWh=_consumo_spec,
-                horas_autonomia=int(_horas_spec),
-                energia_anual_kWh=kwh_anual_total,
-            )
-
-            # Algunas filas de solark_specs.py / eg4_specs.py no traen todos los campos
-            # todavía (ej. garantía de los inversores comerciales 30K/60K, o dimensiones del
-            # EG4 WallMount Indoor) -- pandas los deja en NaN. Sin este helper, la tabla le
-            # muestra "nan" al cliente en un reporte que se supone profesional (Hallazgo 49).
-            def _ndv(valor, sufijo="", formato=None, prefijo=""):
-                if pd.isna(valor):
-                    return "No verificado todavía"
-                return f"{prefijo}{valor:{formato}}{sufijo}" if formato else f"{prefijo}{valor}{sufijo}"
-
-            def _ndv_rango(v_min, v_max, sufijo=""):
-                if pd.isna(v_min) or pd.isna(v_max):
-                    return "No verificado todavía"
-                return f"{v_min}-{v_max}{sufijo}"
-
-            def _ndv_dims(alto, ancho, profundo, sufijo=""):
-                if pd.isna(alto) or pd.isna(ancho) or pd.isna(profundo):
-                    return "No verificado todavía"
-                return f"{alto} x {ancho} x {profundo}{sufijo}"
 
             # Va acumulando los mismos datos que se muestran en pantalla para poder
             # generar el PDF al final sin tener que volver a calcular nada (Hallazgo 49).
@@ -1484,88 +1435,22 @@ with tab_especificacion:
 
             st.divider()
             st.markdown("### Inversor")
-            _inversor_spec = arquitectura_spec["inversor_seleccionado"]
-            if not _inversor_spec.get("compatible"):
-                _msg_inv_no_compat = (
-                    arquitectura_spec.get("nota_pendiente")
-                    or _inversor_spec.get("razon")
-                    or "No se encontró un inversor residencial compatible con este arreglo."
-                )
-                st.warning(_msg_inv_no_compat)
-                _datos_pdf["inversor_no_compatible_msg"] = _msg_inv_no_compat
-            else:
-                if not _inversor_spec.get("specs_verificadas", True):
-                    st.warning(
-                        f"El inversor seleccionado ({_inversor_spec['modelo']}) todavía no tiene "
-                        "datasheet oficial verificado -- ver Hallazgo 43 en avance-de-proyecto.md."
-                    )
-                _fila_inv = get_solark_df().query("Modelo == @_inversor_spec['modelo']")
-                if not _fila_inv.empty:
-                    _inv = _fila_inv.iloc[0]
-                    st.markdown(f"**Sol-Ark {_inv['Modelo']}**")
-                    st.caption("Fabricante: Sol-Ark LLC")
-                    # Algunas filas de solark_specs.py no tienen todos los campos (ej. garantía de
-                    # los modelos comerciales 30K/60K) -- pandas los deja en NaN. _ndv() evita
-                    # mostrarle "nan" al cliente en un reporte que se supone profesional.
-                    _filas_inv = [
-                        ("Potencia FV máxima", _ndv(_inv["Potencia_FV_Max_W"], " W", ",.0f")),
-                        ("Potencia CA continua", _ndv(_inv["Potencia_Salida_CA_Continua_W"], " W", ",.0f")),
-                        ("Voltaje CA de salida", _ndv(_inv["Voltaje_Salida_CA"])),
-                        ("Voltaje nominal de batería", _ndv(_inv["Voltaje_Nominal_CC_V"], " V")),
-                        ("Rango operativo de batería", _ndv_rango(_inv["Voltaje_Operativo_CC_Min_V"], _inv["Voltaje_Operativo_CC_Max_V"], " V")),
-                        ("Corriente máx. de carga/descarga", _ndv(_inv["Corriente_Carga_Descarga_Max_A"], " A")),
-                        ("Corriente máx. de passthrough", _ndv(_inv["Corriente_Passthrough_A"], " A")),
-                        ("Dimensiones (Al x An x Pr)", _ndv_dims(_inv["Altura_mm"], _inv["Ancho_mm"], _inv["Profundidad_mm"], " mm")),
-                        ("Peso", _ndv(_inv["Peso_kg"], " kg")),
-                        ("Garantía", _ndv(_inv["Garantia_Anos"], " años")),
-                        ("Costo de fábrica/cotización", _ndv(_inv["Costo_USD"], formato=",.2f", prefijo="$")),
-                    ]
-                    st.dataframe(
-                        pd.DataFrame([{"Especificación": f, "Valor": v} for f, v in _filas_inv]),
-                        hide_index=True, use_container_width=True,
-                    )
-                    _datos_pdf["inversor"] = {
-                        "nombre": f"Sol-Ark {_inv['Modelo']}", "fabricante": "Sol-Ark LLC",
-                        "filas": _filas_inv,
-                    }
+            _msg_inversor_fuera_alcance = (
+                "Fuera de alcance por ahora -- a pedido explícito de Pablo, la app sólo valora "
+                "equipo Flower Turbines (turbinas); el inversor Sol-Ark no se dimensiona ni se "
+                "costea acá (Hallazgo 57)."
+            )
+            st.info(_msg_inversor_fuera_alcance)
+            _datos_pdf["inversor_no_compatible_msg"] = _msg_inversor_fuera_alcance
 
             st.divider()
             st.markdown("### Banco de baterías (BESS)")
-            _bess_spec = arquitectura_spec.get("bess_seleccionado")
-            if not _bess_spec:
-                st.write("No aplica -- no se pudo dimensionar el inversor todavía.")
-            else:
-                _df_eg4 = get_eg4_df()
-                for _modulo in _bess_spec["bess_seleccionados"]:
-                    _fila_bess = _df_eg4.query("Modelo == @_modulo['modelo']")
-                    if _fila_bess.empty:
-                        continue
-                    _b = _fila_bess.iloc[0]
-                    st.markdown(f"**{_b['Modelo']}**")
-                    st.caption(f"Fabricante: {_b['Fabricante']}")
-                    _filas_bess = [
-                        ("Capacidad", f"{_ndv(_b['Capacidad_kWh'])} kWh ({_ndv(_b['Capacidad_Ah'])} Ah)"),
-                        ("Voltaje nominal", _ndv(_b["Voltaje_Nominal_CC_V"], " V")),
-                        ("Corriente máx. BMS", _ndv(_b["Corriente_BMS_Max_A"], " A")),
-                        ("Ciclos a 80% DoD", _ndv(_b["Ciclos_80pct_DoD"], formato=",")),
-                        ("Dimensiones (Al x An x Pr)", _ndv_dims(_b["Altura_cm"], _b["Ancho_cm"], _b["Profundidad_cm"], " cm")),
-                        ("Peso", _ndv(_b["Peso_kg"], " kg")),
-                        ("Garantía", _ndv(_b["Garantia_Anos"], " años")),
-                        ("Costo (retail, no de fábrica)", _ndv(_b["Costo_USD"], formato=",.2f", prefijo="$")),
-                    ]
-                    st.dataframe(
-                        pd.DataFrame([{"Especificación": f, "Valor": v} for f, v in _filas_bess]),
-                        hide_index=True, use_container_width=True,
-                    )
-                    _datos_pdf["bess"].append({
-                        "nombre": _b["Modelo"], "fabricante": _b["Fabricante"], "filas": _filas_bess,
-                    })
+            st.write("No aplica por ahora -- ver nota de Inversor arriba (Hallazgo 57).")
 
             st.caption(
-                "Fuente de los datos: fichas técnicas oficiales de fábrica (Flower Turbines, "
-                "Sol-Ark) y datasheets de distribuidor (EG4) -- ver `turbine_specs.py`, "
-                "`solark_specs.py`, `eg4_specs.py` en el repositorio para el detalle de cada dato "
-                "y su procedencia."
+                "Fuente de los datos: fichas técnicas oficiales de fábrica de Flower Turbines -- "
+                "ver `turbine_specs.py` y `precios_flower_turbines.py` en el repositorio para el "
+                "detalle de cada dato y su procedencia."
             )
 
             st.divider()

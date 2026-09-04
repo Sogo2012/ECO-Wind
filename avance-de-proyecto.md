@@ -3636,6 +3636,100 @@ corrupción de fórmula.
 
 ---
 
+### Hallazgo 57 — El cliente elige el artículo exacto del catálogo (no sólo el modelo), y se saca a Sol-Ark de la valoración por ahora
+
+Dos pedidos de Pablo sobre lo que se acababa de armar en Hallazgo 56:
+
+**1) Confidencialidad -- verificación pedida por Pablo.** Preguntó explícitamente si
+se habían usado sólo las 3 columnas autorizadas de su catálogo (Grupo/Cantidad,
+Artículo, Precio 3) o si se había expuesto algo más. Repaso honesto: un archivo de
+verificación intermedio (usado sólo para confirmar que el parseo no tenía errores,
+cruzando Precio_3 contra el costo total del plan 75/25) sí incluía de más dos
+columnas de costo -- se identificó, se avisó y se borró del entorno de trabajo, no
+llegó a ningún archivo del repositorio. También se encontró y se corrigió un
+docstring en `precios_flower_turbines.py` que describía la estructura de las
+columnas confidenciales (planes de pago, márgenes, la fórmula exacta de derivación)
+aunque no citaba ninguna cifra confidencial -- se reescribió para no revelar nada
+de esa estructura.
+
+**2) "El usuario elige el artículo, no la app."** Pablo pidió ir un paso más allá de
+Hallazgo 56: en vez de que la app fije un único precio por modelo, el GRUPO del
+catálogo se filtra automático según el modelo ya elegido en el clúster, pero el
+ARTÍCULO específico (unidad simple vs. bouquet, on-grid vs. off-grid, con o sin
+accesorio) lo elige el cliente a mano.
+
+- `engine/precios_flower_turbines.py`: se reemplaza el diccionario plano
+  `PRECIOS_EXWORKS_USD` (un precio fijo por modelo) por `CATALOGO_FLOWER_TURBINES`
+  -- por cada modelo, la lista completa de artículos reales de su grupo en el
+  catálogo (texto exacto de "Artículo" + su Precio_3), en el orden en que se
+  muestran. El primero de cada lista es el mismo precio que ya se usaba en
+  Hallazgo 56 (unidad simple, on-grid con inversor) para no cambiarle el número a
+  nadie que no toque nada. Nuevas funciones `get_articulos_disponibles(modelo)` y
+  `get_precio_exworks_usd(modelo, articulo=None)`.
+- `app.py`, pestaña "Equipos y configuración": cada clúster ahora tiene un
+  selectbox "Artículo (catálogo Flower Turbines)" -- lista los artículos reales del
+  grupo de ese modelo (texto en inglés, tal cual el catálogo, para que el cliente
+  vea exactamente qué está cotizando). El precio unitario/total del clúster y el
+  total del proyecto usan el artículo elegido, no un valor fijo.
+- No se incluyen las filas de descuento por volumen del catálogo (grupos "20",
+  "50", "100 and above", etc. -- precios especiales para pedidos de 20+/50+/100+
+  unidades de una vez): son un eje distinto (tamaño total del pedido) que este
+  selector por clúster no cubre todavía -- documentado en el docstring, no oculto.
+- **Riesgo abierto, avisado en pantalla, no resuelto:** si el cliente elige un
+  artículo tipo "bouquet de N" (varias turbinas con un solo inversor) pero la
+  cantidad (N) del clúster no coincide, el precio mostrado no tiene sentido -- la
+  app no lo detecta ni corrige solo (sería volver a adivinar), sólo avisa en el
+  caption que revise que la cantidad tenga sentido con el artículo elegido.
+
+**3) "Eliminar los datos de Sol-Ark -- por ahora sólo valoramos Flower Turbines."**
+Pedido explícito de Pablo: dejar de dimensionar y costear el inversor Sol-Ark (y
+el BESS EG4 que depende de él) en el flujo de valoración -- la selección de
+equipo la hace el usuario ahora, y el inversor no es parte de lo que se está
+cotizando en este momento.
+
+- Pestaña "Análisis Financiero": se quitó la llamada a
+  `dimensionar_sistema_eolico_completo()` y el bloque "Arquitectura del sistema"
+  (Inversor + BESS) que mostraba. La potencia pico y la cantidad total de turbinas
+  del arreglo -- los únicos dos datos de esa función que el motor financiero
+  realmente necesitaba -- se calculan ahora directo desde `SPECS_TURBINAS` y los
+  clústeres configurados, sin pasar por Sol-Ark. Confirmado en
+  `financial_engine_eolico.py`: esos dos valores son sólo informativos en el
+  resultado (no cambian Payback/ROI/NPV), así que el reemplazo es exacto.
+- Pestaña "Especificación Técnica": las secciones "Inversor" y "Banco de baterías
+  (BESS)" ya no llaman al dimensionador ni a `solark_specs.py`/`eg4_specs.py` --
+  muestran un aviso explícito ("fuera de alcance por ahora, Hallazgo 57") en vez
+  de datos de Sol-Ark/EG4. El PDF de ficha técnica sigue generándose sin error
+  (`generar_pdf_especificacion` ya manejaba el caso `inversor=None`/`bess=[]`, no
+  hizo falta tocarlo).
+- **No se borró ningún módulo de motor** (`dimensionador_sistema_eolico.py`,
+  `solark_specs.py`, `eg4_specs.py`, `price_calculator.py` siguen íntegros en el
+  repositorio) -- sólo se dejó de llamarlos desde `app.py`. Es una decisión de
+  alcance "por ahora", explícita de Pablo, no un descarte permanente de esa
+  ingeniería.
+
+**Verificado:** `py_compile` limpio, 33/33 pruebas existentes pasando. Probado en
+vivo con Playwright, flujo completo (subir EPW real → configurar clúster → elegir
+artículo "bouquet of 2" → precio se actualiza correctamente de \$17,925 a
+\$34,425 c/u → calcular producción → pestaña Análisis Financiero con precio de
+venta ingresado, Payback/ROI/Viabilidad calculan sin error → pestaña Especificación
+Técnica muestra el aviso de Inversor/BESS fuera de alcance, sin traceback → PDF de
+ficha técnica se descarga sin error).
+
+**Pendiente, no resuelto en este hallazgo:**
+- El selector de artículo no impide combinaciones sin sentido físico (ej. elegir
+  un artículo de 10kW para un modelo de la app que corre la curva de un 5kW) ni de
+  cantidad (bouquet vs. N del clúster, ver arriba) -- queda en manos del criterio
+  del usuario, a propósito (ver Hallazgo 55/56: "dejar de adivinar" aplicado ahora
+  también a la selección de producto).
+- Los descuentos por volumen del catálogo (grupos 20+/50+/100+) no están
+  disponibles todavía en este selector.
+- Sol-Ark/BESS siguen sin costearse -- si más adelante se retoma un sistema
+  Standalone con banco de baterías real, hay que decidir cómo reintegrar ese CAPEX
+  sin duplicar el precio de fábrica de Flower Turbines que ya incluye inversor en
+  varios artículos "on grid with inverter".
+
+---
+
 ## 6. Pendientes activos / bloqueos
 
 - [x] ~~Conseguir A/k reales del Global Wind Atlas~~ — resuelto, y con datos más ricos de lo
