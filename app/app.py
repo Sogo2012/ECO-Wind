@@ -1075,11 +1075,11 @@ with tab_financiero:
                 tramo_co = "pequeno" if tramo_label.startswith("≤") else "grande"
                 with col_c3:
                     tipo_cambio_crc_usd = st.number_input(
-                        "Tipo de cambio (₡ por USD)", min_value=1.0, value=520.0, step=1.0,
+                        "Tipo de cambio (₡ por USD)", min_value=1.0, value=_tipo_cambio, step=1.0,
                         key="fin_co_tipo_cambio",
-                        help="Verificá el tipo de cambio de referencia del Banco Central de Costa "
-                             "Rica (BCCR) antes de cotizar -- cambia a diario, este es sólo un punto "
-                             "de partida editable, no un valor fijo del sistema.",
+                        help="Precargado con el tipo de cambio de venta del día del Banco Central "
+                             "de Costa Rica (BCCR, ver sidebar) -- cambia a diario, es un punto de "
+                             "partida editable, no un valor fijo del sistema.",
                     )
 
                 try:
@@ -1120,11 +1120,11 @@ with tab_financiero:
                     )
                 with col_t3:
                     tipo_cambio_crc_usd = st.number_input(
-                        "Tipo de cambio (₡ por USD)", min_value=1.0, value=520.0, step=1.0,
+                        "Tipo de cambio (₡ por USD)", min_value=1.0, value=_tipo_cambio, step=1.0,
                         key="fin_tipo_cambio",
-                        help="Verificá el tipo de cambio de referencia del Banco Central de Costa "
-                             "Rica (BCCR) antes de cotizar -- cambia a diario, este es sólo un punto "
-                             "de partida editable, no un valor fijo del sistema.",
+                        help="Precargado con el tipo de cambio de venta del día del Banco Central "
+                             "de Costa Rica (BCCR, ver sidebar) -- cambia a diario, es un punto de "
+                             "partida editable, no un valor fijo del sistema.",
                     )
 
                 try:
