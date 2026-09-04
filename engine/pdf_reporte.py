@@ -114,9 +114,6 @@ def generar_pdf_especificacion(datos, logo_path=None):
         "elevacion_m": float, "voltaje_bus_v": float,
         "turbinas": [{"nombre", "cantidad", "numero_parte", "filas": [(campo, valor), ...],
                        "imagen": ruta_o_None}, ...],
-        "inversor": {"nombre", "fabricante", "filas": [...]} o None,
-        "inversor_no_compatible_msg": str o None,
-        "bess": [{"nombre", "fabricante", "filas": [...]}, ...],
       }
     """
     estilos = _estilos()
@@ -171,36 +168,11 @@ def generar_pdf_especificacion(datos, logo_path=None):
         story.append(_tabla_specs(t["filas"]))
         story.append(Spacer(1, 6))
 
-    story.append(Paragraph("Inversor", estilos["seccion"]))
-    if datos.get("inversor"):
-        inv = datos["inversor"]
-        story.append(Paragraph(inv["nombre"], estilos["equipo"]))
-        story.append(Paragraph(f"Fabricante: {inv['fabricante']}", estilos["cuerpo"]))
-        story.append(Spacer(1, 3))
-        story.append(_tabla_specs(inv["filas"]))
-    else:
-        story.append(Paragraph(
-            datos.get("inversor_no_compatible_msg")
-            or "No se encontró un inversor residencial compatible con este arreglo.",
-            estilos["cuerpo"],
-        ))
-
-    story.append(Paragraph("Banco de baterías (BESS)", estilos["seccion"]))
-    if datos["bess"]:
-        for b in datos["bess"]:
-            story.append(Paragraph(b["nombre"], estilos["equipo"]))
-            story.append(Paragraph(f"Fabricante: {b['fabricante']}", estilos["cuerpo"]))
-            story.append(Spacer(1, 3))
-            story.append(_tabla_specs(b["filas"]))
-            story.append(Spacer(1, 6))
-    else:
-        story.append(Paragraph("No aplica.", estilos["cuerpo"]))
-
     story.append(Spacer(1, 10))
     story.append(HRFlowable(width="100%", thickness=0.75, color=colors.HexColor("#CBD5E0"), spaceAfter=6))
     story.append(Paragraph(
-        "Fuente de los datos: fichas técnicas oficiales de fábrica (Flower Turbines, Sol-Ark) "
-        "y datasheets de distribuidor (EG4). ECO Consultor -- Energy Conservation Opportunities.",
+        "Fuente de los datos: fichas técnicas oficiales de fábrica de Flower Turbines. "
+        "ECO Consultor -- Energy Conservation Opportunities.",
         estilos["pie"],
     ))
 

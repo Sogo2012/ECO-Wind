@@ -1331,9 +1331,9 @@ with tab_financiero:
 
 with tab_especificacion:
     st.caption(
-        "Datos generales del sistema y ficha técnica de fábrica de cada equipo que lo compone "
-        "-- turbinas, inversor y banco de baterías. Usa las turbinas ya configuradas en "
-        "\"Equipos y configuración\" y la producción ya calculada en \"Resultados\"."
+        "Datos generales del sistema y ficha técnica de fábrica de las turbinas -- usa las "
+        "turbinas ya configuradas en \"Equipos y configuración\" y la producción ya calculada "
+        "en \"Resultados\"."
     )
 
     if not st.session_state.get("calculo_listo"):
@@ -1375,9 +1375,6 @@ with tab_especificacion:
                 "elevacion_m": elevacion_m,
                 "voltaje_bus_v": VOLTAJE_TURBINAS_V,
                 "turbinas": [],
-                "inversor": None,
-                "inversor_no_compatible_msg": None,
-                "bess": [],
             }
 
             st.markdown("### Datos generales del sistema")
@@ -1410,7 +1407,6 @@ with tab_especificacion:
                     with col_specs:
                         st.markdown(f"**{_specs['nombre']}** -- cantidad: {_cantidad}")
                         st.caption(f"Fabricante: Flower Turbines -- N° de parte: {_specs['numero_parte']}")
-                        _costo = _specs.get("costo_usd")
                         _filas_turbina = [
                             ("Potencia nominal", f"{_specs['potencia_nominal_w']} W"),
                             ("Velocidad a potencia nominal", f"{_specs['viento_potencia_nominal_ms']} m/s"),
@@ -1421,10 +1417,7 @@ with tab_especificacion:
                             ("Diámetro del rotor", f"{_specs['diametro_rotor_m']} m"),
                             ("Altura de pala", f"{_specs['altura_pala_m']} m"),
                             ("Peso", f"{_specs['peso_total_kg']} kg"),
-                            ("Vida de diseño", f"{_specs['vida_diseno_anos']} años"),
                             ("Cimentación requerida", _specs["cimentacion_requerida"]),
-                            ("Costo de fábrica (unitario)",
-                             f"${_costo:,.2f}" if _costo is not None else "No verificado todavía"),
                         ]
                         st.dataframe(
                             pd.DataFrame([{"Especificación": f, "Valor": v} for f, v in _filas_turbina]),
@@ -1436,18 +1429,6 @@ with tab_especificacion:
                         })
 
             st.divider()
-            st.markdown("### Inversor")
-            _msg_inversor_fuera_alcance = (
-                "Esta cotización cubre las turbinas Flower Turbines -- el inversor no se "
-                "dimensiona ni se costea en esta sección."
-            )
-            st.info(_msg_inversor_fuera_alcance)
-            _datos_pdf["inversor_no_compatible_msg"] = _msg_inversor_fuera_alcance
-
-            st.divider()
-            st.markdown("### Banco de baterías (BESS)")
-            st.write("No aplica a esta cotización.")
-
             st.caption(
                 "Fuente de los datos: fichas técnicas oficiales de fábrica de Flower Turbines."
             )
