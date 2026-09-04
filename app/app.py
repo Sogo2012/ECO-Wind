@@ -1482,67 +1482,89 @@ with tab_especificacion:
                 "enviar al cliente."
             )
 
-            with st.spinner("Armando el informe ejecutivo..."):
-                # Contexto climático: mismos gráficos que la pestaña "Contexto climático",
-                # generados de nuevo acá (no reutiliza el objeto ya mostrado en pantalla)
-                # para poder exportarlos a PNG sin tocar lo que el usuario está viendo.
-                _media_confirmada = resultado_clima["media"]
-                _z0_actual = st.session_state.get("z0_avanzado", Z0_DEFAULT)
-                _altura_explorar = max(st.session_state.get("altura_explorar_slider", 10.0), 1.0)
+            # BUG REAL corregido acá: esto generaba los gráficos (vía kaleido, que
+            # necesita un navegador Chrome/Chromium real) SIN estar detrás de un botón --
+            # Streamlit ejecuta el cuerpo de TODAS las pestañas en cada rerun (no sólo la
+            # que se está mirando), así que esto corría de nuevo cada vez que se apretaba
+            # CUALQUIER botón en CUALQUIER pestaña (ej. "Calcular producción del
+            # proyecto"). Si kaleido/Chrome no estaban disponibles en el entorno, esto
+            # tumbaba TODA la app con un error crudo en cada rerun posterior -- no dejaba
+            # ni navegar a otras pestañas sin perder los datos cargados. Ahora sólo corre
+            # cuando el usuario aprieta este botón, y una falla acá ya no rompe el resto
+            # de la app.
+            if st.button("Generar informe ejecutivo (PDF)"):
+                try:
+                    with st.spinner("Armando el informe ejecutivo..."):
+                        # Contexto climático: mismos gráficos que la pestaña "Contexto
+                        # climático", generados de nuevo acá (no reutiliza el objeto ya
+                        # mostrado en pantalla) para poder exportarlos a PNG sin tocar lo
+                        # que el usuario está viendo.
+                        _media_confirmada = resultado_clima["media"]
+                        _z0_actual = st.session_state.get("z0_avanzado", Z0_DEFAULT)
+                        _altura_explorar = max(st.session_state.get("altura_explorar_slider", 10.0), 1.0)
 
-                if "meta" in resultado_clima:
-                    _meta = resultado_clima["meta"]
-                    _fuente_texto = (
-                        f"Estación real: {_meta['estacion']} ({_meta['pais']}, WMO {_meta['wmo']}) -- "
-                        f"lat={_meta['lat']:.4f}, lon={_meta['lon']:.4f}, elevación={_meta['elevacion_m']:.0f}m. "
-                        f"Media anual real: {_media_confirmada:.2f} m/s."
+                        if "meta" in resultado_clima:
+                            _meta = resultado_clima["meta"]
+                            _fuente_texto = (
+                                f"Estación real: {_meta['estacion']} ({_meta['pais']}, WMO {_meta['wmo']}) -- "
+                                f"lat={_meta['lat']:.4f}, lon={_meta['lon']:.4f}, elevación={_meta['elevacion_m']:.0f}m. "
+                                f"Media anual real: {_media_confirmada:.2f} m/s."
+                            )
+                        else:
+                            _fuente_texto = f"Media anual real del viento en el sitio: {_media_confirmada:.2f} m/s."
+
+                        _fig_heatmap_pdf, _ = crear_heatmap_plotly(
+                            resultado_clima["hm_json"], media_anual=_media_confirmada,
+                            altura_m=_altura_explorar, z0=_z0_actual,
+                        )
+
+                        _datos_pdf["clima"] = {
+                            "fuente_texto": _fuente_texto,
+                            "img_rosa": fig_a_png(crear_rosa_vientos_plotly(resultado_clima["rosa_detallada"])),
+                            "img_heatmap": fig_a_png(_fig_heatmap_pdf) if _fig_heatmap_pdf else None,
+                            "img_perfil": fig_a_png(crear_perfil_viento_plotly(
+                                _media_confirmada, z0=_z0_actual,
+                                altura_max=max(_altura_explorar * 1.15, 10.0), altura_marcada=_altura_explorar,
+                            )),
+                        }
+
+                        _datos_pdf["produccion"] = {
+                            "filas_tabla": [
+                                (NOMBRES_MODELO.get(r["modelo"], r["modelo"]), r["N"], r["altura_buje"],
+                                 f"{r['kwh_anual']:,.0f}", f"{r['v_hub_medio']:.2f}",
+                                 f"{r['pct_horas_bajo_cutin']:.1f}")
+                                for r in _prod["resultados"]
+                            ],
+                            "correccion_densidad_pct": _prod["correccion_densidad_pct"],
+                            "img_mensual": fig_a_png(crear_produccion_mensual_plotly(_prod["kwh_mensual_total"])),
+                            "img_duracion": fig_a_png(crear_curva_duracion_plotly(_prod["serie_total_w"])),
+                        }
+
+                        _datos_pdf["financiero"] = st.session_state.get("ultimo_resultado_financiero")
+
+                        st.session_state["informe_ejecutivo_pdf"] = generar_pdf_informe_ejecutivo(
+                            _datos_pdf, logo_path=LOGO_ECO if os.path.exists(LOGO_ECO) else None)
+                        st.session_state["informe_ejecutivo_sin_financiero"] = not _datos_pdf["financiero"]
+                except Exception as e:
+                    st.session_state["informe_ejecutivo_pdf"] = None
+                    st.error(
+                        f"No se pudo generar el informe ejecutivo: {e} -- si el problema persiste, "
+                        "puede ser que falte un navegador Chrome/Chromium instalado en este entorno "
+                        "(hace falta para exportar los gráficos al PDF)."
                     )
-                else:
-                    _fuente_texto = f"Media anual real del viento en el sitio: {_media_confirmada:.2f} m/s."
 
-                _fig_heatmap_pdf, _ = crear_heatmap_plotly(
-                    resultado_clima["hm_json"], media_anual=_media_confirmada,
-                    altura_m=_altura_explorar, z0=_z0_actual,
+            if st.session_state.get("informe_ejecutivo_pdf"):
+                if st.session_state.get("informe_ejecutivo_sin_financiero"):
+                    st.caption(
+                        "El informe no incluye CAPEX/Payback/ROI/NPV -- completá el precio de "
+                        "venta y la tarifa eléctrica en \"Análisis Financiero\" y volvé a generar "
+                        "el informe para sumarlos."
+                    )
+                st.download_button(
+                    "📄 Descargar informe ejecutivo (PDF)",
+                    data=st.session_state["informe_ejecutivo_pdf"],
+                    file_name=f"ECO-Wind_informe_ejecutivo_{date.today().isoformat()}.pdf",
+                    mime="application/pdf",
+                    type="primary",
                 )
-
-                _datos_pdf["clima"] = {
-                    "fuente_texto": _fuente_texto,
-                    "img_rosa": fig_a_png(crear_rosa_vientos_plotly(resultado_clima["rosa_detallada"])),
-                    "img_heatmap": fig_a_png(_fig_heatmap_pdf) if _fig_heatmap_pdf else None,
-                    "img_perfil": fig_a_png(crear_perfil_viento_plotly(
-                        _media_confirmada, z0=_z0_actual,
-                        altura_max=max(_altura_explorar * 1.15, 10.0), altura_marcada=_altura_explorar,
-                    )),
-                }
-
-                _datos_pdf["produccion"] = {
-                    "filas_tabla": [
-                        (NOMBRES_MODELO.get(r["modelo"], r["modelo"]), r["N"], r["altura_buje"],
-                         f"{r['kwh_anual']:,.0f}", f"{r['v_hub_medio']:.2f}",
-                         f"{r['pct_horas_bajo_cutin']:.1f}")
-                        for r in _prod["resultados"]
-                    ],
-                    "correccion_densidad_pct": _prod["correccion_densidad_pct"],
-                    "img_mensual": fig_a_png(crear_produccion_mensual_plotly(_prod["kwh_mensual_total"])),
-                    "img_duracion": fig_a_png(crear_curva_duracion_plotly(_prod["serie_total_w"])),
-                }
-
-                _datos_pdf["financiero"] = st.session_state.get("ultimo_resultado_financiero")
-
-                _pdf_bytes = generar_pdf_informe_ejecutivo(
-                    _datos_pdf, logo_path=LOGO_ECO if os.path.exists(LOGO_ECO) else None)
-
-            if not _datos_pdf["financiero"]:
-                st.caption(
-                    "El informe no va a incluir CAPEX/Payback/ROI/NPV todavía -- completá el "
-                    "precio de venta y la tarifa eléctrica en \"Análisis Financiero\" para sumarlos."
-                )
-
-            st.download_button(
-                "📄 Descargar informe ejecutivo (PDF)",
-                data=_pdf_bytes,
-                file_name=f"ECO-Wind_informe_ejecutivo_{date.today().isoformat()}.pdf",
-                mime="application/pdf",
-                type="primary",
-            )
 

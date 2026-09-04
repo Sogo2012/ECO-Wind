@@ -3776,6 +3776,75 @@ amplio compila y no rompe el camino feliz (EPW válido sigue cargando igual).
 
 ---
 
+### Hallazgo 59 — Bug real y grave: el informe ejecutivo en PDF (recién agregado por otra sesión) tumbaba TODA la app en cualquier pestaña
+
+Pablo reportó que la app "se reinicia" al apretar "Calcular producción del
+proyecto", y que después no lo dejaba navegar a "Resultados" sin perder todos los
+datos cargados -- pidió revisar si el último push (el informe ejecutivo en PDF que
+había pedido) tenía algo que ver.
+
+**Sí, exactamente eso.** El commit que agregó el informe ejecutivo
+(`5989bd6 feat(pdf): informe ejecutivo...`) puso la generación de los gráficos del
+PDF (`fig_a_png()`, que exporta cada gráfico Plotly a PNG vía **kaleido**, que a su
+vez necesita un navegador Chrome/Chromium real instalado) **suelta dentro del
+cuerpo de la pestaña "Especificación Técnica", sin ningún botón que la proteja**.
+
+El bug real: Streamlit no ejecuta sólo la pestaña que se está mirando -- corre el
+código de las 6 pestañas en CADA rerun de la app (los `with tab_x:` son sólo
+contenedores de layout, no un `if` que salte el código de las pestañas no
+visibles). Como resultado, apretar "Calcular producción del proyecto" en
+"Equipos y configuración" dejaba `calculo_listo=True`, lo que hacía que el bloque
+del informe ejecutivo en "Especificación Técnica" **corriera también, en el mismo
+rerun**, sin que el usuario hubiera tocado esa pestaña ni pedido ningún PDF. Si
+kaleido/Chrome no están disponibles en el entorno (confirmado: no lo están en este
+sandbox de desarrollo, y probablemente tampoco en la máquina local de Pablo si no
+reinstaló dependencias), esto lanzaba `RuntimeError: Kaleido is required...` sin
+atrapar -- reproducido exacto con Playwright, traceback real:
+
+```
+File ".../app.py", line 1510, in <module>
+    "img_rosa": fig_a_png(crear_rosa_vientos_plotly(resultado_clima["rosa_detallada"])),
+...
+File ".../plotly/io/_kaleido.py", line 145, in to_image
+    raise RuntimeError(KALEIDO_REQUIRED_MSG)
+```
+
+Y como `calculo_listo` se queda en `True` en el `session_state`, ese crash se
+repetía en **cada rerun posterior** (cualquier click en cualquier pestaña) hasta
+que Pablo recargaba la página de cero -- de ahí "se reinicia" y "no me deja
+navegar sin borrar todos los datos".
+
+**Corregido:** la generación del informe ejecutivo (gráficos + PDF) ahora vive
+detrás de un botón explícito ("Generar informe ejecutivo (PDF)") -- sólo corre si
+el usuario está parado en esa pestaña Y aprieta ese botón, nunca como efecto
+secundario de otro botón en otra pestaña. Además se envolvió en un `try/except`
+propio: si kaleido/Chrome fallan, se muestra un `st.error()` contenido en esa
+sección (con el motivo real del fallo) en vez de tumbar toda la app. El PDF
+generado se guarda en `session_state` para que el botón de descarga sobreviva
+reruns posteriores sin tener que re-generar nada.
+
+**Verificado con Playwright:** reproducido el crash original (traceback con
+"kaleido" confirmado tras "Calcular producción"), aplicado el fix, y confirmado
+que: (1) "Calcular producción del proyecto" ya no crashea; (2) navegar por las 6
+pestañas después de calcular no menciona "kaleido" ni tracebacks en ninguna;
+(3) apretar "Generar informe ejecutivo (PDF)" a propósito SÍ dispara kaleido, y
+como este sandbox no tiene Chrome instalado, falla -- pero de forma contenida (un
+mensaje de error legible en esa sección, el resto de la app sigue intacta); (4) la
+configuración de clústeres sigue exactamente igual después de todo esto -- ya no
+se pierden datos. `py_compile` limpio, 50/50 pruebas pasando.
+
+**Pendiente, no resuelto en este hallazgo:**
+- No se pudo probar el camino feliz (el PDF generándose de verdad con gráficos)
+  en este sandbox -- no hay forma de instalar Chrome/Chromium acá (sin acceso a
+  los repositorios completos de apt). En Cloud Run debería funcionar solo, porque
+  el Dockerfile ya instala `chromium` vía apt (agregado en el mismo push). **Para
+  uso LOCAL (no Docker), hace falta `pip install -r requirements.txt` (trae
+  `kaleido>=1.0.0`) Y un Chrome/Chromium real instalado en la máquina** -- si
+  Pablo prueba localmente sin eso, va a seguir viendo el mensaje de error (ya no
+  un crash) hasta que instale un navegador o corra `plotly_get_chrome`.
+
+---
+
 ## 6. Pendientes activos / bloqueos
 
 - [x] ~~Conseguir A/k reales del Global Wind Atlas~~ — resuelto, y con datos más ricos de lo
