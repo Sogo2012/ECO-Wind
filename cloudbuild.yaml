@@ -52,12 +52,16 @@ steps:
       # - "GOOGLE_SHEETS_API_KEY=projects/$PROJECT_ID/secrets/google-sheets-api-key/versions/latest"
       #
       # Token del BCCR (motor de tipo de cambio, engine/tipo_cambio_bccr.py):
-      # crear primero el secreto una vez con
-      #   echo -n "TU_TOKEN_BCCR" | gcloud secrets create bccr-bearer-token --data-file=-
+      # el secreto ya se creó en Secret Manager con el nombre BCCR_BEARER_TOKEN.
+      # Antes de descomentar esto, dale a la cuenta de servicio de Cloud Run
+      # permiso para leerlo (una sola vez):
+      #   gcloud secrets add-iam-policy-binding BCCR_BEARER_TOKEN \
+      #     --member="serviceAccount:PROJECT_NUMBER-compute@developer.gserviceaccount.com" \
+      #     --role="roles/secretmanager.secretAccessor"
       # y luego descomentar esto (o combinarlo con el --set-secrets de arriba
       # separando los pares con una coma):
       # - "--set-secrets"
-      # - "BCCR_BEARER_TOKEN=bccr-bearer-token:latest"
+      # - "BCCR_BEARER_TOKEN=BCCR_BEARER_TOKEN:latest"
     timeout: "600s"
 
 # Configuración de la compilación
