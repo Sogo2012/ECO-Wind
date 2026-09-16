@@ -3907,6 +3907,107 @@ reconecta). Se agregó `--no-cpu-throttling` en `cloudbuild.yaml` junto con el
 
 ---
 
+### Hallazgo 61 — Toggle de idioma Español/English: la app pasa de hablarle al equipo de desarrollo a hablarle directo al cliente final
+
+Pedido explícito: "necesito un toggle para hacer la app en español o en inglés,
+necesito que la jerga sea la de un ingeniero eléctrico y mecánico, que elimines
+los prints de cosas que digan hallazgos o que me hablaron a mí como
+desarrollador, la app ahora le hablará al mundo y debe poder emitir reportes en
+español o en inglés según esté seleccionado el toggle".
+
+**Arquitectura -- `engine/i18n.py` (nuevo módulo):** un diccionario
+`TRANSLATIONS` (309 claves) con una entrada `{"es": ..., "en": ...}` por cada
+texto visible de la app, y dos funciones de acceso:
+- `t(clave, **kwargs)` -- lee `st.session_state["idioma"]` (para usar en
+  `app.py`, dentro de una sesión de Streamlit activa).
+- `tr(clave, idioma, **kwargs)` -- mismo diccionario, con el idioma explícito
+  en vez de leído de sesión (para `engine/pdf_reporte.py`, que no depende de
+  una sesión de Streamlit activa y así se mantiene testeable de forma
+  independiente).
+
+Regla seguida en las ~310 claves: cualquier número que ya viene con formato
+(`:,.0f`, `:.1f`, etc.) se resuelve como string en Python ANTES de pasarlo a
+`t()`/`tr()` -- la plantilla de traducción sólo lleva texto y `{marcadores}`
+simples, nunca el formato numérico, porque el orden de las palabras cambia
+entre español e inglés.
+
+**Toggle:** `st.radio` al principio del sidebar (siempre visible, sin importar
+la pestaña activa), ligado a `st.session_state.idioma` (`"es"` por defecto).
+Cambia el idioma de TODA la app en el siguiente rerun: sidebar, las 6
+pestañas, los 5 gráficos Plotly compartidos (rosa de vientos, heatmap,
+producción mensual, curva de duración, perfil logarítmico), el mapa Folium, y
+el informe ejecutivo en PDF.
+
+**Cómo se hizo (por el volumen: ~1600 líneas de `app.py` + 582 de
+`pdf_reporte.py`):** la sección compartida (imports, sidebar, título de
+página, `NOMBRES_MODELO`, meses, los 5 gráficos Plotly, mapa de estaciones) se
+tradujo directo. Las 6 pestañas de `app.py` (`tab_clima`, `tab_contexto`,
+`tab_config`, `tab_resultados`, `tab_financiero`, `tab_especificacion`) se
+tradujeron con 6 agentes en SECUENCIA (uno a la vez, nunca en paralelo, para
+no arriesgar una escritura concurrente sobre el mismo archivo), y en paralelo
+con esa cadena, otro agente tradujo `engine/pdf_reporte.py` completo (archivo
+separado, sin riesgo de choque) -- sus 65 entradas de traducción se
+devolvieron como datos (no se editó `i18n.py` desde ese agente en paralelo) y
+se insertaron después, en un paso de fusión.
+
+**Jerga técnica:** se usó un glosario fijo (wind speed, hub height, terrain
+roughness/z0, air-density correction, power curve, duration curve, CAPEX/OPEX,
+Payback period, ROI, NPV -- NPV se mantiene igual en español, ya se usaba así
+antes de este cambio --, discount rate, DC bus, weather station, EPW file,
+etc.) para que los mismos conceptos se digan siempre igual en toda la app, no
+traducidos de forma independiente pestaña por pestaña.
+
+**Bug real encontrado y corregido durante la verificación:** el campo
+`modo_tarifa` (tipo de tarifa eléctrica elegido: plana / T-CO / horaria
+ARESEP) se guarda en `session_state` SIEMPRE en español a propósito -- es una
+clave de comparación `==` en `tab_financiero`, traducirla ahí rompería esas
+comparaciones. `pdf_reporte.py` lo imprimía tal cual en la tabla de
+"Modalidad de tarifa eléctrica" del informe -- si el informe se generaba en
+inglés, esa única fila igual salía en español. Se agregó
+`tr_modo_tarifa()` en `engine/i18n.py` (mapea los 3 valores internos
+conocidos a su traducción, y si no reconoce el valor lo muestra tal cual en
+vez de romper el informe) y se corrigió el llamado en `pdf_reporte.py`.
+
+**Qué NO se tradujo (a propósito):**
+- Los valores de datos de fábrica que vienen de `engine/turbine_specs.py`
+  (`tipo_generador`, `cimentacion_requerida`, `material_palas`, etc.) --
+  son datos del motor, no texto de la UI; traducirlos es un trabajo
+  aparte (cambiar `engine/turbine_specs.py`), fuera del alcance de este
+  cambio.
+- Los códigos de tarifa oficiales ARESEP/CNFL/ICE ("T-REH (0-500 kWh)",
+  "T-RH", "T-MT (Media Tensión Max)") -- son claves de lookup exactas contra
+  `engine/tarifas_electricas_cr.py`, no texto traducible.
+- `generar_pdf_lista_precios()` (función sin uso desde ningún lado de la app,
+  código huérfano) se tradujo también, de yapa, con el mismo patrón, aunque
+  no era el foco.
+- Se aprovechó para sacar el único `print()` de debug que mencionaba un
+  "Hallazgo NN" (`engine/dimensionador_sistema_eolico.py`, bloque de demo
+  `if __name__ == "__main__":`, nunca se ejecuta desde la app real).
+
+**Verificación:**
+- `python3 -m py_compile` sobre los 4 archivos tocados, sin errores.
+- Suite completa de pytest: 49/49 pasan.
+- Sin duplicados de clave en las 309 entradas de `TRANSLATIONS` (chequeo
+  programático, no sólo visual).
+- Grep de "Hallazgo"/"Pablo" sobre los VALORES de traducción (no sobre
+  comentarios de Python, que se dejan igual): cero coincidencias.
+- App real levantada y navegada con Playwright: las 6 pestañas cambian
+  correctamente de español a inglés y viceversa, sin ningún texto viejo
+  residual.
+- Informe PDF generado por código real (no mockeado) en los dos idiomas, con
+  y sin bloque financiero -- 4 PDFs sin excepciones, texto extraído y
+  verificado sin claves `[[sin_traducir]]`, sin "Hallazgo"/"Pablo", y con el
+  fix de `modo_tarifa` confirmado visualmente (la versión en inglés muestra
+  "Costa Rica commercial rate (T-CO)", no "Tarifa comercial de Costa Rica").
+
+**Pendiente / a criterio de Pablo:** el toggle no tiene forma de "recordar" el
+idioma entre sesiones distintas del navegador (vive en `session_state`, se
+resetea a español en cada sesión nueva) -- si se quiere persistir por
+usuario/dispositivo haría falta guardarlo en cookie o parámetro de URL, no se
+implementó porque no se pidió.
+
+---
+
 ## 6. Pendientes activos / bloqueos
 
 - [x] ~~Conseguir A/k reales del Global Wind Atlas~~ — resuelto, y con datos más ricos de lo
