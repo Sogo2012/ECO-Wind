@@ -388,7 +388,7 @@ if __name__ == "__main__":
 
     print()
     print("=" * 90)
-    print("Caso 1, flete consolidado por peso (Hallazgo 50, reemplaza modo_importacion)")
+    print("Caso 1, flete consolidado por peso (reemplaza modo_importacion)")
     print("=" * 90)
     r = dimensionar_sistema_eolico_completo(
         turbinas_seleccionadas=["small_tulip", "medium_tulip", "three_m_tulip"],
