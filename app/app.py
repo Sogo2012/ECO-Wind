@@ -1,48 +1,31 @@
 """
-ECO | Wind -- Simulador de microgeneración eólica (Fase 2).
+ECO | Wind -- Simulador de microgeneración eólica.
 
-Sobre el motor validado de Pista A (engine/simulador_pista_a.py +
-engine/flower_turbines_curves.py, Hallazgo 12), extendido con clima
-multi-sitio, corrección de densidad, multi-clúster y gráficos (Hallazgo 17
--- ver avance-de-proyecto.md).
+Motor validado de Pista A (engine/simulador_pista_a.py +
+engine/flower_turbines_curves.py), extendido con clima multi-sitio,
+corrección de densidad de aire, multi-clúster, gráficos interactivos,
+análisis financiero (CAPEX/OPEX/Payback/ROI/NPV), informe ejecutivo en PDF
+y toggle de idioma ES/EN (engine/i18n.py) -- ver avance-de-proyecto.md
+para el detalle de cada decisión de diseño.
 
-ALCANCE HONESTO (Hallazgo 36 -- simplificación deliberada de Pablo, ver
-avance-de-proyecto.md: "nos olvidamos de todas las fuentes, solo vamos a
-usar EPW"):
-- Un solo flujo de clima, homologado con DDP-lite/Skyplus (Hallazgo 19,
-  v3): buscás tu sitio por nombre, coordenada o clic en el mapa, la app te
-  muestra las estaciones climáticas REALES más cercanas (catálogo de
-  climate.onebuilding.org, 5,276 estaciones, 20 países -- sin acotar a
-  Costa Rica), y elegís una. No hay "modos" que elegir de antemano.
-- San José, Nicoya, Liberia y Finca Favorita (Limón) ya están validados
-  localmente con su propio EPW real (Hallazgo 18): si la búsqueda te
-  devuelve una de estas 4 estaciones, la app sirve ese archivo local en
-  vez de descargar de nuevo lo mismo -- invisible para vos, sigue siendo
-  "elegí una estación real de la lista" (ver
-  engine/epw_real.py::sitio_precacheado_cercano()).
-- ¿Tu sitio no tiene una estación real cerca, o ya tenés el EPW de otro
-  lugar que querés usar como referencia? Subilo directo -- misma pestaña,
-  opción secundaria (mismo patrón que DDP-lite/Skyplus). No hay
-  sensibilización espacial de magnitud por ninguna fuente externa (GWA,
-  NASA POWER, ERA5, Köppen): esas vías se investigaron a fondo (Hallazgo
-  21-30) y se descartaron por decisión de producto -- el ráster crudo de
-  GWA a 10m resultó más ruidoso que la señal real que debía resolver
-  (Hallazgo 35). Con datos limitados de verdad, un EPW real elegido a
-  conciencia por el usuario es más confiable que un ajuste automático
-  sobre una fuente que ya demostró fallar en Costa Rica.
-- Lo único que SÍ se sensibiliza, y con una fuente propia: la velocidad
-  del EPW (medida a 10m) se lleva a la altura real de buje de cada turbina
-  con el perfil logarítmico de viento de ladybug-tools/ladybug
-  (`engine/simulador_pista_a.py::wind_at_height()`, Hallazgo 20 -- fórmula
-  y tabla de terrenos verificadas contra el código fuente real de
-  ladybug.windprofile). Terreno de referencia meteorológica fijo en
-  "country" (aeropuerto/EPW, z0=0.1m); terreno del sitio destino
-  seleccionable por el usuario (Equipos y configuración > Parámetros
-  avanzados).
+ALCANCE:
+- Un solo flujo de clima: buscás tu sitio por nombre, coordenada o clic en
+  el mapa, la app muestra las estaciones climáticas REALES más cercanas
+  (catálogo de climate.onebuilding.org, 5,276 estaciones, 20 países), y
+  elegís una -- o subís directo tu propio archivo EPW como referencia. No
+  hay sensibilización espacial de magnitud por ninguna fuente externa
+  (GWA, NASA POWER, ERA5, Köppen); con datos limitados de verdad, un EPW
+  real elegido a conciencia es más confiable que un ajuste automático
+  sobre una fuente que demostró fallar en Costa Rica.
+- Lo único que sí se sensibiliza, con una fuente propia: la velocidad del
+  EPW (medida a 10m) se lleva a la altura real de buje de cada turbina con
+  el perfil logarítmico de viento de ladybug-tools/ladybug
+  (`engine/simulador_pista_a.py::wind_at_height()`). Terreno de referencia
+  meteorológica fijo en "country" (aeropuerto/EPW, z0=0.1m); terreno del
+  sitio destino seleccionable por el usuario (Equipos y configuración >
+  Parámetros avanzados).
 - Elevación: siempre del encabezado del EPW real elegido o subido -- nunca
   tecleada a mano.
-- Sin PDF, sin registro de leads todavía.
-- Corre local; despliegue a Cloud Run sigue pendiente.
 """
 import json
 import os
@@ -75,8 +58,16 @@ from engine.tarifas_electricas_cr import calcular_ahorro_tarifa_horaria_usd, cal
 from engine.precios_flower_turbines import get_articulos_disponibles, get_precio_exworks_usd
 from engine.dimensionador_sistema_eolico import VOLTAJE_TURBINAS_V
 from engine.pdf_reporte import generar_pdf_informe_ejecutivo
+from engine.i18n import t, tr, meses_abreviados, IDIOMA_DEFAULT, IDIOMAS_DISPONIBLES
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Idioma activo de la sesión -- se inicializa ACÁ (antes de set_page_config y de
+# cualquier otro uso de t()) para que el título de la pestaña del navegador y
+# todo el resto de la app ya lo respeten desde el primer render. El widget que
+# lo cambia (toggle Español/English) se dibuja más abajo, en el sidebar.
+if "idioma" not in st.session_state:
+    st.session_state.idioma = IDIOMA_DEFAULT
 
 # --- Paleta corporativa ECO -- colores EXACTOS de libro_de_marca_de_Eco_consultor.pdf
 # (Hallazgo 49), reemplazando los valores aproximados que traía la app desde antes
@@ -91,17 +82,51 @@ FONDO = "#E8F0F3"
 # --- Paleta de clima (10 colores para heatmaps y visualizaciones) ---
 PALETA_CLIMA = ["#4b6ba9", "#5a7bc3", "#6b8dd4", "#7d9ee0", "#90aee8", "#a3beef", "#c9d8f0", "#f4e4a0", "#f5c455", "#ea2600"]
 
-NOMBRES_MODELO = {
-    "small_tulip": "Small Tulip (1.15m pala)",
-    "medium_tulip": "Medium Tulip (2m pala)",
-    "three_m_tulip": "3-M Tulip (3m pala)",
-    "large_tulip": "Large Tulip (5m pala)",
-    "al13_2m": "AL13 Power Tower (2 módulos)",
-    "al13_4m": "AL13 Power Tower (4 módulos)",
-    "al13_6m": "AL13 Power Tower (6 módulos)",
-    "al13_8m": "AL13 Power Tower (8 módulos)",
-}
-MESES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
+# Los nombres se resuelven por función (no dict fijo) porque dependen del
+# idioma activo de la sesión -- NOMBRES_MODELO queda como función para no
+# tener que cambiar cada `NOMBRES_MODELO[modelo]` por `NOMBRES_MODELO()[modelo]`
+# en el resto del archivo; se llama igual, sigue siendo indexable.
+def _nombres_modelo():
+    return {
+        "small_tulip": t("modelo_small_tulip"),
+        "medium_tulip": t("modelo_medium_tulip"),
+        "three_m_tulip": t("modelo_three_m_tulip"),
+        "large_tulip": t("modelo_large_tulip"),
+        "al13_2m": t("modelo_al13_2m"),
+        "al13_4m": t("modelo_al13_4m"),
+        "al13_6m": t("modelo_al13_6m"),
+        "al13_8m": t("modelo_al13_8m"),
+    }
+
+
+class _NombresModelo:
+    """Envoltorio indexable (NOMBRES_MODELO["small_tulip"]) que resuelve el
+    nombre en el idioma activo en el momento de cada acceso, no una vez al
+    importar el módulo -- así respeta el toggle de idioma en cada rerun."""
+    def __getitem__(self, clave):
+        return _nombres_modelo()[clave]
+
+    def get(self, clave, default=None):
+        return _nombres_modelo().get(clave, default)
+
+
+NOMBRES_MODELO = _NombresModelo()
+
+
+class _Meses:
+    """Lista de meses abreviados que se resuelve en el idioma activo en cada
+    acceso (indexado o iterado) -- mismo motivo que _NombresModelo."""
+    def __getitem__(self, i):
+        return meses_abreviados()[i]
+
+    def __iter__(self):
+        return iter(meses_abreviados())
+
+    def __len__(self):
+        return 12
+
+
+MESES = _Meses()
 
 
 def _img_base64(path, max_width):
@@ -117,7 +142,7 @@ def _img_base64(path, max_width):
             f'style="max-width:{max_width}px; width:100%; height:auto; display:block;">')
 
 
-st.set_page_config(page_title="ECO | Wind — Simulador", page_icon=LOGO_ECO, layout="wide")
+st.set_page_config(page_title=t("app_titulo_pagina"), page_icon=LOGO_ECO, layout="wide")
 
 # Fondo y colores base de la app: los define .streamlit/config.toml (theme.backgroundColor,
 # etc.) -- Streamlit los aplica solo, sin necesitar un ".stApp { background-color: ... }"
@@ -205,10 +230,7 @@ def cargar_estacion_elegida(row):
         df_clima, meta = cargar_epw_real(ruta)
         return _resultado_desde_epw(df_clima, meta)
     except Exception as e:
-        return dict(error=(
-            f"No se pudo descargar los datos de {row['name']}. "
-            "Verificá la conexión a internet e intentá de nuevo."
-        ))
+        return dict(error=t("clima_error_descarga_estacion", nombre=row["name"]))
 
 
 def cargar_epw_subido(ruta):
@@ -221,11 +243,7 @@ def cargar_epw_subido(ruta):
     try:
         df_clima, meta = cargar_epw_real(ruta)
     except Exception as e:
-        return dict(error=(
-            f"No se pudo leer el archivo como EPW válido: {e} -- confirmá que es un .epw real "
-            "(formato EnergyPlus/climate.onebuilding.org, 8 líneas de encabezado + una fila por "
-            "hora) y no un archivo renombrado o exportado de otra herramienta."
-        ))
+        return dict(error=t("clima_error_epw_invalido", error=str(e)))
     return _resultado_desde_epw(df_clima, meta)
 
 
@@ -243,13 +261,13 @@ def crear_curva_duracion_plotly(serie_w):
         fill='tozeroy',
         fillcolor=f'rgba({int(VERDE[1:3], 16)}, {int(VERDE[3:5], 16)}, {int(VERDE[5:7], 16)}, 0.25)',
         line=dict(color=VERDE, width=2),
-        hovertemplate='<b>%{x:.1f}% de las horas</b><br>Potencia: %{y:,.0f} W<extra></extra>'
+        hovertemplate=t("chart_duracion_hover")
     ))
 
     fig.update_layout(
-        title="Curva de duración -- resolución horaria completa",
-        xaxis_title="% de las 8,760 horas del año (ordenadas de mayor a menor producción)",
-        yaxis_title="Potencia (W, total del proyecto)",
+        title=t("chart_duracion_titulo"),
+        xaxis_title=t("chart_duracion_eje_x"),
+        yaxis_title=t("chart_duracion_eje_y"),
         hovermode='x unified',
         template='plotly_white',
         height=400,
@@ -271,14 +289,14 @@ def crear_produccion_mensual_plotly(kwh_mensual_total):
         x=MESES,
         y=kwh_mensual_total.values,
         marker=dict(color=VERDE),
-        hovertemplate='<b>%{x}</b><br>Producción: %{y:,.0f} kWh<extra></extra>',
+        hovertemplate=t("chart_mensual_hover"),
         showlegend=False
     ))
 
     fig.update_layout(
-        title="Producción mensual (todos los clústers)",
-        xaxis_title="Mes",
-        yaxis_title="Energía (kWh)",
+        title=t("chart_mensual_titulo"),
+        xaxis_title=t("chart_mensual_eje_x"),
+        yaxis_title=t("chart_mensual_eje_y"),
         hovermode='x unified',
         template='plotly_white',
         height=400,
@@ -317,18 +335,18 @@ def crear_rosa_vientos_plotly(rosa_detallada):
         fig.add_trace(go.Barpolar(
             r=matriz[i], theta=sectores, name=etiqueta,
             marker=dict(color=paleta[i % len(paleta)], line=dict(color='white', width=0.5)),
-            hovertemplate=f'<b>%{{theta}}</b><br>{etiqueta}: %{{r:.1f}}% de las horas del año<extra></extra>',
+            hovertemplate=t("chart_rosa_hover", etiqueta=etiqueta),
         ))
 
     fig.update_layout(
         barmode='stack',
-        title=f"Rosa de vientos -- % de horas por dirección y velocidad (calma: {pct_calma:.0f}%)",
+        title=t("chart_rosa_titulo", pct_calma=f"{pct_calma:.0f}"),
         polar=dict(
             radialaxis=dict(visible=True, gridcolor='#D8D8D8', ticksuffix='%'),
             angularaxis=dict(rotation=90, direction='clockwise', gridcolor='#D8D8D8'),
             bgcolor='rgba(0,0,0,0)',
         ),
-        legend=dict(title="Velocidad", orientation="h", yanchor="bottom", y=-0.25, x=0.1),
+        legend=dict(title=t("chart_rosa_leyenda_titulo"), orientation="h", yanchor="bottom", y=-0.25, x=0.1),
         height=550, font=dict(family="sans-serif", size=10),
         margin=dict(l=60, r=60, t=60, b=90),
         paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
@@ -364,11 +382,9 @@ def crear_heatmap_plotly(hm_json, media_anual, altura_m=10.0, z0=Z0_DEFAULT, z0_
     el hover mostraba literalmente el texto `%{customdata:.2f}` sin reemplazar), así que
     se arma el texto ya resuelto por celda -- funciona en cualquier versión."""
     if altura_m <= z0:
-        return None, (f"Altura elegida ({altura_m:.1f}m) por debajo de la rugosidad del "
-                       f"terreno destino (z0={z0}m) -- el perfil logarítmico no es "
-                       f"físicamente confiable ahí, mismo criterio que wind_at_height().")
+        return None, t("chart_heatmap_aviso_altura_baja", altura=f"{altura_m:.1f}", z0=z0)
 
-    meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
+    meses = meses_abreviados()
     # Parsear formato: lista de dicts con {month, hour, value=índice relativo a la media anual a 10m}
     data = json.loads(hm_json) if isinstance(hm_json, str) else hm_json
     indice = np.zeros((12, 24))
@@ -380,19 +396,21 @@ def crear_heatmap_plotly(hm_json, media_anual, altura_m=10.0, z0=Z0_DEFAULT, z0_
     texto = np.empty((12, 24), dtype=object)
     for m in range(12):
         for h in range(24):
-            texto[m, h] = (f"<b>{meses[m]}</b><br>Hora: {h}:00<br>"
-                            f"{grid_ms[m, h]:.2f} m/s a {altura_m:.1f}m "
-                            f"(índice {indice[m, h]:.2f})")
+            texto[m, h] = t(
+                "chart_heatmap_hover", mes=meses[m], hora=h,
+                velocidad=f"{grid_ms[m, h]:.2f}", altura=f"{altura_m:.1f}",
+                indice=f"{indice[m, h]:.2f}",
+            )
 
     fig = go.Figure(data=go.Heatmap(
         z=grid_ms, x=list(range(24)), text=texto, hoverinfo='text',
         y=meses,
         colorscale='RdYlBu_r',
-        colorbar=dict(title='m/s', thickness=15)
+        colorbar=dict(title=t("chart_heatmap_colorbar"), thickness=15)
     ))
     fig.update_layout(
-        title=f"Velocidad media real del viento a {altura_m:.1f}m (mes × hora)",
-        xaxis_title="Hora del día", yaxis_title="Mes",
+        title=t("chart_heatmap_titulo", altura=f"{altura_m:.1f}"),
+        xaxis_title=t("chart_heatmap_eje_x"), yaxis_title=t("chart_heatmap_eje_y"),
         height=450, font=dict(family="sans-serif", size=10),
         margin=dict(l=80, r=100, t=50, b=60),
         xaxis=dict(tickmode='linear', tick0=0, dtick=3),
@@ -427,7 +445,7 @@ def crear_perfil_viento_plotly(velocidad_10m, z0=Z0_DEFAULT, z0_met=Z0_MET_DEFAU
         fill='tonextx',
         fillcolor='rgba(75, 107, 169, 0.15)',
         line=dict(color=AZUL_CLARO, width=2.5),
-        hovertemplate='<b>%{y:.2f}m</b><br>Viento: %{x:.2f} m/s<extra></extra>',
+        hovertemplate=t("chart_perfil_hover"),
         showlegend=False,
     ))
     if altura_marcada is not None:
@@ -435,13 +453,15 @@ def crear_perfil_viento_plotly(velocidad_10m, z0=Z0_DEFAULT, z0_met=Z0_MET_DEFAU
         fig.add_trace(go.Scatter(
             x=[v_marcada], y=[altura_marcada], mode='markers+text',
             marker=dict(color='#ea2600', size=10),
-            text=[f"{v_marcada:.2f} m/s"], textposition='top center',
-            hovertemplate=f'<b>{altura_marcada:.2f}m</b><br>Viento: {v_marcada:.2f} m/s<extra></extra>',
+            text=[t("chart_perfil_texto_marcado", velocidad=f"{v_marcada:.2f}")],
+            textposition='top center',
+            hovertemplate=t("chart_perfil_hover_marcado",
+                             altura=f"{altura_marcada:.2f}", velocidad=f"{v_marcada:.2f}"),
             showlegend=False,
         ))
     fig.update_layout(
-        title=f"Perfil logarítmico de viento (z0 destino={z0} m)",
-        xaxis_title="Velocidad (m/s)", yaxis_title="Altura (m)",
+        title=t("chart_perfil_titulo", z0=z0),
+        xaxis_title=t("chart_perfil_eje_x"), yaxis_title=t("chart_perfil_eje_y"),
         height=380, template='plotly_white',
         font=dict(family="sans-serif", size=10),
         margin=dict(l=80, r=60, t=50, b=60),
@@ -474,7 +494,7 @@ def crear_mapa_estaciones(lat_sitio, lon_sitio, df_estaciones=None):
     folium.CircleMarker(
         location=[lat_sitio, lon_sitio],
         radius=8,
-        popup=f"Tu sitio: {lat_sitio:.4f}, {lon_sitio:.4f}",
+        popup=t("mapa_popup_sitio", lat=f"{lat_sitio:.4f}", lon=f"{lon_sitio:.4f}"),
         color=VERDE,
         fill=True,
         fillColor=VERDE,
@@ -489,7 +509,9 @@ def crear_mapa_estaciones(lat_sitio, lon_sitio, df_estaciones=None):
             folium.CircleMarker(
                 location=[row["lat"], row["lon"]],
                 radius=6,
-                popup=f"<b>{row['name']}</b><br>{row.get('state', 'N/A')}<br>Distancia: {row['distancia_km']:.1f} km",
+                popup=t("mapa_popup_estacion", nombre=row["name"],
+                        estado=row.get("state", t("mapa_no_disponible")),
+                        distancia=f"{row['distancia_km']:.1f}"),
                 color="#888888",
                 fill=True,
                 fillColor="#CCCCCC",
@@ -508,6 +530,19 @@ def crear_mapa_estaciones(lat_sitio, lon_sitio, df_estaciones=None):
 # tabs, no botones de navegación que compiten por espacio.
 
 with st.sidebar:
+    # Toggle de idioma -- lo primero del sidebar, siempre visible sin importar
+    # la pestaña activa, porque cambia el texto de TODA la app (sidebar, tabs,
+    # gráficos, informe PDF). st.radio con key ligado a session_state.idioma
+    # actualiza el idioma solo en el siguiente rerun al tocarlo.
+    _opciones_idioma = list(IDIOMAS_DISPONIBLES.values())
+    _claves_idioma = list(IDIOMAS_DISPONIBLES.keys())
+    _idx_idioma_actual = _claves_idioma.index(st.session_state.idioma)
+    _idioma_elegido = st.radio(
+        t("sidebar_idioma_label"), _opciones_idioma, index=_idx_idioma_actual,
+        horizontal=True, label_visibility="collapsed", key="_idioma_radio",
+    )
+    st.session_state.idioma = _claves_idioma[_opciones_idioma.index(_idioma_elegido)]
+
     # Sólo el logo de ECO en el header (antes compartía espacio con el de Flower
     # Turbines y ambos quedaban chicos) -- Flower Turbines es un proveedor de equipos,
     # no la marca de la aplicación; se sigue identificando por nombre en las fichas
@@ -518,20 +553,20 @@ with st.sidebar:
         <div class="eco-brand-logos">{_logo_eco_html}</div>
         <div class="eco-brand-text">
             <div class="eco-brand-title">ECO | Wind</div>
-            <div class="eco-brand-sub">Simulador de microgeneración eólica</div>
+            <div class="eco-brand-sub">{t("sidebar_subtitulo_marca")}</div>
         </div>
     </div>
     """, unsafe_allow_html=True)
 
-    st.markdown('<div class="eco-sidebar-section">Elegido hasta ahora</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="eco-sidebar-section">{t("sidebar_elegido_hasta_ahora")}</div>', unsafe_allow_html=True)
     if st.session_state.get("sitio_activo"):
         st.success(f"{st.session_state.get('sitio_nombre_activo')}")
     else:
-        st.caption("Sin sitio seleccionado todavía.")
+        st.caption(t("sidebar_sin_sitio"))
     _n_turbinas = sum(c["N"] for c in st.session_state.clusters)
-    st.caption(f"{len(st.session_state.clusters)} clúster(es), {_n_turbinas} turbina(s) en total.")
+    st.caption(t("sidebar_resumen_clusters", n_clusters=len(st.session_state.clusters), n_turbinas=_n_turbinas))
     if st.session_state.get("calculo_listo"):
-        st.caption("Cálculo de producción listo.")
+        st.caption(t("sidebar_calculo_listo"))
 
     st.divider()
     # Una sola consulta al BCCR por sesión: obtener_tipo_cambio_bccr() ya
@@ -540,14 +575,14 @@ with st.sidebar:
     if "tipo_cambio_bccr" not in st.session_state:
         st.session_state["tipo_cambio_bccr"] = obtener_tipo_cambio_bccr()
     _tipo_cambio, _tc_es_emergencia = st.session_state["tipo_cambio_bccr"]
-    st.metric("Tipo de cambio BCCR", f"₡{_tipo_cambio:,.2f}")
+    st.metric(t("sidebar_metric_tipo_cambio"), f"₡{_tipo_cambio:,.2f}")
     if _tc_es_emergencia:
-        st.caption("BCCR no disponible -- valor de emergencia, no del día.")
+        st.caption(t("sidebar_bccr_emergencia"))
 
     st.divider()
     st.markdown(f"""
     <div style="font-size:0.62rem; color:{GRIS}; line-height:1.6;">
-        © {date.today().year} ECO Consultor. Todos los derechos reservados.
+        {t("sidebar_copyright", anio=date.today().year)}
     </div>
     """, unsafe_allow_html=True)
 
@@ -557,58 +592,58 @@ with st.sidebar:
 # cada uno con su contenido y controles. El sidebar es limpio (solo marca + resumen).
 
 tab_clima, tab_contexto, tab_config, tab_resultados, tab_financiero, tab_especificacion = st.tabs([
-    "Selección de clima",
-    "Contexto climático",
-    "Equipos y configuración",
-    "Resultados",
-    "Análisis Financiero",
-    "Especificación Técnica",
+    t("tabs_clima"),
+    t("tabs_contexto"),
+    t("tabs_config"),
+    t("tabs_resultados"),
+    t("tabs_financiero"),
+    t("tabs_especificacion"),
 ])
 
 with tab_clima:
-    st.caption("Pega las coordenadas de tu sitio (ej: 9.999665, -84.123064). El sistema busca las estaciones climáticas reales más cercanas -- elegí una de la lista, o subí directo el EPW que quieras usar como referencia.")
+    st.caption(t("clima_caption_intro"))
 
     def _buscar_y_guardar(_lat, _lon):
-        with st.spinner("Buscando estaciones cercanas..."):
+        with st.spinner(t("clima_spinner_buscando")):
             st.session_state.sitio_lat, st.session_state.sitio_lon = _lat, _lon
             df = obtener_estaciones_cercanas(_lat, _lon)
             st.session_state.sitio_cercanas = df
             if df is None or df.empty:
-                st.error("No se encontraron estaciones para esta ubicación.")
+                st.error(t("clima_error_sin_estaciones"))
 
     # Input minimalista: solo pegar coordenadas
     col1, col2 = st.columns([3, 1])
     with col1:
         _coords_input = st.text_input(
-            "Coordenadas (latitud, longitud)",
-            placeholder="Ej: 9.999665, -84.123064",
+            t("clima_input_coordenadas_label"),
+            placeholder=t("clima_input_coordenadas_placeholder"),
             key="coords_input"
         )
     with col2:
         st.write("")  # Espaciador
-        if st.button("Buscar"):
+        if st.button(t("clima_boton_buscar")):
             if _coords_input:
                 try:
                     partes = [p.strip() for p in _coords_input.split(",")]
                     if len(partes) != 2:
-                        st.error("Formato: latitud, longitud (ej: 9.999, -84.123)")
+                        st.error(t("clima_error_formato_coordenadas"))
                     else:
                         _lat = float(partes[0])
                         _lon = float(partes[1])
                         _buscar_y_guardar(_lat, _lon)
                         st.rerun()
                 except ValueError:
-                    st.error("Coordenadas inválidas. Usa números separados por coma.")
+                    st.error(t("clima_error_coordenadas_invalidas"))
 
     # Mostrar sitio activo si existe
     if st.session_state.sitio_activo:
-        st.success(f"Sitio activo: **{st.session_state.sitio_nombre_activo}**")
+        st.success(t("clima_sitio_activo", nombre=st.session_state.sitio_nombre_activo))
 
     st.divider()
 
     # Mapa interactivo del sitio y estaciones
     if st.session_state.sitio_cercanas is not None and not st.session_state.sitio_cercanas.empty:
-        st.subheader("Mapa interactivo")
+        st.subheader(t("clima_subheader_mapa"))
         mapa = crear_mapa_estaciones(st.session_state.sitio_lat, st.session_state.sitio_lon, st.session_state.sitio_cercanas)
         mapa_html = mapa._repr_html_()
         components.html(mapa_html, height=500, scrolling=False)
@@ -618,13 +653,18 @@ with tab_clima:
     # Mostrar estaciones disponibles
     _df_cerc = st.session_state.sitio_cercanas
     if _df_cerc is not None and not _df_cerc.empty:
-        st.caption("**Estaciones climáticas más cercanas:**")
+        st.caption(t("clima_caption_estaciones_cercanas"))
         for _i, _row in _df_cerc.iterrows():
             col1, col2 = st.columns([3, 1])
             with col1:
-                st.write(f"**{_row['name']}** — {_row.get('state', '')} ({_row['distancia_km']:.0f} km)")
+                st.write(t(
+                    "clima_estacion_fila",
+                    nombre=_row['name'],
+                    estado=_row.get('state', ''),
+                    distancia=f"{_row['distancia_km']:.0f}",
+                ))
             with col2:
-                if st.button("Usar", key=f"btn_est_{_i}"):
+                if st.button(t("clima_boton_usar"), key=f"btn_est_{_i}"):
                     _res_est = cargar_estacion_elegida(_row)
                     if _res_est.get("error"):
                         st.error(_res_est["error"])
@@ -635,11 +675,7 @@ with tab_clima:
 
         _dist_min = float(_df_cerc["distancia_km"].min())
         if _dist_min > 40.0:
-            st.caption(
-                f"La estación real más cercana está a {_dist_min:.0f} km -- si tenés el EPW real "
-                "de un sitio más representativo (propio o de otro lugar), subilo abajo en vez de "
-                "usar una estación tan lejana."
-            )
+            st.caption(t("clima_caption_estacion_lejana", distancia=f"{_dist_min:.0f}"))
 
     st.divider()
 
@@ -648,10 +684,10 @@ with tab_clima:
     # "aproximación sensibilizada" (GWA/ERA5/NASA POWER, Hallazgo 21-30): esas fuentes se
     # descartaron por decisión de producto (Hallazgo 35) -- un EPW real elegido a conciencia es
     # más confiable que un ajuste automático sobre datos que ya demostraron fallar en Costa Rica.
-    st.caption("**¿Tenés el EPW real de tu sitio (o de otro lugar que quieras usar como referencia)?**")
-    _epw_subido = st.file_uploader("Subir archivo .epw", type=["epw"], key="epw_subido_uploader")
+    st.caption(t("clima_caption_epw_pregunta"))
+    _epw_subido = st.file_uploader(t("clima_uploader_epw_label"), type=["epw"], key="epw_subido_uploader")
     if _epw_subido is not None:
-        if st.button("Usar este EPW"):
+        if st.button(t("clima_boton_usar_epw")):
             with tempfile.NamedTemporaryFile(suffix=".epw", delete=False) as _tmp:
                 _tmp.write(_epw_subido.getvalue())
                 _ruta_tmp = _tmp.name
@@ -661,7 +697,7 @@ with tab_clima:
                 st.error(_res_subido["error"])
             else:
                 st.session_state.sitio_activo = _res_subido
-                st.session_state.sitio_nombre_activo = f"EPW subido -- {_epw_subido.name}"
+                st.session_state.sitio_nombre_activo = t("clima_epw_subido_nombre", nombre=_epw_subido.name)
                 st.rerun()
 
 
