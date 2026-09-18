@@ -128,6 +128,73 @@ TRANSLATIONS = {
     "mes_sep": {"es": "Sep", "en": "Sep"}, "mes_oct": {"es": "Oct", "en": "Oct"},
     "mes_nov": {"es": "Nov", "en": "Nov"}, "mes_dic": {"es": "Dic", "en": "Dec"},
 
+    # --- Tab: Selección de clima (tab_clima) -----------------------------------------
+    "clima_caption_intro": {
+        "es": ("Pega las coordenadas de tu sitio (ej: 9.999665, -84.123064). El sistema "
+               "busca las estaciones climáticas reales más cercanas -- elegí una de la "
+               "lista, o subí directo el EPW que quieras usar como referencia."),
+        "en": ("Paste your site's coordinates (e.g. 9.999665, -84.123064). The system "
+               "looks up the closest real weather stations -- pick one from the list, "
+               "or upload the EPW file you want to use as a reference."),
+    },
+    "clima_spinner_buscando": {
+        "es": "Buscando estaciones cercanas...",
+        "en": "Searching for nearby stations...",
+    },
+    "clima_error_sin_estaciones": {
+        "es": "No se encontraron estaciones para esta ubicación.",
+        "en": "No stations were found for this location.",
+    },
+    "clima_input_coordenadas_label": {
+        "es": "Coordenadas (latitud, longitud)",
+        "en": "Coordinates (latitude, longitude)",
+    },
+    "clima_input_coordenadas_placeholder": {
+        "es": "Ej: 9.999665, -84.123064",
+        "en": "E.g.: 9.999665, -84.123064",
+    },
+    "clima_boton_buscar": {"es": "Buscar", "en": "Search"},
+    "clima_error_formato_coordenadas": {
+        "es": "Formato: latitud, longitud (ej: 9.999, -84.123)",
+        "en": "Format: latitude, longitude (e.g. 9.999, -84.123)",
+    },
+    "clima_error_coordenadas_invalidas": {
+        "es": "Coordenadas inválidas. Usa números separados por coma.",
+        "en": "Invalid coordinates. Use numbers separated by a comma.",
+    },
+    "clima_sitio_activo": {
+        "es": "Sitio activo: **{nombre}**",
+        "en": "Active site: **{nombre}**",
+    },
+    "clima_subheader_mapa": {"es": "Mapa interactivo", "en": "Interactive map"},
+    "clima_caption_estaciones_cercanas": {
+        "es": "**Estaciones climáticas más cercanas:**",
+        "en": "**Closest weather stations:**",
+    },
+    "clima_estacion_fila": {
+        "es": "**{nombre}** — {estado} ({distancia} km)",
+        "en": "**{nombre}** — {estado} ({distancia} km)",
+    },
+    "clima_boton_usar": {"es": "Usar", "en": "Use"},
+    "clima_caption_estacion_lejana": {
+        "es": ("La estación real más cercana está a {distancia} km -- si tenés el EPW "
+               "real de un sitio más representativo (propio o de otro lugar), subilo "
+               "abajo en vez de usar una estación tan lejana."),
+        "en": ("The closest real station is {distancia} km away -- if you have the real "
+               "EPW for a more representative site (your own or another location), "
+               "upload it below instead of using such a distant station."),
+    },
+    "clima_caption_epw_pregunta": {
+        "es": "**¿Tenés el EPW real de tu sitio (o de otro lugar que quieras usar como referencia)?**",
+        "en": "**Do you have the real EPW for your site (or another location you'd like to use as a reference)?**",
+    },
+    "clima_uploader_epw_label": {"es": "Subir archivo .epw", "en": "Upload .epw file"},
+    "clima_boton_usar_epw": {"es": "Usar este EPW", "en": "Use this EPW"},
+    "clima_epw_subido_nombre": {
+        "es": "EPW subido -- {nombre}",
+        "en": "Uploaded EPW -- {nombre}",
+    },
+
     # --- Helpers de clima (errores de carga de EPW) ---------------------------------
     "clima_error_descarga_estacion": {
         "es": "No se pudo descargar los datos de {nombre}. Verificá la conexión a internet e intentá de nuevo.",

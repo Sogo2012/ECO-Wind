@@ -57,7 +57,10 @@ MODELOS SIN NINGÚN ARTÍCULO EN EL CATÁLOGO: `ecoroof_slanted` y `survival_uni
 tienen fila correspondiente -- lista vacía hasta que Pablo confirme un precio real.
 """
 
+import re
 from typing import Dict, List, Optional, Tuple
+
+_RE_KILOWATT_ARTICULO = re.compile(r"(\d+(?:\.\d+)?)\s*kilowatts?\b", re.IGNORECASE)
 
 # (Artículo, Precio_1 USD -- Plan 75/25, margen 30%) -- el primero de cada lista es
 # el default (unidad simple, on-grid con inversor incluido).
@@ -145,3 +148,23 @@ def get_precio_exworks_usd(modelo: str, articulo: Optional[str] = None) -> Optio
             if art == articulo:
                 return precio
     return filas[0][1]
+
+
+def potencia_nominal_articulo_w(articulo: Optional[str]) -> Optional[float]:
+    """
+    Potencia nominal (W) implícita en el texto del artículo, cuando lo trae -- ej.
+    "3-meter tulip off grid with charger 3 kilowatts" -> 3000.0. Varios artículos del
+    catálogo real vienen en más de un tamaño de controlador/inversor (1kW, 3kW, 5kW,
+    10kW...); esa cifra es la potencia real de ESA configuración específica, no la
+    ficha genérica por modelo de turbine_specs.SPECS_TURBINAS (que sólo tiene un
+    número fijo por modelo, sin distinguir controlador).
+
+    None si el artículo no trae ningún número de kilowatts (accesorios como
+    "hurricane reinforcements" o "anti-corrosion measures", o si no se pasó ningún
+    artículo) -- en ese caso quien llama debe usar el valor genérico de
+    SPECS_TURBINAS[modelo]["potencia_nominal_w"] en su lugar.
+    """
+    if not articulo:
+        return None
+    m = _RE_KILOWATT_ARTICULO.search(articulo)
+    return float(m.group(1)) * 1000.0 if m else None
