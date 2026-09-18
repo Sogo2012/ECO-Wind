@@ -55,7 +55,9 @@ from engine.epw_real import (
 from engine.tipo_cambio_bccr import obtener_tipo_cambio_bccr
 from engine.financial_engine_eolico import FinancialEngineEolico
 from engine.tarifas_electricas_cr import calcular_ahorro_tarifa_horaria_usd, calcular_ahorro_tarifa_comercial_usd
-from engine.precios_flower_turbines import get_articulos_disponibles, get_precio_exworks_usd
+from engine.precios_flower_turbines import (
+    get_articulos_disponibles, get_precio_exworks_usd, potencia_nominal_articulo_w,
+)
 from engine.dimensionador_sistema_eolico import VOLTAJE_TURBINAS_V
 from engine.pdf_reporte import generar_pdf_informe_ejecutivo
 from engine.i18n import t, tr, meses_abreviados, IDIOMA_DEFAULT, IDIOMAS_DISPONIBLES
@@ -1443,8 +1445,13 @@ with tab_especificacion:
             turbinas_seleccionadas = [
                 c["modelo"] for c in st.session_state.clusters for _ in range(int(c["N"]))
             ]
+            # Si el clúster ya tiene un artículo elegido (pestaña Análisis Financiero)
+            # y ese artículo trae un tamaño de controlador/inversor explícito (ej. "...3
+            # kilowatts"), esa es la potencia nominal real de ESA configuración -- más
+            # precisa que la ficha genérica por modelo, que no distingue controlador.
             potencia_pico_W = sum(
-                SPECS_TURBINAS[c["modelo"]]["potencia_nominal_w"] * int(c["N"])
+                (potencia_nominal_articulo_w(c.get("articulo"))
+                 or SPECS_TURBINAS[c["modelo"]]["potencia_nominal_w"]) * int(c["N"])
                 for c in st.session_state.clusters
             )
 
@@ -1475,12 +1482,19 @@ with tab_especificacion:
 
             st.divider()
             st.markdown("### Turbinas eólicas")
-            _cantidad_por_modelo = {}
+            # Se agrupa por (modelo, artículo) -- no solo por modelo -- para que dos
+            # clústers del mismo modelo con distinto controlador/inversor elegido (ej.
+            # "...1 kilowatt" vs. "...3 kilowatts") aparezcan como filas separadas, cada
+            # una con su propia potencia nominal real, en vez de mezclarse en una sola
+            # fila con la ficha genérica del modelo.
+            _cantidad_por_config = {}
             for c in st.session_state.clusters:
-                _cantidad_por_modelo[c["modelo"]] = _cantidad_por_modelo.get(c["modelo"], 0) + int(c["N"])
+                _clave_config = (c["modelo"], c.get("articulo"))
+                _cantidad_por_config[_clave_config] = _cantidad_por_config.get(_clave_config, 0) + int(c["N"])
 
-            for _clave, _cantidad in _cantidad_por_modelo.items():
+            for (_clave, _articulo), _cantidad in _cantidad_por_config.items():
                 _specs = SPECS_TURBINAS[_clave]
+                _potencia_nominal_w = potencia_nominal_articulo_w(_articulo) or _specs["potencia_nominal_w"]
                 with st.container(border=True):
                     col_img, col_specs = st.columns([1, 3])
                     with col_img:
@@ -1488,10 +1502,11 @@ with tab_especificacion:
                         if _ruta_img and os.path.exists(_ruta_img):
                             st.image(_ruta_img, use_column_width=True)
                     with col_specs:
-                        st.markdown(f"**{_specs['nombre']}** -- cantidad: {_cantidad}")
+                        _titulo = f"**{_specs['nombre']}**" + (f" -- {_articulo}" if _articulo else "")
+                        st.markdown(f"{_titulo} -- cantidad: {_cantidad}")
                         st.caption(f"Fabricante: Flower Turbines -- N° de parte: {_specs['numero_parte']}")
                         _filas_turbina = [
-                            ("Potencia nominal", f"{_specs['potencia_nominal_w']} W"),
+                            ("Potencia nominal", f"{_potencia_nominal_w:.0f} W"),
                             ("Velocidad a potencia nominal", f"{_specs['viento_potencia_nominal_ms']} m/s"),
                             ("Velocidad de arranque (cut-in)", f"{_specs['velocidad_cutin_ms']} m/s"),
                             ("Velocidad de supervivencia", f"{_specs['velocidad_supervivencia_ms']} m/s"),
@@ -1507,7 +1522,7 @@ with tab_especificacion:
                             hide_index=True, use_container_width=True,
                         )
                         _datos_pdf["turbinas"].append({
-                            "nombre": _specs["nombre"], "cantidad": _cantidad, "clave": _clave,
+                            "nombre": _titulo.replace("**", ""), "cantidad": _cantidad, "clave": _clave,
                             "numero_parte": _specs["numero_parte"], "filas": _filas_turbina,
                         })
 
