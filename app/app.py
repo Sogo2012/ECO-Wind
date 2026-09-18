@@ -286,7 +286,13 @@ def crear_produccion_mensual_plotly(kwh_mensual_total):
     fig = go.Figure()
 
     fig.add_trace(go.Bar(
-        x=MESES,
+        # list(MESES), no MESES directo: MESES es una instancia de _Meses (se
+        # resuelve al idioma activo en cada acceso, ver la clase arriba), no
+        # una lista/tupla/ndarray real. Plotly valida el tipo de "x" en forma
+        # estricta (isinstance) y no acepta un objeto solo "iterable" -- sin
+        # este list(...), esto rompe con
+        # "Invalid value of type '...._Meses' received for the 'x' property".
+        x=list(MESES),
         y=kwh_mensual_total.values,
         marker=dict(color=VERDE),
         hovertemplate=t("chart_mensual_hover"),
