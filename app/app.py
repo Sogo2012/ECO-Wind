@@ -817,13 +817,13 @@ with tab_config:
                             f"a {_specs['viento_potencia_nominal_ms']} m/s\n"
                             f"- **Cut-in / supervivencia:** {_specs['velocidad_cutin_ms']} m/s / "
                             f"{_specs['velocidad_supervivencia_ms']} m/s\n"
-                            f"- **Generador:** {_specs['tipo_generador']} ({_specs['polos_generador']} polos)\n"
+                            f"- **Generador:** {t(_specs['tipo_generador'])} ({_specs['polos_generador']} polos)\n"
                             f"- **Salida:** {_specs['voltaje_salida']}\n"
                             f"- **Dimensiones:** {_specs['altura_total_m']} m altura total, "
                             f"{_specs['diametro_rotor_m']} m diámetro de rotor, "
                             f"{_specs['peso_total_kg']} kg\n"
                             f"- **Vida de diseño:** {_specs['vida_diseno_anos']} años\n"
-                            f"- **Cimentación requerida:** {_specs['cimentacion_requerida']}"
+                            f"- **Cimentación requerida:** {t(_specs['cimentacion_requerida'])}"
                         )
 
     if st.button("+ Agregar clúster"):
@@ -1510,12 +1510,12 @@ with tab_especificacion:
                             ("Velocidad a potencia nominal", f"{_specs['viento_potencia_nominal_ms']} m/s"),
                             ("Velocidad de arranque (cut-in)", f"{_specs['velocidad_cutin_ms']} m/s"),
                             ("Velocidad de supervivencia", f"{_specs['velocidad_supervivencia_ms']} m/s"),
-                            ("Tipo de rotor", _specs["tipo_rotor"]),
-                            ("Tipo de generador", _specs["tipo_generador"]),
+                            ("Tipo de rotor", t(_specs["tipo_rotor"])),
+                            ("Tipo de generador", t(_specs["tipo_generador"])),
                             ("Diámetro del rotor", f"{_specs['diametro_rotor_m']} m"),
                             ("Altura de pala", f"{_specs['altura_pala_m']} m"),
                             ("Peso", f"{_specs['peso_total_kg']} kg"),
-                            ("Cimentación requerida", _specs["cimentacion_requerida"]),
+                            ("Cimentación requerida", t(_specs["cimentacion_requerida"])),
                         ]
                         st.dataframe(
                             pd.DataFrame([{"Especificación": f, "Valor": v} for f, v in _filas_turbina]),
