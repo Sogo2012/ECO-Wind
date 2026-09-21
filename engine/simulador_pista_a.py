@@ -289,7 +289,7 @@ def cargar_wind_rose_lib(ruta_lib, z0=0.030, altura=10.0):
 
 
 def simular(df_clima, altura_buje, modelo, N, elevacion_m=0.0, h_ref=10, z0=Z0_DEFAULT,
-            z0_met=Z0_MET_DEFAULT, metodo_bouquet="real"):
+            z0_met=Z0_MET_DEFAULT, metodo_bouquet="real", capacidad_electronica_w=None):
     """
     Ensambla la serie horaria de potencia del cluster y la agrega a kWh
     mensual/anual, usando P(v)=k*v^3 x M(N) del motor empirico
@@ -310,11 +310,37 @@ def simular(df_clima, altura_buje, modelo, N, elevacion_m=0.0, h_ref=10, z0=Z0_D
     elevacion_m: elevacion del sitio (m sobre el nivel del mar). Default 0.0
     (sin corregir, nivel del mar) -- pasar la elevacion real del sitio para
     que la correccion de densidad se aplique.
+
+    RECORTE POR ELECTRONICA (capacidad_electronica_w): P=k*v^3 x M(N) no
+    tiene techo -- a partir de la velocidad nominal (~11 m/s) y sobre todo
+    con el Efecto Bouquet de un cluster, la potencia POR TURBINA ya supera
+    varias veces la "potencia nominal" de la ficha de fabrica (ej. a 12 m/s
+    aislada da 1400W, no 1000W -- confirmado contra la tabla oficial de
+    Flower Turbines). Esa energia de mas solo se aprovecha si el
+    controlador de carga/inversor de esa turbina la puede procesar -- si no,
+    se recorta (clipping), watt por watt, hora por hora. Confirmado con
+    Flower Turbines (Daniel Farb, correo del proyecto Estadio Heredia): el
+    recorte es un TOPE DURO por turbina, igual a la capacidad de la
+    electronica de esa turbina, sin margen extra sobre la curva de fabrica.
+
+    Si se pasa capacidad_electronica_w (W, por turbina), la serie horaria de
+    potencia se recorta a ese tope ANTES de integrar a kWh -- así el
+    kwh_anual refleja lo que esa electronica específica puede entregar de
+    verdad, no el potencial aerodinamico ideal. None (default) no recorta
+    -- comportamiento idéntico al de antes de este parámetro.
     """
     v_hub = wind_at_height(df_clima["WS10M"].values, h_ref, altura_buje, z0=z0, z0_met=z0_met)
     potencia_w_por_turbina = power_in_bouquet(v_hub, modelo, N, metodo=metodo_bouquet)
     factor_densidad = factor_correccion_densidad(elevacion_m)
     potencia_w_por_turbina = potencia_w_por_turbina * factor_densidad
+
+    energia_perdida_por_recorte_kwh = 0.0
+    pct_horas_con_recorte = 0.0
+    if capacidad_electronica_w is not None:
+        _sin_recorte = potencia_w_por_turbina
+        potencia_w_por_turbina = np.minimum(_sin_recorte, capacidad_electronica_w)
+        energia_perdida_por_recorte_kwh = float((_sin_recorte - potencia_w_por_turbina).sum() * N / 1000.0)
+        pct_horas_con_recorte = float(np.mean(_sin_recorte > capacidad_electronica_w) * 100)
 
     serie = pd.Series(potencia_w_por_turbina, index=df_clima.index,
                        name="potencia_W_por_turbina")
@@ -327,6 +353,9 @@ def simular(df_clima, altura_buje, modelo, N, elevacion_m=0.0, h_ref=10, z0=Z0_D
         "pct_horas_bajo_cutin": float(np.mean(v_hub < CURVE_COEFFICIENTS[modelo]["v_cutin"]) * 100),
         "factor_correccion_densidad": float(factor_densidad),
         "elevacion_m": float(elevacion_m),
+        "capacidad_electronica_w": capacidad_electronica_w,
+        "energia_perdida_por_recorte_kwh": energia_perdida_por_recorte_kwh,
+        "pct_horas_con_recorte": pct_horas_con_recorte,
     }
 
 

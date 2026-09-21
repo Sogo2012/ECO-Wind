@@ -120,6 +120,130 @@ TRANSLATIONS = {
     "modelo_al13_6m": {"es": "AL13 Power Tower (6 módulos)", "en": "AL13 Power Tower (6 modules)"},
     "modelo_al13_8m": {"es": "AL13 Power Tower (8 módulos)", "en": "AL13 Power Tower (8 modules)"},
 
+    # --- Fichas técnicas de turbinas (SPECS_TURBINAS: tipo_rotor, tipo_generador, ---
+    # --- cimentacion_requerida -- los 3 únicos campos de esa ficha que la app hoy --
+    # --- muestra en pantalla; sistema_frenado/material_palas/material_chasis están --
+    # --- en los datos pero no se despliegan todavía, se dejan en español hasta que --
+    # --- se conecten a algún lugar visible) -----------------------------------------
+    "specs_small_tulip_rotor": {"es": "VAWT (Eje Vertical, 2 Palas)", "en": "VAWT (Vertical Axis, 2 Blades)"},
+    "specs_small_tulip_generador": {
+        "es": "PMSG Imanes Permanentes (máx. 200W picos cortos)",
+        "en": "PMSG Permanent Magnets (max. 200W short peaks)",
+    },
+    "specs_small_tulip_cimentacion": {
+        "es": "Dado concreto 0.5x0.5x0.5m o lastre Eco-Roof",
+        "en": "0.5x0.5x0.5m concrete block, or Eco-Roof ballast",
+    },
+
+    "specs_survival_unit_rotor": {
+        "es": "VAWT Portátil sobre contenedor móvil",
+        "en": "VAWT, portable on mobile container",
+    },
+    "specs_survival_unit_generador": {"es": "PMSG", "en": "PMSG"},
+    "specs_survival_unit_cimentacion": {
+        "es": "Sin cimentación (autoestable)",
+        "en": "No foundation required (self-supporting)",
+    },
+
+    "specs_medium_tulip_rotor": {"es": "VAWT (Eje Vertical, 2 Palas)", "en": "VAWT (Vertical Axis, 2 Blades)"},
+    "specs_medium_tulip_generador": {
+        "es": "PMSG (Electrónica 1000W en grupos de 10)",
+        "en": "PMSG (1000W electronics in groups of 10)",
+    },
+    "specs_medium_tulip_cimentacion": {
+        "es": "Losa 2.1x2.1x0.25m o zapata 1.0x1.0x1.6m (12x M14)",
+        "en": "2.1x2.1x0.25m slab, or 1.0x1.0x1.6m footing (12x M14)",
+    },
+
+    "specs_three_m_tulip_rotor": {"es": "VAWT (Eje Vertical, 2 Palas)", "en": "VAWT (Vertical Axis, 2 Blades)"},
+    "specs_three_m_tulip_generador": {
+        "es": "PMSG (Electrónica 1500W o 2000W en grupos >=10)",
+        "en": "PMSG (1500W or 2000W electronics in groups >=10)",
+    },
+    "specs_three_m_tulip_cimentacion": {
+        "es": "Base de concreto reforzada con pernos M14",
+        "en": "Reinforced concrete base with M14 bolts",
+    },
+
+    "specs_large_tulip_rotor": {"es": "VAWT (Eje Vertical, 2 Palas)", "en": "VAWT (Vertical Axis, 2 Blades)"},
+    "specs_large_tulip_generador": {"es": "PMSG Trifásico", "en": "Three-phase PMSG"},
+    "specs_large_tulip_cimentacion": {
+        "es": "Zapata 2.5x2.5x0.9m o 2.5x4.0x0.5m",
+        "en": "2.5x2.5x0.9m footing, or 2.5x4.0x0.5m",
+    },
+
+    "specs_al13_2m_rotor": {
+        "es": "VAWT Modular (Palas cruzadas a 90°)",
+        "en": "Modular VAWT (blades crossed at 90°)",
+    },
+    "specs_al13_2m_generador": {
+        "es": "PMSG Modular de 24V o 48V AC",
+        "en": "Modular PMSG, 24V or 48V AC",
+    },
+    "specs_al13_2m_cimentacion": {
+        "es": "Base de concreto 1.0x1.0x2.2m",
+        "en": "1.0x1.0x2.2m concrete base",
+    },
+
+    "specs_al13_6m_rotor": {
+        "es": "VAWT Modular (Palas cruzadas a 90°)",
+        "en": "Modular VAWT (blades crossed at 90°)",
+    },
+    "specs_al13_6m_generador": {"es": "PMSG de 5 kW", "en": "5 kW PMSG"},
+    "specs_al13_6m_cimentacion": {
+        "es": "Zapata 2.5x2.5x0.9m + Anclaje para poste",
+        "en": "2.5x2.5x0.9m footing + post anchor",
+    },
+
+    "specs_al13_8m_rotor": {
+        "es": "VAWT Modular (Palas cruzadas a 90°)",
+        "en": "Modular VAWT (blades crossed at 90°)",
+    },
+    "specs_al13_8m_generador": {"es": "PMSG de 10 kW", "en": "10 kW PMSG"},
+    "specs_al13_8m_cimentacion": {
+        "es": "Zapata 2.5x2.5x1.2m + Poste lateral a 1280 mm",
+        "en": "2.5x2.5x1.2m footing + side post at 1280 mm",
+    },
+
+    "specs_ecoroof_flat_3_rotor": {
+        "es": "3 Turbinas VAWT (1m) en plataforma plana",
+        "en": "3 VAWT turbines (1m) on a flat platform",
+    },
+    "specs_ecoroof_flat_3_generador": {
+        "es": "PMSG (Capacidad solar aprox: 2 x 100W)",
+        "en": "PMSG (approx. solar capacity: 2 x 100W)",
+    },
+    "specs_ecoroof_flat_3_cimentacion": {
+        "es": "Instalación sin perforaciones (Efecto Bouquet integrado)",
+        "en": "Drilling-free installation (integrated Bouquet Effect)",
+    },
+
+    "specs_ecoroof_flat_5_rotor": {
+        "es": "5 Turbinas VAWT (1m) en plataforma plana",
+        "en": "5 VAWT turbines (1m) on a flat platform",
+    },
+    "specs_ecoroof_flat_5_generador": {
+        "es": "PMSG (Capacidad solar aprox: 4 x 100W)",
+        "en": "PMSG (approx. solar capacity: 4 x 100W)",
+    },
+    "specs_ecoroof_flat_5_cimentacion": {
+        "es": "Instalación sin perforaciones",
+        "en": "Drilling-free installation",
+    },
+
+    "specs_ecoroof_slanted_rotor": {
+        "es": "Módulos de 3 Turbinas VAWT (1m) en techo inclinado",
+        "en": "Modules of 3 VAWT turbines (1m) on a slanted roof",
+    },
+    "specs_ecoroof_slanted_generador": {
+        "es": "PMSG (Capacidad solar aprox: 2x400W o 4x400W por módulo)",
+        "en": "PMSG (approx. solar capacity: 2x400W or 4x400W per module)",
+    },
+    "specs_ecoroof_slanted_cimentacion": {
+        "es": "Sin perforaciones. Ángulo máximo de techo: 3°",
+        "en": "No drilling. Maximum roof angle: 3°",
+    },
+
     # --- Meses (abreviados, para ejes de gráficos) ----------------------------------
     "mes_ene": {"es": "Ene", "en": "Jan"}, "mes_feb": {"es": "Feb", "en": "Feb"},
     "mes_mar": {"es": "Mar", "en": "Mar"}, "mes_abr": {"es": "Abr", "en": "Apr"},

@@ -56,7 +56,7 @@ from engine.tipo_cambio_bccr import obtener_tipo_cambio_bccr
 from engine.financial_engine_eolico import FinancialEngineEolico
 from engine.tarifas_electricas_cr import calcular_ahorro_tarifa_horaria_usd, calcular_ahorro_tarifa_comercial_usd
 from engine.precios_flower_turbines import (
-    get_articulos_disponibles, get_precio_exworks_usd, potencia_nominal_articulo_w,
+    get_articulos_disponibles, get_precio_exworks_usd, capacidad_controlador_articulo_w,
 )
 from engine.dimensionador_sistema_eolico import VOLTAJE_TURBINAS_V
 from engine.pdf_reporte import generar_pdf_informe_ejecutivo
@@ -817,13 +817,13 @@ with tab_config:
                             f"a {_specs['viento_potencia_nominal_ms']} m/s\n"
                             f"- **Cut-in / supervivencia:** {_specs['velocidad_cutin_ms']} m/s / "
                             f"{_specs['velocidad_supervivencia_ms']} m/s\n"
-                            f"- **Generador:** {_specs['tipo_generador']} ({_specs['polos_generador']} polos)\n"
+                            f"- **Generador:** {t(_specs['tipo_generador'])} ({_specs['polos_generador']} polos)\n"
                             f"- **Salida:** {_specs['voltaje_salida']}\n"
                             f"- **Dimensiones:** {_specs['altura_total_m']} m altura total, "
                             f"{_specs['diametro_rotor_m']} m diámetro de rotor, "
                             f"{_specs['peso_total_kg']} kg\n"
                             f"- **Vida de diseño:** {_specs['vida_diseno_anos']} años\n"
-                            f"- **Cimentación requerida:** {_specs['cimentacion_requerida']}"
+                            f"- **Cimentación requerida:** {t(_specs['cimentacion_requerida'])}"
                         )
 
     if st.button("+ Agregar clúster"):
@@ -891,8 +891,18 @@ with tab_resultados:
             resultados = []
             serie_total_w = None
             for c in st.session_state.clusters:
+                # Recorte por electrónica (correo Estadio Heredia, Flower Turbines):
+                # sin este tope, kWh/año asume que TODA la energía aerodinámica se
+                # aprovecha, sin importar qué controlador/inversor se compró -- eso
+                # sobreestima la producción real en sitios de viento fuerte. Si el
+                # clúster todavía no tiene artículo elegido (pestaña Financiero), cae
+                # al valor de fábrica del modelo -- nunca al recorte más grande, para
+                # no estimar de más.
+                _capacidad_w = (capacidad_controlador_articulo_w(c.get("articulo"))
+                                or SPECS_TURBINAS[c["modelo"]]["potencia_nominal_w"])
                 r = simular(df_clima, altura_buje=c["altura_buje"], modelo=c["modelo"], N=int(c["N"]),
-                            elevacion_m=elevacion_m, z0=z0, metodo_bouquet=metodo_bouquet)
+                            elevacion_m=elevacion_m, z0=z0, metodo_bouquet=metodo_bouquet,
+                            capacidad_electronica_w=_capacidad_w)
                 resultados.append({**c, **r})
                 serie_cluster_w = r["serie_horaria_W_por_turbina"] * c["N"]
                 serie_total_w = serie_cluster_w if serie_total_w is None else serie_total_w + serie_cluster_w
@@ -913,8 +923,19 @@ with tab_resultados:
                 "Buje (m)": r["altura_buje"], "kWh/año": round(r["kwh_anual"]),
                 "V. medio buje (m/s)": round(r["v_hub_medio"], 2),
                 "% bajo cut-in": round(r["pct_horas_bajo_cutin"], 1),
+                "% horas con recorte": round(r["pct_horas_con_recorte"], 1),
+                "kWh/año perdidos por recorte": round(r["energia_perdida_por_recorte_kwh"]),
             } for r in resultados])
             st.dataframe(tabla, hide_index=True)
+            if any(r["energia_perdida_por_recorte_kwh"] > 0 for r in resultados):
+                st.caption(
+                    "\"Recorte\": horas donde el viento (+ Efecto Bouquet) le daría más "
+                    "energía a la turbina de la que su controlador/inversor puede procesar -- "
+                    "ese excedente se pierde, no se cuenta en el kWh/año. Depende de qué "
+                    "artículo (capacidad de electrónica) elegiste para cada clúster en "
+                    "\"Análisis Financiero\" -- sin elegir ninguno todavía, se asume el "
+                    "tamaño de fábrica del modelo, el más conservador."
+                )
 
             media_confirmada = resultado_clima["media"]
             with st.expander("Perfil de viento por altura: dos rugosidades, y una verificación independiente"):
@@ -1030,9 +1051,15 @@ with tab_financiero:
             # tarifa horaria de Costa Rica necesita saber A QUÉ HORA se genera cada kWh, no
             # sólo el total anual -- serie_horaria_W_por_turbina es POR TURBINA, se escala
             # por N de cada clúster y se suman todos para tener el perfil horario del proyecto.
+            # Mismo recorte por electrónica que en "Resultados" (correo Estadio
+            # Heredia, Flower Turbines) -- si acá diera un kWh/año distinto al de esa
+            # pestaña por no aplicar el mismo tope, Payback/ROI/NPV terminarían
+            # calculados contra una energía que la pestaña Resultados ya no muestra.
             resultados_clusters = [
                 simular(df_clima, altura_buje=c["altura_buje"], modelo=c["modelo"], N=int(c["N"]),
-                        elevacion_m=elevacion_m, z0=z0, metodo_bouquet=metodo_bouquet)
+                        elevacion_m=elevacion_m, z0=z0, metodo_bouquet=metodo_bouquet,
+                        capacidad_electronica_w=(capacidad_controlador_articulo_w(c.get("articulo"))
+                                                  or SPECS_TURBINAS[c["modelo"]]["potencia_nominal_w"]))
                 for c in st.session_state.clusters
             ]
             kwh_anual_total = sum(r["kwh_anual"] for r in resultados_clusters)
@@ -1445,13 +1472,12 @@ with tab_especificacion:
             turbinas_seleccionadas = [
                 c["modelo"] for c in st.session_state.clusters for _ in range(int(c["N"]))
             ]
-            # Si el clúster ya tiene un artículo elegido (pestaña Análisis Financiero)
-            # y ese artículo trae un tamaño de controlador/inversor explícito (ej. "...3
-            # kilowatts"), esa es la potencia nominal real de ESA configuración -- más
-            # precisa que la ficha genérica por modelo, que no distingue controlador.
+            # Potencia del GENERADOR (ficha de fábrica) -- no cambia según qué
+            # controlador/inversor se haya elegido para el clúster (ver docstring de
+            # capacidad_controlador_articulo_w: son dos componentes eléctricos
+            # distintos, se corrigió acá una confusión real entre ambos).
             potencia_pico_W = sum(
-                (potencia_nominal_articulo_w(c.get("articulo"))
-                 or SPECS_TURBINAS[c["modelo"]]["potencia_nominal_w"]) * int(c["N"])
+                SPECS_TURBINAS[c["modelo"]]["potencia_nominal_w"] * int(c["N"])
                 for c in st.session_state.clusters
             )
 
@@ -1494,7 +1520,7 @@ with tab_especificacion:
 
             for (_clave, _articulo), _cantidad in _cantidad_por_config.items():
                 _specs = SPECS_TURBINAS[_clave]
-                _potencia_nominal_w = potencia_nominal_articulo_w(_articulo) or _specs["potencia_nominal_w"]
+                _capacidad_controlador_w = capacidad_controlador_articulo_w(_articulo)
                 with st.container(border=True):
                     col_img, col_specs = st.columns([1, 3])
                     with col_img:
@@ -1506,17 +1532,25 @@ with tab_especificacion:
                         st.markdown(f"{_titulo} -- cantidad: {_cantidad}")
                         st.caption(f"Fabricante: Flower Turbines -- N° de parte: {_specs['numero_parte']}")
                         _filas_turbina = [
-                            ("Potencia nominal", f"{_potencia_nominal_w:.0f} W"),
+                            ("Potencia nominal (generador)", f"{_specs['potencia_nominal_w']:.0f} W"),
                             ("Velocidad a potencia nominal", f"{_specs['viento_potencia_nominal_ms']} m/s"),
                             ("Velocidad de arranque (cut-in)", f"{_specs['velocidad_cutin_ms']} m/s"),
                             ("Velocidad de supervivencia", f"{_specs['velocidad_supervivencia_ms']} m/s"),
-                            ("Tipo de rotor", _specs["tipo_rotor"]),
-                            ("Tipo de generador", _specs["tipo_generador"]),
+                            ("Tipo de rotor", t(_specs["tipo_rotor"])),
+                            ("Tipo de generador", t(_specs["tipo_generador"])),
                             ("Diámetro del rotor", f"{_specs['diametro_rotor_m']} m"),
                             ("Altura de pala", f"{_specs['altura_pala_m']} m"),
                             ("Peso", f"{_specs['peso_total_kg']} kg"),
-                            ("Cimentación requerida", _specs["cimentacion_requerida"]),
+                            ("Cimentación requerida", t(_specs["cimentacion_requerida"])),
                         ]
+                        if _capacidad_controlador_w is not None:
+                            # Dato del controlador/inversor incluido en ESE artículo --
+                            # distinto de la potencia del generador de arriba, no se
+                            # suman ni se reemplazan entre sí (ver docstring de
+                            # capacidad_controlador_articulo_w).
+                            _filas_turbina.insert(
+                                1, ("Capacidad del controlador/inversor incluido", f"{_capacidad_controlador_w:.0f} W")
+                            )
                         st.dataframe(
                             pd.DataFrame([{"Especificación": f, "Valor": v} for f, v in _filas_turbina]),
                             hide_index=True, use_container_width=True,
