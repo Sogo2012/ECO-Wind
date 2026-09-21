@@ -56,7 +56,7 @@ from engine.tipo_cambio_bccr import obtener_tipo_cambio_bccr
 from engine.financial_engine_eolico import FinancialEngineEolico
 from engine.tarifas_electricas_cr import calcular_ahorro_tarifa_horaria_usd, calcular_ahorro_tarifa_comercial_usd
 from engine.precios_flower_turbines import (
-    get_articulos_disponibles, get_precio_exworks_usd, potencia_nominal_articulo_w,
+    get_articulos_disponibles, get_precio_exworks_usd, capacidad_controlador_articulo_w,
 )
 from engine.dimensionador_sistema_eolico import VOLTAJE_TURBINAS_V
 from engine.pdf_reporte import generar_pdf_informe_ejecutivo
@@ -1445,13 +1445,12 @@ with tab_especificacion:
             turbinas_seleccionadas = [
                 c["modelo"] for c in st.session_state.clusters for _ in range(int(c["N"]))
             ]
-            # Si el clúster ya tiene un artículo elegido (pestaña Análisis Financiero)
-            # y ese artículo trae un tamaño de controlador/inversor explícito (ej. "...3
-            # kilowatts"), esa es la potencia nominal real de ESA configuración -- más
-            # precisa que la ficha genérica por modelo, que no distingue controlador.
+            # Potencia del GENERADOR (ficha de fábrica) -- no cambia según qué
+            # controlador/inversor se haya elegido para el clúster (ver docstring de
+            # capacidad_controlador_articulo_w: son dos componentes eléctricos
+            # distintos, se corrigió acá una confusión real entre ambos).
             potencia_pico_W = sum(
-                (potencia_nominal_articulo_w(c.get("articulo"))
-                 or SPECS_TURBINAS[c["modelo"]]["potencia_nominal_w"]) * int(c["N"])
+                SPECS_TURBINAS[c["modelo"]]["potencia_nominal_w"] * int(c["N"])
                 for c in st.session_state.clusters
             )
 
@@ -1494,7 +1493,7 @@ with tab_especificacion:
 
             for (_clave, _articulo), _cantidad in _cantidad_por_config.items():
                 _specs = SPECS_TURBINAS[_clave]
-                _potencia_nominal_w = potencia_nominal_articulo_w(_articulo) or _specs["potencia_nominal_w"]
+                _capacidad_controlador_w = capacidad_controlador_articulo_w(_articulo)
                 with st.container(border=True):
                     col_img, col_specs = st.columns([1, 3])
                     with col_img:
@@ -1506,7 +1505,7 @@ with tab_especificacion:
                         st.markdown(f"{_titulo} -- cantidad: {_cantidad}")
                         st.caption(f"Fabricante: Flower Turbines -- N° de parte: {_specs['numero_parte']}")
                         _filas_turbina = [
-                            ("Potencia nominal", f"{_potencia_nominal_w:.0f} W"),
+                            ("Potencia nominal (generador)", f"{_specs['potencia_nominal_w']:.0f} W"),
                             ("Velocidad a potencia nominal", f"{_specs['viento_potencia_nominal_ms']} m/s"),
                             ("Velocidad de arranque (cut-in)", f"{_specs['velocidad_cutin_ms']} m/s"),
                             ("Velocidad de supervivencia", f"{_specs['velocidad_supervivencia_ms']} m/s"),
@@ -1517,6 +1516,14 @@ with tab_especificacion:
                             ("Peso", f"{_specs['peso_total_kg']} kg"),
                             ("Cimentación requerida", t(_specs["cimentacion_requerida"])),
                         ]
+                        if _capacidad_controlador_w is not None:
+                            # Dato del controlador/inversor incluido en ESE artículo --
+                            # distinto de la potencia del generador de arriba, no se
+                            # suman ni se reemplazan entre sí (ver docstring de
+                            # capacidad_controlador_articulo_w).
+                            _filas_turbina.insert(
+                                1, ("Capacidad del controlador/inversor incluido", f"{_capacidad_controlador_w:.0f} W")
+                            )
                         st.dataframe(
                             pd.DataFrame([{"Especificación": f, "Valor": v} for f, v in _filas_turbina]),
                             hide_index=True, use_container_width=True,

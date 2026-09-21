@@ -150,19 +150,29 @@ def get_precio_exworks_usd(modelo: str, articulo: Optional[str] = None) -> Optio
     return filas[0][1]
 
 
-def potencia_nominal_articulo_w(articulo: Optional[str]) -> Optional[float]:
+def capacidad_controlador_articulo_w(articulo: Optional[str]) -> Optional[float]:
     """
-    Potencia nominal (W) implícita en el texto del artículo, cuando lo trae -- ej.
-    "3-meter tulip off grid with charger 3 kilowatts" -> 3000.0. Varios artículos del
-    catálogo real vienen en más de un tamaño de controlador/inversor (1kW, 3kW, 5kW,
-    10kW...); esa cifra es la potencia real de ESA configuración específica, no la
-    ficha genérica por modelo de turbine_specs.SPECS_TURBINAS (que sólo tiene un
-    número fijo por modelo, sin distinguir controlador).
+    Capacidad (W) del controlador de carga/inversor que viene incluido en ESE
+    artículo del catálogo, cuando el texto la trae explícita -- ej. "3-meter tulip
+    off grid with charger 3 kilowatts" -> 3000.0.
+
+    ⚠️ CORREGIDO -- esta función se llamaba "potencia_nominal_articulo_w" y su
+    resultado se usaba para SOBRESCRIBIR turbine_specs.SPECS_TURBINAS[modelo]
+    ["potencia_nominal_w"] en la tabla de especificación y en "Potencia pico
+    instalada". Eso mezclaba dos componentes eléctricos distintos: verificado
+    contra la ficha oficial de fábrica, la curva de potencia ya validada de este
+    proyecto (flower_turbines_curves.py, R²≈1.000000) y las páginas de producto de
+    Flower Turbines, el GENERADOR de una turbina 3-M Tulip entrega ~1000W sin
+    importar qué artículo se compró -- el número de kilowatts del artículo
+    ("...1 kilowatt" / "...3 kilowatts") describe el CONTROLADOR/INVERSOR
+    empaquetado con esa venta (útil para que el Efecto Bouquet de un clúster no se
+    recorte), no la potencia del generador. Esta función ahora sirve para mostrar
+    la capacidad del controlador como un dato APARTE -- nunca para reemplazar
+    potencia_nominal_w.
 
     None si el artículo no trae ningún número de kilowatts (accesorios como
     "hurricane reinforcements" o "anti-corrosion measures", o si no se pasó ningún
-    artículo) -- en ese caso quien llama debe usar el valor genérico de
-    SPECS_TURBINAS[modelo]["potencia_nominal_w"] en su lugar.
+    artículo).
     """
     if not articulo:
         return None
