@@ -76,7 +76,43 @@ FUENTES Y NIVEL DE CONFIANZA
    Turbines, y ambos tramos siguen la MISMA curva exponencial sin
    quiebre visible en N=5->6.
 
-   Confianza: ALTA, validado en todo el rango 0-15 m/s.
+   Confianza: ALTA, validado en todo el rango 0-15 m/s -- PERO SOLO PARA
+   SMALL/MEDIUM/LARGE. Ver punto 4 abajo: el calculador online NO tiene
+   columna para el 3-Meter Tulip, así que a ese modelo se le venía
+   aplicando esta misma curva por extensión, sin dato propio que lo
+   confirmara -- corregido en el punto 4.
+
+4) Multiplicador de Efecto Bouquet -- 3-Meter Tulip, CASO APARTE
+   (Hallazgo 2026-09-21, correo del proyecto Estadio Heredia): el
+   calculador online (flowerturbines.com/bouquet-effect-calculator)
+   confirmado con capturas de pantalla frescas del cliente para N=10 --
+   SOLO tiene columnas Small/Medium/Large. No existe columna "3-Meter"
+   ahí. Se verificó que esas 3 columnas coinciden con M(N)=exp(0.21103*
+   (N-1)) con error <0.15% en N=10 -- la fórmula de arriba es correcta
+   para esos 3 modelos, sin dudas.
+
+   Pero el 3-Meter Tulip (el modelo de este proyecto) nunca tuvo un dato
+   propio que confirmara que sigue la MISMA curva -- se le aplicaba la
+   fórmula de Small/Medium/Large por extensión. El único documento con
+   datos de bouquet PROPIOS del 3-Meter es el manual oficial "3M Tulip
+   Quick Start Guide 2025" (Tablas 1-4, páginas 4-9: turbina aislada,
+   bouquet de 3, de 5 y de 10). Comparando esas tablas contra la curva
+   aislada del 3-Meter (ya validada, R²=1.00000) se obtiene el
+   multiplicador real, constante en todo el rango de viento 3-15 m/s
+   (desviación estándar <0.05% en las 31 velocidades de cada tabla --
+   no es ruido, es un multiplicador real y distinto):
+
+       M(1)=1.000  M(3)=1.750  M(5)=2.280  M(10)=4.500
+
+   A N=5 casi coincide con la fórmula genérica (2.280 vs 2.326, ~2%),
+   pero a N=10 la fórmula genérica SOBRESTIMA un 48% (6.681 vs 4.500) --
+   el 3-Meter no logra el mismo Efecto Bouquet que Small/Medium/Large a
+   partir de bouquets grandes. Con solo 4 anclas confirmadas (N=1,3,5,
+   10), bouquet_multiplier_three_m_tulip() interpola log-lineal para los
+   N intermedios (2,4,6,7,8,9) -- no hay dato propio todavía para esos.
+
+   Confianza: ALTA para N=1,3,5,10 (dato oficial exacto). MEDIA para
+   N=2,4,6,7,8,9 (interpolados, sin verificación propia todavía).
 
 BRECHA PENDIENTE (para la calibración real vs. campo)
 -------------------------------------------------------
@@ -172,16 +208,53 @@ def bouquet_multiplier_linear(N):
     return np.where(N_arr >= 1, 1 + 0.25 * N_arr, 0.0)
 
 
+# ---------------------------------------------------------------------------
+# 2b. Multiplicador de Efecto Bouquet — 3-Meter Tulip (caso aparte, ver
+#     punto 4 del docstring del módulo). Anclado a las Tablas 1/2/3/4 del
+#     "3M Tulip Quick Start Guide 2025" -- únicos puntos con dato oficial
+#     propio de este modelo (N=1, 3, 5, 10). N=2,4,6,7,8,9 se interpolan
+#     log-linealmente entre esas anclas.
+# ---------------------------------------------------------------------------
+
+_BOUQUET_3M_ANCLAS_N = np.array([1.0, 3.0, 5.0, 10.0])
+_BOUQUET_3M_ANCLAS_M = np.array([1.0000, 1.7501, 2.2801, 4.5000])
+_BOUQUET_3M_LOG_ANCLAS_M = np.log(_BOUQUET_3M_ANCLAS_M)
+
+
+def bouquet_multiplier_three_m_tulip(N):
+    """
+    Multiplicador real M(N) del 3-Meter Tulip, anclado a datos oficiales
+    propios de este modelo (Quick Start Guide 2025, N=1,3,5,10) -- NO a la
+    curva genérica de bouquet_multiplier() (esa es de Small/Medium/Large,
+    calculador online, no incluye 3-Meter). N=2,4,6,7,8,9 interpolados
+    log-linealmente entre las anclas conocidas.
+
+    M(1)=1.000  M(3)=1.750  M(5)=2.280  M(10)=4.500
+    """
+    N_arr = np.asarray(N, dtype=float)
+    log_m = np.interp(N_arr, _BOUQUET_3M_ANCLAS_N, _BOUQUET_3M_LOG_ANCLAS_M)
+    return np.where(N_arr >= 1, np.exp(log_m), 0.0)
+
+
 def power_in_bouquet(v, modelo, N, metodo="real"):
     """
     Potencia POR TURBINA dentro de un clúster de N unidades del mismo modelo.
 
     metodo: "real"   (default) usa bouquet_multiplier() — la exponencial
-                      verificada contra el calculador oficial
+                      verificada contra el calculador oficial -- EXCEPTO
+                      para modelo="three_m_tulip", que usa
+                      bouquet_multiplier_three_m_tulip() (dato propio del
+                      manual, distinto de Small/Medium/Large -- ver punto
+                      4 del docstring del módulo)
             "lineal" usa bouquet_multiplier_linear() — solo para comparar
     """
     base = power_isolated(v, modelo)
-    m = bouquet_multiplier_linear(N) if metodo == "lineal" else bouquet_multiplier(N)
+    if metodo == "lineal":
+        m = bouquet_multiplier_linear(N)
+    elif modelo == "three_m_tulip":
+        m = bouquet_multiplier_three_m_tulip(N)
+    else:
+        m = bouquet_multiplier(N)
     return base * m
 
 
