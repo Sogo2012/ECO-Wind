@@ -891,8 +891,18 @@ with tab_resultados:
             resultados = []
             serie_total_w = None
             for c in st.session_state.clusters:
+                # Recorte por electrónica (correo Estadio Heredia, Flower Turbines):
+                # sin este tope, kWh/año asume que TODA la energía aerodinámica se
+                # aprovecha, sin importar qué controlador/inversor se compró -- eso
+                # sobreestima la producción real en sitios de viento fuerte. Si el
+                # clúster todavía no tiene artículo elegido (pestaña Financiero), cae
+                # al valor de fábrica del modelo -- nunca al recorte más grande, para
+                # no estimar de más.
+                _capacidad_w = (capacidad_controlador_articulo_w(c.get("articulo"))
+                                or SPECS_TURBINAS[c["modelo"]]["potencia_nominal_w"])
                 r = simular(df_clima, altura_buje=c["altura_buje"], modelo=c["modelo"], N=int(c["N"]),
-                            elevacion_m=elevacion_m, z0=z0, metodo_bouquet=metodo_bouquet)
+                            elevacion_m=elevacion_m, z0=z0, metodo_bouquet=metodo_bouquet,
+                            capacidad_electronica_w=_capacidad_w)
                 resultados.append({**c, **r})
                 serie_cluster_w = r["serie_horaria_W_por_turbina"] * c["N"]
                 serie_total_w = serie_cluster_w if serie_total_w is None else serie_total_w + serie_cluster_w
@@ -913,8 +923,19 @@ with tab_resultados:
                 "Buje (m)": r["altura_buje"], "kWh/año": round(r["kwh_anual"]),
                 "V. medio buje (m/s)": round(r["v_hub_medio"], 2),
                 "% bajo cut-in": round(r["pct_horas_bajo_cutin"], 1),
+                "% horas con recorte": round(r["pct_horas_con_recorte"], 1),
+                "kWh/año perdidos por recorte": round(r["energia_perdida_por_recorte_kwh"]),
             } for r in resultados])
             st.dataframe(tabla, hide_index=True)
+            if any(r["energia_perdida_por_recorte_kwh"] > 0 for r in resultados):
+                st.caption(
+                    "\"Recorte\": horas donde el viento (+ Efecto Bouquet) le daría más "
+                    "energía a la turbina de la que su controlador/inversor puede procesar -- "
+                    "ese excedente se pierde, no se cuenta en el kWh/año. Depende de qué "
+                    "artículo (capacidad de electrónica) elegiste para cada clúster en "
+                    "\"Análisis Financiero\" -- sin elegir ninguno todavía, se asume el "
+                    "tamaño de fábrica del modelo, el más conservador."
+                )
 
             media_confirmada = resultado_clima["media"]
             with st.expander("Perfil de viento por altura: dos rugosidades, y una verificación independiente"):
@@ -1030,9 +1051,15 @@ with tab_financiero:
             # tarifa horaria de Costa Rica necesita saber A QUÉ HORA se genera cada kWh, no
             # sólo el total anual -- serie_horaria_W_por_turbina es POR TURBINA, se escala
             # por N de cada clúster y se suman todos para tener el perfil horario del proyecto.
+            # Mismo recorte por electrónica que en "Resultados" (correo Estadio
+            # Heredia, Flower Turbines) -- si acá diera un kWh/año distinto al de esa
+            # pestaña por no aplicar el mismo tope, Payback/ROI/NPV terminarían
+            # calculados contra una energía que la pestaña Resultados ya no muestra.
             resultados_clusters = [
                 simular(df_clima, altura_buje=c["altura_buje"], modelo=c["modelo"], N=int(c["N"]),
-                        elevacion_m=elevacion_m, z0=z0, metodo_bouquet=metodo_bouquet)
+                        elevacion_m=elevacion_m, z0=z0, metodo_bouquet=metodo_bouquet,
+                        capacidad_electronica_w=(capacidad_controlador_articulo_w(c.get("articulo"))
+                                                  or SPECS_TURBINAS[c["modelo"]]["potencia_nominal_w"]))
                 for c in st.session_state.clusters
             ]
             kwh_anual_total = sum(r["kwh_anual"] for r in resultados_clusters)
