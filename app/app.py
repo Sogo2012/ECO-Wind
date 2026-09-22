@@ -79,6 +79,7 @@ if "idioma" not in st.session_state:
 AZUL = "#173D4A"    # Pantone 309 C
 VERDE = "#66913E"   # Pantone 575 C
 GRIS = "#414549"    # Pantone 432 C
+AMBAR = "#B7791F"   # mismo tono que engine/pdf_reporte.py -- energía perdida por recorte
 FONDO = "#E8F0F3"
 
 # --- Paleta de clima (10 colores para heatmaps y visualizaciones) ---
@@ -280,6 +281,84 @@ def crear_curva_duracion_plotly(serie_w):
         paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
     )
 
+    return fig
+
+
+def calcular_desglose_por_viento(v_hub, kwh_entregado_por_hora, kwh_perdido_por_hora, ancho_bin=1.0):
+    """
+    Agrupa la producción horaria del proyecto (post-recorte, más lo perdido por el tope
+    de electrónica) en tramos de `ancho_bin` m/s de viento en el buje -- pedido de
+    Flower Turbines (correo del proyecto Estadio Heredia): un desglose más granular que
+    un solo promedio anual, porque P∝v³ hace que las horas de viento fuerte valgan
+    desproporcionadamente más.
+
+    v_hub, kwh_entregado_por_hora, kwh_perdido_por_hora: arreglos del mismo largo
+    (8760 u 8784 horas). Devuelve un DataFrame con una fila por tramo que sí tuvo
+    horas -- vacío si v_hub está vacío.
+    """
+    v_hub = np.asarray(v_hub, dtype=float)
+    n_horas = len(v_hub)
+    if n_horas == 0:
+        return pd.DataFrame()
+
+    v_max = float(v_hub.max())
+    bordes = np.arange(0.0, v_max + ancho_bin, ancho_bin)
+    if bordes[-1] <= v_max:
+        bordes = np.append(bordes, bordes[-1] + ancho_bin)
+
+    total_kwh = float(np.sum(kwh_entregado_por_hora))
+    filas = []
+    for i in range(len(bordes) - 1):
+        mask = (v_hub >= bordes[i]) & (v_hub < bordes[i + 1])
+        horas = int(mask.sum())
+        if horas == 0:
+            continue
+        kwh_bin = float(np.sum(kwh_entregado_por_hora[mask]))
+        filas.append({
+            "bin_label": f"{bordes[i]:.0f}-{bordes[i+1]:.0f}",
+            "bin_ini": bordes[i],
+            "horas": horas,
+            "pct_horas": horas / n_horas * 100,
+            "kwh": kwh_bin,
+            "pct_kwh": (kwh_bin / total_kwh * 100) if total_kwh > 0 else 0.0,
+            "kwh_perdido": float(np.sum(kwh_perdido_por_hora[mask])),
+        })
+    return pd.DataFrame(filas)
+
+
+def crear_desglose_viento_plotly(tabla_desglose, ancho_bin=1.0):
+    """Barras apiladas: energía entregada (post-recorte) + energía perdida por el tope
+    de electrónica, una barra por tramo de velocidad de viento."""
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=tabla_desglose["bin_label"], y=tabla_desglose["kwh"],
+        name=t("resultados_viento_leyenda_entregado"),
+        marker=dict(color=VERDE),
+        hovertemplate=t("resultados_viento_hover_entregado"),
+    ))
+    fig.add_trace(go.Bar(
+        x=tabla_desglose["bin_label"], y=tabla_desglose["kwh_perdido"],
+        name=t("resultados_viento_leyenda_perdido"),
+        marker=dict(color=AMBAR, opacity=0.6),
+        hovertemplate=t("resultados_viento_hover_perdido"),
+    ))
+    fig.update_layout(
+        barmode="stack",
+        title=t("resultados_viento_titulo_chart", ancho=f"{ancho_bin:.0f}"),
+        xaxis_title=t("resultados_viento_eje_x"),
+        yaxis_title=t("resultados_viento_eje_y"),
+        template="plotly_white",
+        height=400,
+        margin=dict(l=60, r=20, t=40, b=60),
+        font=dict(family="sans-serif", size=11),
+        # type="category" explícito: sin esto, Plotly detecta el eje X como fecha --
+        # etiquetas como "6-7" o "10-11" calzan con su heurística de fecha corta
+        # (día-mes) y el eje termina mostrando años en vez de tramos de viento.
+        xaxis=dict(type="category", gridcolor="#E8E8E8"),
+        yaxis=dict(gridcolor="#E8E8E8"),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+    )
     return fig
 
 
@@ -901,6 +980,7 @@ with tab_resultados:
 
             resultados = []
             serie_total_w = None
+            serie_perdido_total_kwh = None
             for c in st.session_state.clusters:
                 # Recorte por electrónica (correo Estadio Heredia, Flower Turbines):
                 # sin este tope, kWh/año asume que TODA la energía aerodinámica se
@@ -917,6 +997,9 @@ with tab_resultados:
                 resultados.append({**c, **r})
                 serie_cluster_w = r["serie_horaria_W_por_turbina"] * c["N"]
                 serie_total_w = serie_cluster_w if serie_total_w is None else serie_total_w + serie_cluster_w
+                serie_cluster_kwh_perdido = r["serie_horaria_kwh_perdido_por_turbina"] * c["N"]
+                serie_perdido_total_kwh = (serie_cluster_kwh_perdido if serie_perdido_total_kwh is None
+                                            else serie_perdido_total_kwh + serie_cluster_kwh_perdido)
 
             kwh_total = sum(r["kwh_anual"] for r in resultados)
             n_total = sum(c["N"] for c in st.session_state.clusters)
@@ -978,6 +1061,26 @@ with tab_resultados:
             kwh_mensual_total = pd.concat([r["kwh_mensual"] for r in resultados], axis=1).sum(axis=1)
             st.plotly_chart(crear_produccion_mensual_plotly(kwh_mensual_total), use_container_width=True)
             st.plotly_chart(crear_curva_duracion_plotly(serie_total_w), use_container_width=True)
+
+            st.markdown(t("resultados_subheader_viento"))
+            st.caption(t("resultados_caption_viento"))
+            tabla_desglose_viento = calcular_desglose_por_viento(
+                resultados[0]["v_hub"], (serie_total_w / 1000.0).values,
+                serie_perdido_total_kwh.values, ancho_bin=1.0)
+            if not tabla_desglose_viento.empty:
+                st.plotly_chart(
+                    crear_desglose_viento_plotly(tabla_desglose_viento, ancho_bin=1.0),
+                    use_container_width=True)
+                with st.expander(t("resultados_viento_expander_tabla")):
+                    tabla_viento_mostrar = pd.DataFrame({
+                        t("resultados_viento_col_bin"): tabla_desglose_viento["bin_label"],
+                        t("resultados_viento_col_horas"): tabla_desglose_viento["horas"],
+                        t("resultados_viento_col_pct_horas"): tabla_desglose_viento["pct_horas"].round(1),
+                        t("resultados_viento_col_kwh"): tabla_desglose_viento["kwh"].round(0),
+                        t("resultados_viento_col_pct_kwh"): tabla_desglose_viento["pct_kwh"].round(1),
+                        t("resultados_viento_col_perdido"): tabla_desglose_viento["kwh_perdido"].round(0),
+                    })
+                    st.dataframe(tabla_viento_mostrar, hide_index=True)
 
             st.caption(t("resultados_caption_validado"))
 

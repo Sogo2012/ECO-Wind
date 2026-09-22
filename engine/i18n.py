@@ -972,6 +972,42 @@ TRANSLATIONS = {
                "recovering the investment from electricity savings alone, that's the value to "
                "present -- this calculation doesn't quantify it in dollars."),
     },
+    "resultados_subheader_viento": {
+        "es": "**Desglose de producción por velocidad de viento**",
+        "en": "**Production breakdown by wind speed**",
+    },
+    "resultados_caption_viento": {
+        "es": ("La potencia crece con el cubo de la velocidad (P∝v³) -- por eso las horas de "
+               "viento fuerte valen desproporcionadamente más que las de viento flojo. "
+               "Calculado con la altura de buje del primer clúster (los clústers normalmente "
+               "comparten la misma altura de instalación)."),
+        "en": ("Power grows with the cube of speed (P∝v³) -- that's why strong-wind hours are "
+               "worth disproportionately more than light-wind ones. Calculated using the first "
+               "cluster's hub height (clusters usually share the same installation height)."),
+    },
+    "resultados_viento_leyenda_entregado": {"es": "Entregado (con recorte de electrónica)", "en": "Delivered (with electronics clipping)"},
+    "resultados_viento_leyenda_perdido": {"es": "Perdido por el tope de electrónica", "en": "Lost to the electronics cap"},
+    "resultados_viento_titulo_chart": {
+        "es": "Energía entregada vs. perdida por tramo de {ancho} m/s",
+        "en": "Energy delivered vs. lost, by {ancho} m/s bin",
+    },
+    "resultados_viento_eje_x": {"es": "Velocidad de viento en el buje (m/s)", "en": "Hub wind speed (m/s)"},
+    "resultados_viento_eje_y": {"es": "Energía (kWh/año)", "en": "Energy (kWh/year)"},
+    "resultados_viento_hover_entregado": {
+        "es": "<b>%{x}</b><br>Entregado: %{y:,.0f} kWh<extra></extra>",
+        "en": "<b>%{x}</b><br>Delivered: %{y:,.0f} kWh<extra></extra>",
+    },
+    "resultados_viento_hover_perdido": {
+        "es": "<b>%{x}</b><br>Perdido por recorte: %{y:,.0f} kWh<extra></extra>",
+        "en": "<b>%{x}</b><br>Lost to clipping: %{y:,.0f} kWh<extra></extra>",
+    },
+    "resultados_viento_expander_tabla": {"es": "Ver tabla completa", "en": "View full table"},
+    "resultados_viento_col_bin": {"es": "Viento (m/s)", "en": "Wind (m/s)"},
+    "resultados_viento_col_horas": {"es": "Horas", "en": "Hours"},
+    "resultados_viento_col_pct_horas": {"es": "% horas", "en": "% hours"},
+    "resultados_viento_col_kwh": {"es": "kWh entregado", "en": "kWh delivered"},
+    "resultados_viento_col_pct_kwh": {"es": "% de la producción anual", "en": "% of annual production"},
+    "resultados_viento_col_perdido": {"es": "kWh perdido (recorte)", "en": "kWh lost (clipping)"},
     "financiero_caption_footer": {
         "es": ("CAPEX, mantenimiento y precio de venta ingresados directo por el usuario. "
                "Tarifas horarias reales de CNFL/ICE cruzadas contra la producción hora por "
