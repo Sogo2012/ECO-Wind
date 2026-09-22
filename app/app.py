@@ -1109,6 +1109,7 @@ with tab_resultados:
                 "kwh_total": kwh_total, "n_total": n_total,
                 "kwh_mensual_total": kwh_mensual_total,
                 "correccion_densidad_pct": (1 - resultados[0]["factor_correccion_densidad"]) * 100,
+                "tabla_desglose_viento": tabla_desglose_viento,
             }
     else:
         st.info(t("resultados_info_sin_calculo"))
@@ -1676,6 +1677,12 @@ with tab_especificacion:
                             "correccion_densidad_pct": _prod["correccion_densidad_pct"],
                             "img_mensual": fig_a_png(crear_produccion_mensual_plotly(_prod["kwh_mensual_total"])),
                             "img_duracion": fig_a_png(crear_curva_duracion_plotly(_prod["serie_total_w"])),
+                            "img_viento": (
+                                fig_a_png(crear_desglose_viento_plotly(
+                                    _prod["tabla_desglose_viento"], ancho_bin=1.0,
+                                    capacidad_electronica_w=_prod["resultados"][0]["capacidad_electronica_w"]))
+                                if not _prod["tabla_desglose_viento"].empty else None
+                            ),
                         }
 
                         _datos_pdf["financiero"] = st.session_state.get("ultimo_resultado_financiero")
