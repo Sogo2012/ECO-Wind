@@ -191,14 +191,22 @@ def _imagen_png(png_bytes, ancho, alto):
 
 
 def _fila_imagenes(imgs_con_leyenda):
-    """Una o dos imágenes lado a lado (gráficos), cada una con su leyenda chica debajo.
-    `imgs_con_leyenda`: lista de (png_bytes, leyenda_str)."""
+    """Una o más imágenes lado a lado (gráficos), cada una con su leyenda chica debajo.
+    `imgs_con_leyenda`: lista de (png_bytes, leyenda_str).
+
+    Con una sola imagen (fila a todo el ancho), el alto se calcula a partir del aspect
+    ratio 1000x560 con el que fig_a_png() (app.py) exporta TODOS los gráficos del
+    informe -- así la imagen llena el ancho completo de la columna en vez de quedar
+    recortada por una altura fija (kind="proportional" ajusta por la dimensión más
+    chica, y con altura fija de sobra queda angosta y centrada, con margen vacío a los
+    lados). Con dos o más imágenes lado a lado, se mantiene el alto fijo de antes."""
     estilos = _estilos()
     n = len(imgs_con_leyenda)
     ancho_col = ANCHO_UTIL / n
+    alto = (ancho_col - 0.3 * cm) * (560 / 1000) if n == 1 else 7.5 * cm
     fila_imgs, fila_leyendas = [], []
     for png_bytes, leyenda in imgs_con_leyenda:
-        fila_imgs.append(_imagen_png(png_bytes, ancho_col - 0.3 * cm, 7.5 * cm))
+        fila_imgs.append(_imagen_png(png_bytes, ancho_col - 0.3 * cm, alto))
         fila_leyendas.append(Paragraph(leyenda, estilos["img_caption"]))
     t = Table([fila_imgs, fila_leyendas], colWidths=[ancho_col] * n)
     t.setStyle(TableStyle([
@@ -399,14 +407,21 @@ def generar_pdf_informe_ejecutivo(datos, logo_path=None, idioma=IDIOMA_DEFAULT):
     story.append(Spacer(1, 10))
     # KeepTogether: que el caption de cierre nunca quede solo, huérfano, en la página
     # siguiente -- si las imágenes no entran completas en la página actual, se van
-    # las dos juntas (imágenes + caption) a la próxima, no el texto solo.
-    story.append(KeepTogether([
-        _fila_imagenes([
-            (prod["img_mensual"], tr("pdf_caption_mensual", idioma)),
-            (prod["img_duracion"], tr("pdf_caption_duracion", idioma)),
-        ]),
-        Paragraph(tr("pdf_texto_validado", idioma), estilos["cuerpo"]),
-    ]))
+    # todas juntas (imágenes + caption) a la próxima, no el texto solo.
+    # Una imagen por fila, a todo el ancho útil -- no una al lado de la otra: a mitad
+    # de ancho los ejes y las etiquetas quedan demasiado apretados para leerse bien.
+    _bloque_imagenes_produccion = [
+        _fila_imagenes([(prod["img_mensual"], tr("pdf_caption_mensual", idioma))]),
+        Spacer(1, 8),
+        _fila_imagenes([(prod["img_duracion"], tr("pdf_caption_duracion", idioma))]),
+    ]
+    if prod.get("img_viento"):
+        _bloque_imagenes_produccion.append(Spacer(1, 8))
+        _bloque_imagenes_produccion.append(_fila_imagenes([
+            (prod["img_viento"], tr("pdf_caption_viento", idioma)),
+        ]))
+    _bloque_imagenes_produccion.append(Paragraph(tr("pdf_texto_validado", idioma), estilos["cuerpo"]))
+    story.append(KeepTogether(_bloque_imagenes_produccion))
 
     story.append(PageBreak())
 

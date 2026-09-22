@@ -1217,6 +1217,10 @@ TRANSLATIONS = {
         "es": "Curva de duración -- resolución horaria completa",
         "en": "Duration curve -- full hourly resolution",
     },
+    "pdf_caption_viento": {
+        "es": "Desglose de producción por velocidad de viento",
+        "en": "Production breakdown by wind speed",
+    },
     "pdf_texto_validado": {
         "es": ("Cálculo validado con datos de campo, con corrección por densidad de aire "
                "según elevación. Fuente climática: EPW real de la estación elegida o subida "
