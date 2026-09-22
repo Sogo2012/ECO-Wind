@@ -798,6 +798,35 @@ with tab_config:
                 st.session_state.clusters.pop(i)
                 st.rerun()
 
+            _articulos_disponibles = get_articulos_disponibles(c["modelo"])
+            if _articulos_disponibles:
+                _opciones_articulo = [art for art, _ in _articulos_disponibles]
+                _articulo_guardado = c.get("articulo")
+                _idx_articulo = (
+                    _opciones_articulo.index(_articulo_guardado)
+                    if _articulo_guardado in _opciones_articulo else 0
+                )
+                c["articulo"] = st.selectbox(
+                    "Artículo (precio EXWORKS real de fábrica)", options=_opciones_articulo,
+                    index=_idx_articulo, key=f"articulo_{i}",
+                    help="Elegí la variante exacta del catálogo real de Flower Turbines que vas a "
+                         "cotizar (unidad simple, bouquet, on/off-grid, con o sin accesorio) -- "
+                         "también define la capacidad de la electrónica que se usa para calcular "
+                         "la producción (pestaña \"Resultados\") y el costeo (pestaña \"Análisis "
+                         "Financiero\").",
+                )
+                _precio_unitario = get_precio_exworks_usd(c["modelo"], c["articulo"])
+                st.caption(
+                    f"Precio: \\${_precio_unitario:,.0f} c/u -- "
+                    f"Total del clúster ({int(c['N'])}x): \\${_precio_unitario * c['N']:,.0f}"
+                )
+            else:
+                c["articulo"] = None
+                st.caption(
+                    "Precio no disponible todavía (no hay artículo cargado en el catálogo para "
+                    "este modelo)."
+                )
+
             _specs = SPECS_TURBINAS.get(c["modelo"])
             _ruta_img = RUTA_IMAGEN.get(c["modelo"])
             with st.expander(f"Ficha técnica -- {NOMBRES_MODELO.get(c['modelo'], c['modelo'])}"):
@@ -895,9 +924,9 @@ with tab_resultados:
                 # sin este tope, kWh/año asume que TODA la energía aerodinámica se
                 # aprovecha, sin importar qué controlador/inversor se compró -- eso
                 # sobreestima la producción real en sitios de viento fuerte. Si el
-                # clúster todavía no tiene artículo elegido (pestaña Financiero), cae
-                # al valor de fábrica del modelo -- nunca al recorte más grande, para
-                # no estimar de más.
+                # clúster todavía no tiene artículo elegido (pestaña Equipos y
+                # configuración), cae al valor de fábrica del modelo -- nunca al
+                # recorte más grande, para no estimar de más.
                 _capacidad_w = (capacidad_controlador_articulo_w(c.get("articulo"))
                                 or SPECS_TURBINAS[c["modelo"]]["potencia_nominal_w"])
                 r = simular(df_clima, altura_buje=c["altura_buje"], modelo=c["modelo"], N=int(c["N"]),
@@ -933,7 +962,7 @@ with tab_resultados:
                     "energía a la turbina de la que su controlador/inversor puede procesar -- "
                     "ese excedente se pierde, no se cuenta en el kWh/año. Depende de qué "
                     "artículo (capacidad de electrónica) elegiste para cada clúster en "
-                    "\"Análisis Financiero\" -- sin elegir ninguno todavía, se asume el "
+                    "\"Equipos y configuración\" -- sin elegir ninguno todavía, se asume el "
                     "tamaño de fábrica del modelo, el más conservador."
                 )
 
@@ -1218,44 +1247,31 @@ with tab_financiero:
             _cantidad_turbinas_total = len(turbinas_seleccionadas)
 
             st.divider()
-            st.markdown("**Selección de equipo -- precio EXWORKS**")
+            st.markdown("**Equipo elegido -- precio EXWORKS**")
             st.caption(
-                "Elegí acá, por clúster, el artículo exacto del catálogo real de Flower Turbines "
-                "que vas a cotizar -- el grupo ya se filtra automático según el modelo elegido en "
-                "\"Equipos y configuración\", vos elegís la variante (unidad simple, bouquet, "
-                "on/off-grid, con o sin accesorio). Esto es sólo de referencia para llenar el "
-                "costeo de abajo -- no se usa solo para calcular Payback/ROI."
+                "El artículo exacto del catálogo (unidad simple, bouquet, on/off-grid, con o sin "
+                "accesorio) se elige por clúster en \"Equipos y configuración\" -- acá solo se "
+                "muestra el precio resultante, de referencia para el costeo de abajo (no se usa "
+                "solo para calcular Payback/ROI)."
             )
             _precio_total_proyecto = 0.0
             _algun_modelo_sin_precio = False
-            for _i, _c in enumerate(st.session_state.clusters):
-                _articulos_disponibles = get_articulos_disponibles(_c["modelo"])
+            for _c in st.session_state.clusters:
                 _nombre_modelo = NOMBRES_MODELO.get(_c["modelo"], _c["modelo"])
-                if not _articulos_disponibles:
+                _articulo = _c.get("articulo")
+                if not _articulo:
                     st.caption(
                         f"{_nombre_modelo}: precio no disponible todavía (no hay artículo cargado "
-                        "en el catálogo)."
+                        "en el catálogo, o no se eligió ninguno en \"Equipos y configuración\")."
                     )
                     _algun_modelo_sin_precio = True
                     continue
-                _opciones_articulo = [art for art, _ in _articulos_disponibles]
-                _articulo_guardado = _c.get("articulo")
-                _idx_articulo = (
-                    _opciones_articulo.index(_articulo_guardado)
-                    if _articulo_guardado in _opciones_articulo else 0
-                )
-                _c["articulo"] = st.selectbox(
-                    f"Artículo -- {_nombre_modelo} ({int(_c['N'])}x)", options=_opciones_articulo,
-                    index=_idx_articulo, key=f"articulo_fin_{_i}",
-                    help="Precio de venta real de fábrica -- elegí la variante exacta que vas a "
-                         "cotizar (unidad simple, bouquet, on/off-grid, con o sin accesorio).",
-                )
-                _precio_unitario = get_precio_exworks_usd(_c["modelo"], _c["articulo"])
+                _precio_unitario = get_precio_exworks_usd(_c["modelo"], _articulo)
                 _precio_total_proyecto += _precio_unitario * _c["N"]
                 # Dos "$" en el mismo st.caption() arman un par que Streamlit interpreta
                 # como LaTeX ($...$) -- se escapan con "\$" (mismo bug real de Hallazgo 48).
                 st.caption(
-                    f"Precio: \\${_precio_unitario:,.0f} c/u -- "
+                    f"{_nombre_modelo} -- {_articulo}: \\${_precio_unitario:,.0f} c/u -- "
                     f"Total del clúster ({int(_c['N'])}x): \\${_precio_unitario * _c['N']:,.0f}"
                 )
             st.metric("Precio total del proyecto (equipos, EXWORKS)", f"${_precio_total_proyecto:,.0f}")
