@@ -1560,7 +1560,8 @@ with tab_especificacion:
                         _datos_pdf["financiero"] = st.session_state.get("ultimo_resultado_financiero")
 
                         st.session_state["informe_ejecutivo_pdf"] = generar_pdf_informe_ejecutivo(
-                            _datos_pdf, logo_path=LOGO_ECO if os.path.exists(LOGO_ECO) else None)
+                            _datos_pdf, logo_path=LOGO_ECO if os.path.exists(LOGO_ECO) else None,
+                            idioma=st.session_state.get("idioma", IDIOMA_DEFAULT))
                         st.session_state["informe_ejecutivo_sin_financiero"] = not _datos_pdf["financiero"]
                 except Exception as e:
                     st.session_state["informe_ejecutivo_pdf"] = None

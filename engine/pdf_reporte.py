@@ -31,6 +31,22 @@ from engine.price_calculator import (
     LIMITE_PESO_UNIDAD_KG, LIMITE_PESO_PALLET_KG, LIMITE_PESO_CONTENEDOR_KG,
     MARGIN_PCT,
 )
+from engine.i18n import tr, IDIOMA_DEFAULT
+
+# Las 3 opciones de modo de tarifa de app.py (tab_financiero) quedan fijas en español
+# a propósito -- son el valor interno que se guarda en session_state y compara el resto
+# de la app, no texto para mostrar (ver Fase 4 de i18n). Acá, al mostrarlas en el PDF,
+# se traducen recién en este punto de salida, sin tocar el valor guardado.
+_CLAVE_MODO_TARIFA = {
+    "Tarifa plana (USD/kWh)": "financiero_tarifa_plana",
+    "Tarifa horaria real de Costa Rica (ARESEP)": "financiero_tarifa_aresep",
+    "Tarifa comercial de Costa Rica (T-CO)": "financiero_tarifa_tco",
+}
+
+
+def _tr_modo_tarifa(modo_tarifa, idioma):
+    clave = _CLAVE_MODO_TARIFA.get(modo_tarifa)
+    return tr(clave, idioma) if clave else modo_tarifa
 
 AZUL = colors.HexColor("#173D4A")
 VERDE = colors.HexColor("#66913E")
@@ -106,12 +122,13 @@ def _celda(valor):
     return Paragraph(str(valor), _estilo_celda)
 
 
-def _tabla_specs(filas):
+def _tabla_specs(filas, idioma=IDIOMA_DEFAULT):
     """Tabla de 2 columnas (Especificación / Valor) con el mismo tono que la app -- los
     valores van en Paragraph (no texto plano) para que un dato largo sin espacios (ej. el
     nombre de un archivo EPW subido) envuelva dentro de la columna en vez de desbordar el
     margen de la página (encontrado probando el flujo real de subir un EPW, Hallazgo 49)."""
-    data = [[Paragraph("Especificación", _estilo_celda_header), Paragraph("Valor", _estilo_celda_header)]]
+    data = [[Paragraph(tr("pdf_col_especificacion", idioma), _estilo_celda_header),
+             Paragraph(tr("pdf_col_valor", idioma), _estilo_celda_header)]]
     data += [[_celda(f), _celda(v)] for f, v in filas]
     t = Table(data, colWidths=[7 * cm, 8.5 * cm])
     t.setStyle(TableStyle([
@@ -209,9 +226,11 @@ def _caja_info(texto, color_fondo=FONDO_INFO, color_borde=AZUL):
     return t
 
 
-def _tabla_produccion(filas):
+def _tabla_produccion(filas, idioma=IDIOMA_DEFAULT):
     """Tabla de producción por clúster: Modelo / N / Buje / kWh-año / V. media / % bajo cut-in."""
-    encabezados = ["Modelo", "N", "Buje (m)", "kWh/año", "V. media buje (m/s)", "% bajo cut-in"]
+    encabezados = [tr("pdf_col_modelo", idioma), tr("pdf_col_n", idioma), tr("pdf_col_buje", idioma),
+                   tr("pdf_col_kwh_anio", idioma), tr("pdf_col_v_media_buje", idioma),
+                   tr("pdf_col_pct_bajo_cutin", idioma)]
     data = [[Paragraph(h, _estilo_celda_header) for h in encabezados]]
     data += [[_celda(v) for v in fila] for fila in filas]
     t = Table(data, colWidths=[5.2 * cm, 1.4 * cm, 2.0 * cm, 2.6 * cm, 3.4 * cm, 2.8 * cm])
@@ -228,7 +247,7 @@ def _tabla_produccion(filas):
     return t
 
 
-def _pie_pagina(canvas, doc):
+def _pie_pagina(canvas, doc, idioma=IDIOMA_DEFAULT):
     """Callback de reportlab (onFirstPage/onLaterPages): franja superior de marca +
     pie con número de página, dibujado en cada página del informe."""
     canvas.saveState()
@@ -237,13 +256,13 @@ def _pie_pagina(canvas, doc):
     canvas.rect(0, alto_pagina - 0.35 * cm, ancho_pagina, 0.35 * cm, stroke=0, fill=1)
     canvas.setFont("Helvetica", 8)
     canvas.setFillColor(GRIS)
-    canvas.drawString(1.8 * cm, 1.0 * cm, f"© {date.today().year} ECO Consultor")
-    canvas.drawCentredString(ancho_pagina / 2, 1.0 * cm, "Informe Ejecutivo -- ECO | Wind")
-    canvas.drawRightString(ancho_pagina - 1.8 * cm, 1.0 * cm, f"Página {doc.page}")
+    canvas.drawString(1.8 * cm, 1.0 * cm, tr("pdf_pie_copyright", idioma, anio=date.today().year))
+    canvas.drawCentredString(ancho_pagina / 2, 1.0 * cm, tr("pdf_pie_titulo", idioma))
+    canvas.drawRightString(ancho_pagina - 1.8 * cm, 1.0 * cm, tr("pdf_pie_pagina", idioma, n=doc.page))
     canvas.restoreState()
 
 
-def generar_pdf_informe_ejecutivo(datos, logo_path=None):
+def generar_pdf_informe_ejecutivo(datos, logo_path=None, idioma=IDIOMA_DEFAULT):
     """Arma el informe ejecutivo completo (portada con KPIs, contexto climático,
     equipos y producción, análisis financiero) a partir del dict `datos` y devuelve los
     bytes ya listos para st.download_button. Pensado para imprimir/exportar y llevar
@@ -274,7 +293,7 @@ def generar_pdf_informe_ejecutivo(datos, logo_path=None):
     doc = SimpleDocTemplate(
         buffer, pagesize=letter,
         leftMargin=1.8 * cm, rightMargin=1.8 * cm, topMargin=1.8 * cm, bottomMargin=1.8 * cm,
-        title="Informe Ejecutivo -- ECO | Wind",
+        title=tr("pdf_pie_titulo", idioma),
     )
     story = []
 
@@ -286,27 +305,21 @@ def generar_pdf_informe_ejecutivo(datos, logo_path=None):
             pass
 
     story.append(Spacer(1, 8))
-    story.append(Paragraph("Informe Ejecutivo", estilos["titulo"]))
+    story.append(Paragraph(tr("pdf_titulo_informe", idioma), estilos["titulo"]))
     story.append(Paragraph(
-        f"Propuesta de microgeneración eólica -- {datos['sitio_nombre']} -- generado el "
-        f"{datos.get('fecha_generado') or date.today().strftime('%d/%m/%Y')}",
+        tr("pdf_subtitulo", idioma, sitio=datos['sitio_nombre'],
+           fecha=datos.get('fecha_generado') or date.today().strftime('%d/%m/%Y')),
         estilos["subtitulo"],
     ))
     story.append(HRFlowable(width="100%", thickness=1.5, color=VERDE, spaceAfter=12))
 
-    story.append(Paragraph(
-        f"Este informe resume la propuesta técnica y financiera de microgeneración eólica "
-        f"para <b>{datos['sitio_nombre']}</b>, calculada a partir de datos climáticos reales "
-        "(EPW de la estación elegida) y especificaciones oficiales de fábrica de los equipos "
-        "Flower Turbines.",
-        estilos["intro"],
-    ))
+    story.append(Paragraph(tr("pdf_intro", idioma, sitio=datos['sitio_nombre']), estilos["intro"]))
 
     story.append(_fila_kpis([
-        _kpi_card("Potencia pico instalada", f"{datos['potencia_pico_kw']:.2f} kW"),
-        _kpi_card("Energía anual estimada", f"{datos['energia_anual_kwh']:,.0f} kWh"),
-        _kpi_card("Turbinas totales", f"{datos['n_turbinas_total']}"),
-        _kpi_card("Elevación del sitio", f"{datos['elevacion_m']:.0f} m"),
+        _kpi_card(tr("pdf_kpi_potencia_pico", idioma), f"{datos['potencia_pico_kw']:.2f} kW"),
+        _kpi_card(tr("pdf_kpi_energia_anual", idioma), f"{datos['energia_anual_kwh']:,.0f} kWh"),
+        _kpi_card(tr("pdf_kpi_turbinas_totales", idioma), f"{datos['n_turbinas_total']}"),
+        _kpi_card(tr("pdf_kpi_elevacion", idioma), f"{datos['elevacion_m']:.0f} m"),
     ]))
 
     fin = datos.get("financiero")
@@ -314,136 +327,127 @@ def generar_pdf_informe_ejecutivo(datos, logo_path=None):
         story.append(Spacer(1, 10))
         color_viabilidad = VERDE if fin["viable"] else AMBAR
         story.append(_fila_kpis([
-            _kpi_card("CAPEX (precio de venta)", f"${fin['capex']:,.0f}", accent=AZUL),
-            _kpi_card("Payback",
-                      f"{fin['payback_years']:.1f} años" if fin["payback_years"] is not None else "N/A",
+            _kpi_card(tr("pdf_kpi_capex_venta", idioma), f"${fin['capex']:,.0f}", accent=AZUL),
+            _kpi_card(tr("pdf_kpi_payback", idioma),
+                      tr("pdf_valor_anos", idioma, val=f"{fin['payback_years']:.1f}")
+                      if fin["payback_years"] is not None else tr("pdf_na", idioma),
                       accent=color_viabilidad),
-            _kpi_card("ROI (vida útil)",
-                      f"{fin['roi_percentage']:.0f}%" if fin["roi_percentage"] is not None else "N/A",
+            _kpi_card(tr("pdf_kpi_roi", idioma),
+                      f"{fin['roi_percentage']:.0f}%" if fin["roi_percentage"] is not None else tr("pdf_na", idioma),
                       accent=color_viabilidad),
-            _kpi_card("Viabilidad económica",
-                      "VIABLE" if fin["viable"] else "A EVALUAR", accent=color_viabilidad),
+            _kpi_card(tr("pdf_kpi_viabilidad_economica", idioma),
+                      tr("pdf_viable", idioma) if fin["viable"] else tr("pdf_a_evaluar", idioma),
+                      accent=color_viabilidad),
         ]))
 
     story.append(PageBreak())
 
     # --- Contexto climático -----------------------------------------------------------
     clima = datos["clima"]
-    story.append(Paragraph("Contexto Climático", estilos["seccion"]))
+    story.append(Paragraph(tr("pdf_seccion_contexto_climatico", idioma), estilos["seccion"]))
     story.append(Paragraph(clima["fuente_texto"], estilos["cuerpo"]))
     story.append(Spacer(1, 6))
-    imgs_clima = [(clima["img_rosa"], "Rosa de vientos -- % de horas por dirección y velocidad")]
+    imgs_clima = [(clima["img_rosa"], tr("pdf_caption_rosa", idioma))]
     if clima.get("img_heatmap"):
-        imgs_clima.append((clima["img_heatmap"], "Velocidad media del viento por mes y hora del día"))
+        imgs_clima.append((clima["img_heatmap"], tr("pdf_caption_heatmap", idioma)))
     story.append(_fila_imagenes(imgs_clima))
     story.append(Spacer(1, 4))
     story.append(_imagen_png(clima["img_perfil"], ANCHO_UTIL * 0.75, 6.5 * cm))
-    story.append(Paragraph(
-        "Perfil logarítmico de viento -- velocidad real según la altura de instalación",
-        estilos["img_caption"],
-    ))
+    story.append(Paragraph(tr("pdf_caption_perfil", idioma), estilos["img_caption"]))
 
     story.append(PageBreak())
 
     # --- Equipos configurados ----------------------------------------------------------
-    story.append(Paragraph("Equipos Configurados", estilos["seccion"]))
+    story.append(Paragraph(tr("pdf_seccion_equipos", idioma), estilos["seccion"]))
     story.append(Paragraph(
-        f"Bus de corriente continua a {datos['voltaje_bus_v']}V -- cada turbina entrega su "
-        "salida a través de un controlador individual de fábrica; todos los controladores se "
-        "conectan en paralelo al mismo bus.",
+        tr("pdf_texto_bus_dc", idioma, voltaje=datos['voltaje_bus_v']),
         estilos["cuerpo"],
     ))
-    for t in datos["turbinas"]:
-        bloque = [Paragraph(f"{t['nombre']} -- cantidad: {t['cantidad']}", estilos["equipo"])]
+    for t_turbina in datos["turbinas"]:
+        bloque = [Paragraph(
+            tr("pdf_turbina_titulo_cantidad", idioma, nombre=t_turbina['nombre'], cantidad=t_turbina['cantidad']),
+            estilos["equipo"],
+        )]
         bloque.append(Paragraph(
-            f"Fabricante: Flower Turbines -- N° de parte: {t['numero_parte']}", estilos["cuerpo"]
+            tr("pdf_caption_fabricante", idioma, numero_parte=t_turbina['numero_parte']), estilos["cuerpo"]
         ))
         bloque.append(Spacer(1, 3))
-        _ruta_img = RUTA_IMAGEN.get(t.get("clave"))
+        _ruta_img = RUTA_IMAGEN.get(t_turbina.get("clave"))
         if _ruta_img and os.path.exists(_ruta_img):
             fila = Table(
                 [[Image(_ruta_img, width=3.2 * cm, height=3.2 * cm, kind="proportional"),
-                  _tabla_specs(t["filas"])]],
+                  _tabla_specs(t_turbina["filas"], idioma)]],
                 colWidths=[3.6 * cm, ANCHO_UTIL - 3.6 * cm],
             )
             fila.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
             bloque.append(fila)
         else:
-            bloque.append(_tabla_specs(t["filas"]))
+            bloque.append(_tabla_specs(t_turbina["filas"], idioma))
         bloque.append(Spacer(1, 8))
         story.append(KeepTogether(bloque))
 
     # --- Resultados de producción -------------------------------------------------------
     prod = datos["produccion"]
-    story.append(Paragraph("Resultados de Producción", estilos["seccion"]))
+    story.append(Paragraph(tr("pdf_seccion_resultados", idioma), estilos["seccion"]))
     story.append(_fila_kpis([
-        _kpi_card("Producción anual total", f"{datos['energia_anual_kwh']:,.0f} kWh"),
-        _kpi_card("Corrección por densidad (elevación)",
-                  f"{prod['correccion_densidad_pct']:.1f}% menos", accent=AZUL),
+        _kpi_card(tr("pdf_kpi_produccion_anual", idioma), f"{datos['energia_anual_kwh']:,.0f} kWh"),
+        _kpi_card(tr("pdf_kpi_correccion_densidad", idioma),
+                  tr("pdf_valor_pct_menos", idioma, pct=f"{prod['correccion_densidad_pct']:.1f}"), accent=AZUL),
     ]))
     story.append(Spacer(1, 8))
-    story.append(_tabla_produccion(prod["filas_tabla"]))
+    story.append(_tabla_produccion(prod["filas_tabla"], idioma))
     story.append(Spacer(1, 10))
     # KeepTogether: que el caption de cierre nunca quede solo, huérfano, en la página
     # siguiente -- si las imágenes no entran completas en la página actual, se van
     # las dos juntas (imágenes + caption) a la próxima, no el texto solo.
     story.append(KeepTogether([
         _fila_imagenes([
-            (prod["img_mensual"], "Producción mensual (todos los clústers)"),
-            (prod["img_duracion"], "Curva de duración -- resolución horaria completa"),
+            (prod["img_mensual"], tr("pdf_caption_mensual", idioma)),
+            (prod["img_duracion"], tr("pdf_caption_duracion", idioma)),
         ]),
-        Paragraph(
-            "Cálculo validado con datos de campo, con corrección por densidad de aire según "
-            "elevación. Fuente climática: EPW real de la estación elegida o subida por el usuario.",
-            estilos["cuerpo"],
-        ),
+        Paragraph(tr("pdf_texto_validado", idioma), estilos["cuerpo"]),
     ]))
 
     story.append(PageBreak())
 
     # --- Análisis financiero -------------------------------------------------------------
-    story.append(Paragraph("Análisis Financiero", estilos["seccion"]))
+    story.append(Paragraph(tr("pdf_seccion_financiero", idioma), estilos["seccion"]))
     if fin:
         color_viabilidad = VERDE if fin["viable"] else AMBAR
         story.append(_fila_kpis([
-            _kpi_card("CAPEX", f"${fin['capex']:,.0f}", accent=AZUL),
-            _kpi_card("Ahorro anual", f"${fin['ahorro_anual_USD']:,.0f}", accent=VERDE),
-            _kpi_card("Mantenimiento anual", f"${fin['mantenimiento_anual_USD']:,.0f}", accent=AZUL),
+            _kpi_card(tr("pdf_kpi_capex", idioma), f"${fin['capex']:,.0f}", accent=AZUL),
+            _kpi_card(tr("pdf_kpi_ahorro_anual", idioma), f"${fin['ahorro_anual_USD']:,.0f}", accent=VERDE),
+            _kpi_card(tr("pdf_kpi_mantenimiento_anual", idioma), f"${fin['mantenimiento_anual_USD']:,.0f}", accent=AZUL),
         ]))
         story.append(Spacer(1, 10))
         story.append(_fila_kpis([
-            _kpi_card("Payback",
-                      f"{fin['payback_years']:.1f} años" if fin["payback_years"] is not None else "N/A",
+            _kpi_card(tr("pdf_kpi_payback", idioma),
+                      tr("pdf_valor_anos", idioma, val=f"{fin['payback_years']:.1f}")
+                      if fin["payback_years"] is not None else tr("pdf_na", idioma),
                       accent=color_viabilidad),
-            _kpi_card("ROI (vida útil)",
-                      f"{fin['roi_percentage']:.0f}%" if fin["roi_percentage"] is not None else "N/A",
+            _kpi_card(tr("pdf_kpi_roi", idioma),
+                      f"{fin['roi_percentage']:.0f}%" if fin["roi_percentage"] is not None else tr("pdf_na", idioma),
                       accent=color_viabilidad),
-            _kpi_card("NPV",
-                      f"${fin['npv_usd']:,.0f}" if fin.get("npv_usd") is not None else "N/A",
+            _kpi_card(tr("pdf_kpi_npv", idioma),
+                      f"${fin['npv_usd']:,.0f}" if fin.get("npv_usd") is not None else tr("pdf_na", idioma),
                       accent=color_viabilidad),
-            _kpi_card("Viabilidad", "VIABLE" if fin["viable"] else "A EVALUAR", accent=color_viabilidad),
+            _kpi_card(tr("pdf_kpi_viabilidad", idioma),
+                      tr("pdf_viable", idioma) if fin["viable"] else tr("pdf_a_evaluar", idioma),
+                      accent=color_viabilidad),
         ]))
         story.append(Spacer(1, 12))
         story.append(_tabla_specs([
-            ("Modalidad de tarifa eléctrica", fin["modo_tarifa"]),
-            ("Vida útil del proyecto", f"{fin['vida_util_anos']} años"),
-            ("Tasa de descuento (NPV)", f"{fin['tasa_descuento_pct']:.1f}%"),
-        ]))
+            (tr("pdf_fila_modalidad_tarifa", idioma), _tr_modo_tarifa(fin["modo_tarifa"], idioma)),
+            (tr("pdf_fila_vida_util", idioma), tr("pdf_valor_anos", idioma, val=fin['vida_util_anos'])),
+            (tr("pdf_fila_tasa_descuento", idioma), f"{fin['tasa_descuento_pct']:.1f}%"),
+        ], idioma))
         story.append(Spacer(1, 8))
-        story.append(Paragraph(
-            "CAPEX, mantenimiento y precio de venta ingresados directo por el usuario en la "
-            "app. Tarifas horarias reales de CNFL/ICE cruzadas contra la producción hora por "
-            "hora cuando corresponde, en vez de una tarifa plana adivinada.",
-            estilos["cuerpo"],
-        ))
+        story.append(Paragraph(tr("pdf_texto_footer_financiero", idioma), estilos["cuerpo"]))
     else:
-        story.append(_caja_info(
-            "Completá el precio de venta al cliente y la tarifa eléctrica en la pestaña "
-            "\"Análisis Financiero\" de la app para incluir acá el CAPEX, Payback, ROI y NPV "
-            "de este proyecto."
-        ))
+        story.append(_caja_info(tr("pdf_caja_sin_financiero", idioma)))
 
-    doc.build(story, onFirstPage=_pie_pagina, onLaterPages=_pie_pagina)
+    doc.build(story, onFirstPage=lambda c, d: _pie_pagina(c, d, idioma),
+              onLaterPages=lambda c, d: _pie_pagina(c, d, idioma))
     return buffer.getvalue()
 
 
@@ -469,9 +473,11 @@ def _flete_por_unidad_optimo(peso_kg):
     return min(opciones)
 
 
-def _tabla_precios(filas):
+def _tabla_precios(filas, idioma=IDIOMA_DEFAULT):
     """Tabla de 5 columnas: Modelo / Costo fábrica / Flete est. / Precio final / Fuente."""
-    encabezados = ["Modelo", "Costo fábrica", "Flete/unidad (est.)", "Precio final (est.)", "Fuente del costo"]
+    encabezados = [tr("pdf_precios_col_modelo", idioma), tr("pdf_precios_col_costo_fabrica", idioma),
+                   tr("pdf_precios_col_flete", idioma), tr("pdf_precios_col_precio_final", idioma),
+                   tr("pdf_precios_col_fuente", idioma)]
     data = [[Paragraph(h, _estilo_celda_header) for h in encabezados]]
     data += [[_celda(v) for v in fila] for fila in filas]
     t = Table(data, colWidths=[5.1 * cm, 2.6 * cm, 2.9 * cm, 2.9 * cm, 2.6 * cm])
@@ -487,7 +493,7 @@ def _tabla_precios(filas):
     return t
 
 
-def generar_pdf_lista_precios(logo_path=None):
+def generar_pdf_lista_precios(logo_path=None, idioma=IDIOMA_DEFAULT):
     """
     Lista de precios de referencia por modelo de turbina (Hallazgo 50): costo de
     fábrica (turbine_specs.py) + flete estimado por el modelo de flete consolidado
@@ -508,7 +514,7 @@ def generar_pdf_lista_precios(logo_path=None):
     doc = SimpleDocTemplate(
         buffer, pagesize=letter,
         leftMargin=1.5 * cm, rightMargin=1.5 * cm, topMargin=1.5 * cm, bottomMargin=1.5 * cm,
-        title="Lista de precios -- ECO | Wind",
+        title=tr("pdf_precios_doc_titulo", idioma),
     )
     story = []
 
@@ -519,22 +525,14 @@ def generar_pdf_lista_precios(logo_path=None):
             pass
 
     story.append(Spacer(1, 6))
-    story.append(Paragraph("Lista de Precios de Referencia -- Turbinas Flower Turbines", estilos["titulo"]))
+    story.append(Paragraph(tr("pdf_precios_titulo", idioma), estilos["titulo"]))
     story.append(Paragraph(
-        f"ECO | Wind -- Simulador de microgeneración eólica -- generado el "
-        f"{date.today().strftime('%d/%m/%Y')}",
+        tr("pdf_precios_subtitulo", idioma, fecha=date.today().strftime('%d/%m/%Y')),
         estilos["subtitulo"],
     ))
     story.append(HRFlowable(width="100%", thickness=1.2, color=VERDE, spaceAfter=10))
 
-    story.append(Paragraph(
-        "Precio final = (costo de fábrica + flete estimado por unidad) &times; 1.30 de margen "
-        "comercial. El flete asume pedir lo suficiente para llenar 1 pallet o 1 contenedor "
-        "completo (lo que salga más barato por unidad) -- tarifas de mercado ($2,000 unidad / "
-        "$3,500 pallet / $10,000 contenedor de 40'), NO una cotización de un forwarder real. "
-        "Usar como orden de magnitud para el cliente, confirmar antes de cotizar en firme.",
-        estilos["cuerpo"],
-    ))
+    story.append(Paragraph(tr("pdf_precios_intro", idioma), estilos["cuerpo"]))
     story.append(Spacer(1, 8))
 
     verificados, no_verificados = [], []
@@ -548,35 +546,26 @@ def generar_pdf_lista_precios(logo_path=None):
         fila = [
             specs["nombre"],
             f"${costo:,.2f}",
-            f"${flete_u:,.2f}" if flete_u is not None else "N/D",
+            f"${flete_u:,.2f}" if flete_u is not None else tr("pdf_precios_nd", idioma),
             f"${precio_final:,.2f}",
-            "Verificado" if specs.get("costo_usd_fuente") == "verificado" else "No verificado",
+            tr("pdf_precios_verificado", idioma) if specs.get("costo_usd_fuente") == "verificado"
+            else tr("pdf_precios_no_verificado", idioma),
         ]
         (verificados if specs.get("costo_usd_fuente") == "verificado" else no_verificados).append(fila)
 
-    story.append(Paragraph("Modelos con costo de fábrica verificado", estilos["seccion"]))
-    story.append(_tabla_precios(verificados))
+    story.append(Paragraph(tr("pdf_precios_seccion_verificados", idioma), estilos["seccion"]))
+    story.append(_tabla_precios(verificados, idioma))
 
     if no_verificados:
         story.append(Spacer(1, 10))
-        story.append(Paragraph("Modelos con costo de fábrica NO verificado", estilos["seccion"]))
-        story.append(Paragraph(
-            "Vienen de una respuesta de chat tipo \"representante de Flower Turbines\", no de una "
-            "cotización real -- usar sólo como referencia interna, no repetirlos como precio firme "
-            "frente al cliente.",
-            estilos["cuerpo"],
-        ))
+        story.append(Paragraph(tr("pdf_precios_seccion_no_verificados", idioma), estilos["seccion"]))
+        story.append(Paragraph(tr("pdf_precios_aviso_no_verificados", idioma), estilos["cuerpo"]))
         story.append(Spacer(1, 4))
-        story.append(_tabla_precios(no_verificados))
+        story.append(_tabla_precios(no_verificados, idioma))
 
     story.append(Spacer(1, 10))
     story.append(HRFlowable(width="100%", thickness=0.75, color=colors.HexColor("#CBD5E0"), spaceAfter=6))
-    story.append(Paragraph(
-        "Fuente de los datos: fichas técnicas oficiales de fábrica (Flower Turbines) para el costo "
-        "base, `engine/price_calculator.py` para el flete y margen. ECO Consultor -- Energy "
-        "Conservation Opportunities.",
-        estilos["pie"],
-    ))
+    story.append(Paragraph(tr("pdf_precios_footer", idioma), estilos["pie"]))
 
     doc.build(story)
     return buffer.getvalue()

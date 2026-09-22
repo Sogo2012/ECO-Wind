@@ -1101,6 +1101,178 @@ TRANSLATIONS = {
     # --- Unidades sueltas reutilizadas en varios metric() -------------------------------
     "unidad_por_anio": {"es": "/año", "en": "/year"},
 
+    # --- engine/pdf_reporte.py: generar_pdf_informe_ejecutivo() ------------------------
+    # (no depende de sesión de Streamlit -- usa tr(clave, idioma, **kwargs), idioma
+    # pasado explícito desde app.py al momento de generar el PDF)
+    "pdf_titulo_informe": {"es": "Informe Ejecutivo", "en": "Executive Report"},
+    "pdf_subtitulo": {
+        "es": "Propuesta de microgeneración eólica -- {sitio} -- generado el {fecha}",
+        "en": "Wind micro-generation proposal -- {sitio} -- generated on {fecha}",
+    },
+    "pdf_intro": {
+        "es": ("Este informe resume la propuesta técnica y financiera de microgeneración "
+               "eólica para <b>{sitio}</b>, calculada a partir de datos climáticos reales "
+               "(EPW de la estación elegida) y especificaciones oficiales de fábrica de los "
+               "equipos Flower Turbines."),
+        "en": ("This report summarizes the technical and financial wind micro-generation "
+               "proposal for <b>{sitio}</b>, calculated from real climate data (EPW of the "
+               "chosen station) and Flower Turbines' official factory specifications."),
+    },
+    "pdf_kpi_potencia_pico": {"es": "Potencia pico instalada", "en": "Installed peak power"},
+    "pdf_kpi_energia_anual": {"es": "Energía anual estimada", "en": "Estimated annual energy"},
+    "pdf_kpi_turbinas_totales": {"es": "Turbinas totales", "en": "Total turbines"},
+    "pdf_kpi_elevacion": {"es": "Elevación del sitio", "en": "Site elevation"},
+    "pdf_kpi_capex_venta": {"es": "CAPEX (precio de venta)", "en": "CAPEX (sale price)"},
+    "pdf_kpi_payback": {"es": "Payback", "en": "Payback"},
+    "pdf_kpi_roi": {"es": "ROI (vida útil)", "en": "ROI (useful life)"},
+    "pdf_kpi_viabilidad_economica": {"es": "Viabilidad económica", "en": "Economic viability"},
+    "pdf_valor_anos": {"es": "{val} años", "en": "{val} years"},
+    "pdf_na": {"es": "N/A", "en": "N/A"},
+    "pdf_viable": {"es": "VIABLE", "en": "VIABLE"},
+    "pdf_a_evaluar": {"es": "A EVALUAR", "en": "TO BE EVALUATED"},
+    "pdf_seccion_contexto_climatico": {"es": "Contexto Climático", "en": "Climate Context"},
+    "pdf_caption_rosa": {
+        "es": "Rosa de vientos -- % de horas por dirección y velocidad",
+        "en": "Wind rose -- % of hours by direction and speed",
+    },
+    "pdf_caption_heatmap": {
+        "es": "Velocidad media del viento por mes y hora del día",
+        "en": "Average wind speed by month and hour of day",
+    },
+    "pdf_caption_perfil": {
+        "es": "Perfil logarítmico de viento -- velocidad real según la altura de instalación",
+        "en": "Logarithmic wind profile -- real speed by installation height",
+    },
+    "pdf_seccion_equipos": {"es": "Equipos Configurados", "en": "Configured Equipment"},
+    "pdf_texto_bus_dc": {
+        "es": ("Bus de corriente continua a {voltaje}V -- cada turbina entrega su salida a "
+               "través de un controlador individual de fábrica; todos los controladores se "
+               "conectan en paralelo al mismo bus."),
+        "en": ("{voltaje}V DC bus -- each turbine delivers its output through an individual "
+               "factory controller; all controllers connect in parallel to the same bus."),
+    },
+    "pdf_turbina_titulo_cantidad": {"es": "{nombre} -- cantidad: {cantidad}", "en": "{nombre} -- quantity: {cantidad}"},
+    "pdf_caption_fabricante": {
+        "es": "Fabricante: Flower Turbines -- N° de parte: {numero_parte}",
+        "en": "Manufacturer: Flower Turbines -- Part number: {numero_parte}",
+    },
+    "pdf_seccion_resultados": {"es": "Resultados de Producción", "en": "Production Results"},
+    "pdf_kpi_produccion_anual": {"es": "Producción anual total", "en": "Total annual production"},
+    "pdf_kpi_correccion_densidad": {
+        "es": "Corrección por densidad (elevación)",
+        "en": "Density correction (elevation)",
+    },
+    "pdf_valor_pct_menos": {"es": "{pct}% menos", "en": "{pct}% less"},
+    "pdf_col_modelo": {"es": "Modelo", "en": "Model"},
+    "pdf_col_n": {"es": "N", "en": "N"},
+    "pdf_col_buje": {"es": "Buje (m)", "en": "Hub (m)"},
+    "pdf_col_kwh_anio": {"es": "kWh/año", "en": "kWh/year"},
+    "pdf_col_v_media_buje": {"es": "V. media buje (m/s)", "en": "Avg. hub speed (m/s)"},
+    "pdf_col_pct_bajo_cutin": {"es": "% bajo cut-in", "en": "% below cut-in"},
+    "pdf_caption_mensual": {
+        "es": "Producción mensual (todos los clústers)",
+        "en": "Monthly output (all clusters)",
+    },
+    "pdf_caption_duracion": {
+        "es": "Curva de duración -- resolución horaria completa",
+        "en": "Duration curve -- full hourly resolution",
+    },
+    "pdf_texto_validado": {
+        "es": ("Cálculo validado con datos de campo, con corrección por densidad de aire "
+               "según elevación. Fuente climática: EPW real de la estación elegida o subida "
+               "por el usuario."),
+        "en": ("Calculation validated with field data, with air-density correction by "
+               "elevation. Climate source: real EPW from the chosen station or the one "
+               "uploaded by the user."),
+    },
+    "pdf_seccion_financiero": {"es": "Análisis Financiero", "en": "Financial Analysis"},
+    "pdf_kpi_capex": {"es": "CAPEX", "en": "CAPEX"},
+    "pdf_kpi_ahorro_anual": {"es": "Ahorro anual", "en": "Annual savings"},
+    "pdf_kpi_mantenimiento_anual": {"es": "Mantenimiento anual", "en": "Annual maintenance"},
+    "pdf_kpi_npv": {"es": "NPV", "en": "NPV"},
+    "pdf_kpi_viabilidad": {"es": "Viabilidad", "en": "Viability"},
+    "pdf_fila_modalidad_tarifa": {"es": "Modalidad de tarifa eléctrica", "en": "Electricity rate mode"},
+    "pdf_fila_vida_util": {"es": "Vida útil del proyecto", "en": "Project useful life"},
+    "pdf_fila_tasa_descuento": {"es": "Tasa de descuento (NPV)", "en": "Discount rate (NPV)"},
+    "pdf_texto_footer_financiero": {
+        "es": ("CAPEX, mantenimiento y precio de venta ingresados directo por el usuario en "
+               "la app. Tarifas horarias reales de CNFL/ICE cruzadas contra la producción "
+               "hora por hora cuando corresponde, en vez de una tarifa plana adivinada."),
+        "en": ("CAPEX, maintenance and sale price entered directly by the user in the app. "
+               "Real CNFL/ICE hourly rates crossed against hour-by-hour production when "
+               "applicable, instead of a guessed flat rate."),
+    },
+    "pdf_caja_sin_financiero": {
+        "es": ("Completá el precio de venta al cliente y la tarifa eléctrica en la pestaña "
+               "\"Análisis Financiero\" de la app para incluir acá el CAPEX, Payback, ROI y "
+               "NPV de este proyecto."),
+        "en": ("Fill in the sale price to the client and the electricity rate in the "
+               "\"Financial analysis\" tab of the app to include the CAPEX, Payback, ROI and "
+               "NPV of this project here."),
+    },
+    "pdf_col_especificacion": {"es": "Especificación", "en": "Specification"},
+    "pdf_col_valor": {"es": "Valor", "en": "Value"},
+    "pdf_pie_copyright": {"es": "© {anio} ECO Consultor", "en": "© {anio} ECO Consultor"},
+    "pdf_pie_titulo": {"es": "Informe Ejecutivo -- ECO | Wind", "en": "Executive Report -- ECO | Wind"},
+    "pdf_pie_pagina": {"es": "Página {n}", "en": "Page {n}"},
+
+    # --- engine/pdf_reporte.py: generar_pdf_lista_precios() (no llamado desde la app hoy,
+    # se traduce igual por completitud del módulo) --------------------------------------
+    "pdf_precios_titulo": {
+        "es": "Lista de Precios de Referencia -- Turbinas Flower Turbines",
+        "en": "Reference Price List -- Flower Turbines Turbines",
+    },
+    "pdf_precios_subtitulo": {
+        "es": "ECO | Wind -- Simulador de microgeneración eólica -- generado el {fecha}",
+        "en": "ECO | Wind -- Wind micro-generation simulator -- generated on {fecha}",
+    },
+    "pdf_precios_intro": {
+        "es": ("Precio final = (costo de fábrica + flete estimado por unidad) &times; 1.30 "
+               "de margen comercial. El flete asume pedir lo suficiente para llenar 1 pallet "
+               "o 1 contenedor completo (lo que salga más barato por unidad) -- tarifas de "
+               "mercado ($2,000 unidad / $3,500 pallet / $10,000 contenedor de 40'), NO una "
+               "cotización de un forwarder real. Usar como orden de magnitud para el cliente, "
+               "confirmar antes de cotizar en firme."),
+        "en": ("Final price = (factory cost + estimated freight per unit) &times; 1.30 "
+               "commercial margin. Freight assumes ordering enough to fill 1 pallet or 1 full "
+               "container (whichever is cheaper per unit) -- market rates ($2,000 unit / "
+               "$3,500 pallet / $10,000 40' container), NOT a real forwarder quote. Use as an "
+               "order-of-magnitude figure for the client, confirm before quoting firmly."),
+    },
+    "pdf_precios_seccion_verificados": {
+        "es": "Modelos con costo de fábrica verificado",
+        "en": "Models with verified factory cost",
+    },
+    "pdf_precios_seccion_no_verificados": {
+        "es": "Modelos con costo de fábrica NO verificado",
+        "en": "Models with UNVERIFIED factory cost",
+    },
+    "pdf_precios_aviso_no_verificados": {
+        "es": ("Vienen de una respuesta de chat tipo \"representante de Flower Turbines\", no "
+               "de una cotización real -- usar sólo como referencia interna, no repetirlos "
+               "como precio firme frente al cliente."),
+        "en": ("These come from a chat response along the lines of a \"Flower Turbines "
+               "representative\", not a real quote -- use only as internal reference, don't "
+               "repeat them as a firm price to the client."),
+    },
+    "pdf_precios_col_modelo": {"es": "Modelo", "en": "Model"},
+    "pdf_precios_col_costo_fabrica": {"es": "Costo fábrica", "en": "Factory cost"},
+    "pdf_precios_col_flete": {"es": "Flete/unidad (est.)", "en": "Freight/unit (est.)"},
+    "pdf_precios_col_precio_final": {"es": "Precio final (est.)", "en": "Final price (est.)"},
+    "pdf_precios_col_fuente": {"es": "Fuente del costo", "en": "Cost source"},
+    "pdf_precios_verificado": {"es": "Verificado", "en": "Verified"},
+    "pdf_precios_no_verificado": {"es": "No verificado", "en": "Not verified"},
+    "pdf_precios_nd": {"es": "N/D", "en": "N/A"},
+    "pdf_precios_doc_titulo": {"es": "Lista de precios -- ECO | Wind", "en": "Price list -- ECO | Wind"},
+    "pdf_precios_footer": {
+        "es": ("Fuente de los datos: fichas técnicas oficiales de fábrica (Flower Turbines) "
+               "para el costo base, `engine/price_calculator.py` para el flete y margen. ECO "
+               "Consultor -- Energy Conservation Opportunities."),
+        "en": ("Data source: official factory technical datasheets (Flower Turbines) for the "
+               "base cost, `engine/price_calculator.py` for freight and margin. ECO Consultor "
+               "-- Energy Conservation Opportunities."),
+    },
+
 }
 
 
