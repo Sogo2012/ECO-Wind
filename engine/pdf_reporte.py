@@ -355,13 +355,16 @@ def generar_pdf_informe_ejecutivo(datos, logo_path=None, idioma=IDIOMA_DEFAULT):
     story.append(Paragraph(tr("pdf_seccion_contexto_climatico", idioma), estilos["seccion"]))
     story.append(Paragraph(clima["fuente_texto"], estilos["cuerpo"]))
     story.append(Spacer(1, 6))
+    # Una imagen por fila, a todo el ancho útil -- mismo criterio que en "Resultados de
+    # Producción": lado a lado quedaban demasiado chicas para leerse bien.
     imgs_clima = [(clima["img_rosa"], tr("pdf_caption_rosa", idioma))]
     if clima.get("img_heatmap"):
         imgs_clima.append((clima["img_heatmap"], tr("pdf_caption_heatmap", idioma)))
-    story.append(_fila_imagenes(imgs_clima))
-    story.append(Spacer(1, 4))
-    story.append(_imagen_png(clima["img_perfil"], ANCHO_UTIL * 0.75, 6.5 * cm))
-    story.append(Paragraph(tr("pdf_caption_perfil", idioma), estilos["img_caption"]))
+    imgs_clima.append((clima["img_perfil"], tr("pdf_caption_perfil", idioma)))
+    for i, img_con_leyenda in enumerate(imgs_clima):
+        if i > 0:
+            story.append(Spacer(1, 8))
+        story.append(_fila_imagenes([img_con_leyenda]))
 
     story.append(PageBreak())
 
