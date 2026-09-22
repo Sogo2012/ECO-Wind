@@ -1456,7 +1456,7 @@ with tab_especificacion:
                     with col_img:
                         _ruta_img = RUTA_IMAGEN.get(_clave)
                         if _ruta_img and os.path.exists(_ruta_img):
-                            st.image(_ruta_img, use_container_width=True)
+                            st.image(_ruta_img, use_column_width=True)
                     with col_specs:
                         _titulo = f"**{_specs['nombre']}**" + (f" -- {_articulo}" if _articulo else "")
                         st.markdown(t("especificacion_turbina_titulo_cantidad", titulo=_titulo, cantidad=_cantidad))
