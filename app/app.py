@@ -326,9 +326,13 @@ def calcular_desglose_por_viento(v_hub, kwh_entregado_por_hora, kwh_perdido_por_
     return pd.DataFrame(filas)
 
 
-def crear_desglose_viento_plotly(tabla_desglose, ancho_bin=1.0):
+def crear_desglose_viento_plotly(tabla_desglose, ancho_bin=1.0, capacidad_electronica_w=None):
     """Barras apiladas: energía entregada (post-recorte) + energía perdida por el tope
-    de electrónica, una barra por tramo de velocidad de viento."""
+    de electrónica, una barra por tramo de velocidad de viento.
+
+    capacidad_electronica_w: tope de potencia (W, por turbina) que causa el recorte --
+    si se pasa, se anota en el gráfico para que quede claro DE DÓNDE sale la barra
+    "perdido" (ej. controlador/inversor de 1000 W)."""
     fig = go.Figure()
     fig.add_trace(go.Bar(
         x=tabla_desglose["bin_label"], y=tabla_desglose["kwh"],
@@ -348,17 +352,29 @@ def crear_desglose_viento_plotly(tabla_desglose, ancho_bin=1.0):
         xaxis_title=t("resultados_viento_eje_x"),
         yaxis_title=t("resultados_viento_eje_y"),
         template="plotly_white",
-        height=400,
-        margin=dict(l=60, r=20, t=40, b=60),
+        height=440,
+        # b=110 (en vez de 60): dejar espacio para la leyenda, que se movió abajo del
+        # eje X -- ver comentario en el legend= de más abajo.
+        margin=dict(l=60, r=20, t=50, b=110),
         font=dict(family="sans-serif", size=11),
         # type="category" explícito: sin esto, Plotly detecta el eje X como fecha --
         # etiquetas como "6-7" o "10-11" calzan con su heurística de fecha corta
         # (día-mes) y el eje termina mostrando años en vez de tramos de viento.
         xaxis=dict(type="category", gridcolor="#E8E8E8"),
         yaxis=dict(gridcolor="#E8E8E8"),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+        # Leyenda ABAJO (mismo patrón que crear_rosa_vientos_plotly): con y=1.02 (arriba)
+        # se solapaba con el título -- ambos caen en la misma franja angosta sobre el
+        # área del gráfico.
+        legend=dict(orientation="h", yanchor="top", y=-0.32, x=0),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
     )
+    if capacidad_electronica_w:
+        fig.add_annotation(
+            text=t("resultados_viento_anotacion_tope", cap=f"{capacidad_electronica_w:,.0f}"),
+            xref="paper", yref="paper", x=0.99, y=0.97, xanchor="right", yanchor="top",
+            showarrow=False, font=dict(size=11, color=AMBAR),
+            bgcolor="rgba(255,255,255,0.8)", bordercolor=AMBAR, borderwidth=1, borderpad=4,
+        )
     return fig
 
 
@@ -1069,7 +1085,9 @@ with tab_resultados:
                 serie_perdido_total_kwh.values, ancho_bin=1.0)
             if not tabla_desglose_viento.empty:
                 st.plotly_chart(
-                    crear_desglose_viento_plotly(tabla_desglose_viento, ancho_bin=1.0),
+                    crear_desglose_viento_plotly(
+                        tabla_desglose_viento, ancho_bin=1.0,
+                        capacidad_electronica_w=resultados[0]["capacidad_electronica_w"]),
                     use_container_width=True)
                 with st.expander(t("resultados_viento_expander_tabla")):
                     tabla_viento_mostrar = pd.DataFrame({

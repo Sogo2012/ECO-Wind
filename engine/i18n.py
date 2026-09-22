@@ -1008,6 +1008,10 @@ TRANSLATIONS = {
     "resultados_viento_col_kwh": {"es": "kWh entregado", "en": "kWh delivered"},
     "resultados_viento_col_pct_kwh": {"es": "% de la producción anual", "en": "% of annual production"},
     "resultados_viento_col_perdido": {"es": "kWh perdido (recorte)", "en": "kWh lost (clipping)"},
+    "resultados_viento_anotacion_tope": {
+        "es": "Tope de electrónica: {cap} W/turbina",
+        "en": "Electronics cap: {cap} W/turbine",
+    },
     "financiero_caption_footer": {
         "es": ("CAPEX, mantenimiento y precio de venta ingresados directo por el usuario. "
                "Tarifas horarias reales de CNFL/ICE cruzadas contra la producción hora por "
