@@ -336,17 +336,27 @@ def simular(df_clima, altura_buje, modelo, N, elevacion_m=0.0, h_ref=10, z0=Z0_D
 
     energia_perdida_por_recorte_kwh = 0.0
     pct_horas_con_recorte = 0.0
+    perdido_w_por_turbina = np.zeros_like(potencia_w_por_turbina)
     if capacidad_electronica_w is not None:
         _sin_recorte = potencia_w_por_turbina
         potencia_w_por_turbina = np.minimum(_sin_recorte, capacidad_electronica_w)
-        energia_perdida_por_recorte_kwh = float((_sin_recorte - potencia_w_por_turbina).sum() * N / 1000.0)
+        perdido_w_por_turbina = _sin_recorte - potencia_w_por_turbina
+        energia_perdida_por_recorte_kwh = float(perdido_w_por_turbina.sum() * N / 1000.0)
         pct_horas_con_recorte = float(np.mean(_sin_recorte > capacidad_electronica_w) * 100)
 
     serie = pd.Series(potencia_w_por_turbina, index=df_clima.index,
                        name="potencia_W_por_turbina")
+    # kWh/hora perdidos por el tope de electronica, POR TURBINA -- mismo patron que
+    # serie_horaria_W_por_turbina (sin multiplicar por N todavia), para que el desglose
+    # de produccion por velocidad de viento (ver calcular_desglose_por_viento() en
+    # app.py) pueda sumarla hora a hora junto con el resto de clusters del proyecto.
+    serie_kwh_perdido_por_turbina = pd.Series(perdido_w_por_turbina / 1000.0, index=df_clima.index,
+                                               name="kwh_perdido_por_turbina")
     energia_cluster_kwh = serie * N / 1000.0
     return {
         "serie_horaria_W_por_turbina": serie,
+        "serie_horaria_kwh_perdido_por_turbina": serie_kwh_perdido_por_turbina,
+        "v_hub": v_hub,
         "kwh_mensual": energia_cluster_kwh.resample("MS").sum(),
         "kwh_anual": float(energia_cluster_kwh.sum()),
         "v_hub_medio": float(np.mean(v_hub)),
