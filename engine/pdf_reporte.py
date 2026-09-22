@@ -364,16 +364,23 @@ def generar_pdf_informe_ejecutivo(datos, logo_path=None, idioma=IDIOMA_DEFAULT):
     for i, img_con_leyenda in enumerate(imgs_clima):
         if i > 0:
             story.append(Spacer(1, 8))
-        story.append(_fila_imagenes([img_con_leyenda]))
-
-    story.append(PageBreak())
+        # KeepTogether por gráfico: que la imagen nunca quede en una página y su leyenda
+        # sola al principio de la siguiente.
+        story.append(KeepTogether(_fila_imagenes([img_con_leyenda])))
 
     # --- Equipos configurados ----------------------------------------------------------
-    story.append(Paragraph(tr("pdf_seccion_equipos", idioma), estilos["seccion"]))
-    story.append(Paragraph(
-        tr("pdf_texto_bus_dc", idioma, voltaje=datos['voltaje_bus_v']),
-        estilos["cuerpo"],
-    ))
+    # Sin PageBreak: que fluya justo después del contexto climático en vez de forzar una
+    # página nueva -- el perfil logarítmico (última imagen de arriba) casi nunca llena una
+    # página completa por sí solo, así que Equipos aprovecha el espacio que sobra. El
+    # encabezado + intro van en KeepTogether para que, si igual caen cerca del borde de
+    # una página, no quede el título solo y el primer equipo huérfano en la siguiente.
+    story.append(KeepTogether([
+        Paragraph(tr("pdf_seccion_equipos", idioma), estilos["seccion"]),
+        Paragraph(
+            tr("pdf_texto_bus_dc", idioma, voltaje=datos['voltaje_bus_v']),
+            estilos["cuerpo"],
+        ),
+    ]))
     for t_turbina in datos["turbinas"]:
         bloque = [Paragraph(
             tr("pdf_turbina_titulo_cantidad", idioma, nombre=t_turbina['nombre'], cantidad=t_turbina['cantidad']),
@@ -398,44 +405,57 @@ def generar_pdf_informe_ejecutivo(datos, logo_path=None, idioma=IDIOMA_DEFAULT):
         story.append(KeepTogether(bloque))
 
     # --- Resultados de producción -------------------------------------------------------
+    # KeepTogether en el encabezado + KPIs + tabla (bloque chico) para que no quede el
+    # título solo al fondo de una página con el resto de la sección en la siguiente.
     prod = datos["produccion"]
-    story.append(Paragraph(tr("pdf_seccion_resultados", idioma), estilos["seccion"]))
-    story.append(_fila_kpis([
-        _kpi_card(tr("pdf_kpi_produccion_anual", idioma), f"{datos['energia_anual_kwh']:,.0f} kWh"),
-        _kpi_card(tr("pdf_kpi_correccion_densidad", idioma),
-                  tr("pdf_valor_pct_menos", idioma, pct=f"{prod['correccion_densidad_pct']:.1f}"), accent=AZUL),
+    story.append(KeepTogether([
+        Paragraph(tr("pdf_seccion_resultados", idioma), estilos["seccion"]),
+        _fila_kpis([
+            _kpi_card(tr("pdf_kpi_produccion_anual", idioma), f"{datos['energia_anual_kwh']:,.0f} kWh"),
+            _kpi_card(tr("pdf_kpi_correccion_densidad", idioma),
+                      tr("pdf_valor_pct_menos", idioma, pct=f"{prod['correccion_densidad_pct']:.1f}"), accent=AZUL),
+        ]),
+        Spacer(1, 8),
+        _tabla_produccion(prod["filas_tabla"], idioma),
     ]))
-    story.append(Spacer(1, 8))
-    story.append(_tabla_produccion(prod["filas_tabla"], idioma))
     story.append(Spacer(1, 10))
-    # KeepTogether: que el caption de cierre nunca quede solo, huérfano, en la página
-    # siguiente -- si las imágenes no entran completas en la página actual, se van
-    # todas juntas (imágenes + caption) a la próxima, no el texto solo.
+    # Un KeepTogether chico POR GRÁFICO (imagen + su leyenda), no uno solo con las 3 --
+    # un bloque de ~30cm (3 gráficos a todo el ancho) nunca entra en una página, así que
+    # reportlab lo manda entero a una página nueva en vez de aprovechar lo que sobra en
+    # la actual. Separados, cada gráfico decide por su cuenta si cabe donde está.
     # Una imagen por fila, a todo el ancho útil -- no una al lado de la otra: a mitad
     # de ancho los ejes y las etiquetas quedan demasiado apretados para leerse bien.
-    _bloque_imagenes_produccion = [
-        _fila_imagenes([(prod["img_mensual"], tr("pdf_caption_mensual", idioma))]),
-        Spacer(1, 8),
-        _fila_imagenes([(prod["img_duracion"], tr("pdf_caption_duracion", idioma))]),
-    ]
+    story.append(KeepTogether(_fila_imagenes([(prod["img_mensual"], tr("pdf_caption_mensual", idioma))])))
+    story.append(Spacer(1, 8))
     if prod.get("img_viento"):
-        _bloque_imagenes_produccion.append(Spacer(1, 8))
-        _bloque_imagenes_produccion.append(_fila_imagenes([
-            (prod["img_viento"], tr("pdf_caption_viento", idioma)),
+        story.append(KeepTogether(_fila_imagenes([(prod["img_duracion"], tr("pdf_caption_duracion", idioma))])))
+        story.append(Spacer(1, 8))
+        # El último gráfico de la sección va junto con el texto de cierre -- que ese
+        # texto nunca quede solo, huérfano, al principio de la página siguiente.
+        story.append(KeepTogether([
+            _fila_imagenes([(prod["img_viento"], tr("pdf_caption_viento", idioma))]),
+            Paragraph(tr("pdf_texto_validado", idioma), estilos["cuerpo"]),
         ]))
-    _bloque_imagenes_produccion.append(Paragraph(tr("pdf_texto_validado", idioma), estilos["cuerpo"]))
-    story.append(KeepTogether(_bloque_imagenes_produccion))
-
-    story.append(PageBreak())
+    else:
+        story.append(KeepTogether([
+            _fila_imagenes([(prod["img_duracion"], tr("pdf_caption_duracion", idioma))]),
+            Paragraph(tr("pdf_texto_validado", idioma), estilos["cuerpo"]),
+        ]))
 
     # --- Análisis financiero -------------------------------------------------------------
-    story.append(Paragraph(tr("pdf_seccion_financiero", idioma), estilos["seccion"]))
+    # Sin PageBreak: que aproveche el espacio que quede después de Producción en vez de
+    # arrancar una página nueva -- esta sección suele terminar siendo corta (una caja de
+    # aviso, si no se cargó el módulo financiero), así que casi siempre sobra lugar.
+    color_viabilidad = VERDE if fin and fin["viable"] else AMBAR
     if fin:
-        color_viabilidad = VERDE if fin["viable"] else AMBAR
-        story.append(_fila_kpis([
-            _kpi_card(tr("pdf_kpi_capex", idioma), f"${fin['capex']:,.0f}", accent=AZUL),
-            _kpi_card(tr("pdf_kpi_ahorro_anual", idioma), f"${fin['ahorro_anual_USD']:,.0f}", accent=VERDE),
-            _kpi_card(tr("pdf_kpi_mantenimiento_anual", idioma), f"${fin['mantenimiento_anual_USD']:,.0f}", accent=AZUL),
+        story.append(KeepTogether([
+            Paragraph(tr("pdf_seccion_financiero", idioma), estilos["seccion"]),
+            _fila_kpis([
+                _kpi_card(tr("pdf_kpi_capex", idioma), f"${fin['capex']:,.0f}", accent=AZUL),
+                _kpi_card(tr("pdf_kpi_ahorro_anual", idioma), f"${fin['ahorro_anual_USD']:,.0f}", accent=VERDE),
+                _kpi_card(tr("pdf_kpi_mantenimiento_anual", idioma), f"${fin['mantenimiento_anual_USD']:,.0f}",
+                          accent=AZUL),
+            ]),
         ]))
         story.append(Spacer(1, 10))
         story.append(_fila_kpis([
@@ -462,7 +482,10 @@ def generar_pdf_informe_ejecutivo(datos, logo_path=None, idioma=IDIOMA_DEFAULT):
         story.append(Spacer(1, 8))
         story.append(Paragraph(tr("pdf_texto_footer_financiero", idioma), estilos["cuerpo"]))
     else:
-        story.append(_caja_info(tr("pdf_caja_sin_financiero", idioma)))
+        story.append(KeepTogether([
+            Paragraph(tr("pdf_seccion_financiero", idioma), estilos["seccion"]),
+            _caja_info(tr("pdf_caja_sin_financiero", idioma)),
+        ]))
 
     doc.build(story, onFirstPage=lambda c, d: _pie_pagina(c, d, idioma),
               onLaterPages=lambda c, d: _pie_pagina(c, d, idioma))
