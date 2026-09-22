@@ -329,7 +329,9 @@ def crear_rosa_vientos_plotly(rosa_detallada):
     8 puntos de compás (N/NE/E/SE/S/SO/O/NO) -- ver docstring de
     rosa_vientos_detallada_desde_epw() para por qué 8 y no 12 (con 12 sectores de 30°
     las etiquetas de 16 puntos, tipo NNE/ENE, quedan mal puestas)."""
-    sectores = ['N', 'NE', 'E', 'SE', 'S', 'SO', 'O', 'NO'][:rosa_detallada["n_sectores"]]
+    sectores = [t("chart_rosa_dir_n"), t("chart_rosa_dir_ne"), t("chart_rosa_dir_e"), t("chart_rosa_dir_se"),
+                t("chart_rosa_dir_s"), t("chart_rosa_dir_so"), t("chart_rosa_dir_o"),
+                t("chart_rosa_dir_no")][:rosa_detallada["n_sectores"]]
     matriz = np.array(rosa_detallada["matriz"])
     bins_label = rosa_detallada["bins_label"]
     pct_calma = rosa_detallada["pct_calma"]
@@ -716,7 +718,7 @@ with tab_contexto:
     error_clima = None if resultado_clima is None else resultado_clima.get("error")
 
     if resultado_clima is None:
-        st.info("Elegí primero un sitio en la pestaña \"Selección de clima\" para ver su contexto climático.")
+        st.info(t("contexto_info_sin_sitio"))
     elif error_clima:
         st.error(error_clima)
     else:
@@ -726,9 +728,12 @@ with tab_contexto:
 
         if "meta" in resultado_clima:
             _meta = resultado_clima["meta"]
-            st.success(f"Estación real: {_meta['estacion']} ({_meta['pais']}, WMO {_meta['wmo']}) -- "
-                       f"lat={_meta['lat']:.4f}, lon={_meta['lon']:.4f}, elevación={_meta['elevacion_m']:.0f}m. "
-                       f"Media anual real (10m): {media_confirmada:.2f} m/s.")
+            st.success(t(
+                "contexto_estacion_real",
+                estacion=_meta["estacion"], pais=_meta["pais"], wmo=_meta["wmo"],
+                lat=f"{_meta['lat']:.4f}", lon=f"{_meta['lon']:.4f}",
+                elevacion_m=f"{_meta['elevacion_m']:.0f}", media=f"{media_confirmada:.2f}",
+            ))
 
         st.divider()
 
@@ -738,19 +743,10 @@ with tab_contexto:
         # si esa pestaña todavía no se visitó en esta sesión, cae al default de simular().
         z0_actual = st.session_state.get("z0_avanzado", Z0_DEFAULT)
         _altura_explorar = st.slider(
-            "Altura de buje a explorar (m)", 0.5, 150.0, 10.0, 0.5, key="altura_explorar_slider",
-            help="Mueve esta altura para ver cómo cambia la velocidad real del viento (heatmap y "
-                 "perfil de abajo) entre la altura de referencia del EPW (10m) y la altura real de "
-                 "buje de tu turbina -- misma fórmula y rugosidad que usa el cálculo de energía. "
-                 "Para una instalación en TECHO de un edificio, usá altura del edificio + altura del "
-                 "mástil sobre el techo -- ojo, la ley logarítmica extrapola la velocidad REGIONAL "
-                 "a esa altura, no el efecto aerodinámico local de estar encima de un edificio "
-                 "puntual (aceleración sobre el borde del techo, turbulencia).",
+            t("contexto_slider_altura_label"), 0.5, 150.0, 10.0, 0.5, key="altura_explorar_slider",
+            help=t("contexto_slider_altura_help"),
         )
-        st.caption(
-            f"Rugosidad de destino usada abajo: z0={z0_actual} m -- configurable en "
-            f"\"Equipos y configuración\" > Parámetros avanzados."
-        )
+        st.caption(t("contexto_caption_rugosidad", z0=z0_actual))
 
         col_g1, col_g2 = st.columns(2)
         with col_g1:
@@ -776,25 +772,22 @@ with tab_contexto:
 # --- Tab: Equipos y configuración -- turbinas, clústers, parámetros avanzados ---
 
 with tab_config:
-    st.subheader("Clústers del proyecto")
+    st.subheader(t("equipos_subheader_clusters"))
     for i, c in enumerate(st.session_state.clusters):
         with st.container():
             cc1, cc2, cc3, cc4 = st.columns([2, 1, 1, 0.4])
             c["modelo"] = cc1.selectbox(
-                "Modelo", options=list(CURVE_COEFFICIENTS.keys()),
+                t("equipos_label_modelo"), options=list(CURVE_COEFFICIENTS.keys()),
                 format_func=lambda k: NOMBRES_MODELO.get(k, k),
                 index=list(CURVE_COEFFICIENTS.keys()).index(c["modelo"]), key=f"modelo_{i}",
             )
-            c["N"] = cc2.number_input("N", min_value=1, max_value=20, value=c["N"], step=1, key=f"n_{i}")
+            c["N"] = cc2.number_input(t("equipos_label_n"), min_value=1, max_value=20, value=c["N"], step=1, key=f"n_{i}")
             c["altura_buje"] = cc3.number_input(
-                "Buje (m)", min_value=0.5, max_value=150.0,
+                t("equipos_label_buje"), min_value=0.5, max_value=150.0,
                 value=c["altura_buje"], step=0.5, key=f"h_{i}",
-                help="Para una instalación en TECHO (ej. azotea de un edificio de varios pisos): "
-                     "altura del edificio (m) + altura del mástil/soporte sobre el techo -- NO la "
-                     "cantidad de pisos. Un edificio de 15 pisos ronda 45-55m según la altura de "
-                     "entrepiso.",
+                help=t("equipos_help_buje"),
             )
-            if cc4.button("✕", key=f"del_{i}", help="Quitar este clúster") and len(st.session_state.clusters) > 1:
+            if cc4.button("✕", key=f"del_{i}", help=t("equipos_boton_quitar_cluster")) and len(st.session_state.clusters) > 1:
                 st.session_state.clusters.pop(i)
                 st.rerun()
 
@@ -807,82 +800,76 @@ with tab_config:
                     if _articulo_guardado in _opciones_articulo else 0
                 )
                 c["articulo"] = st.selectbox(
-                    "Artículo (precio EXWORKS real de fábrica)", options=_opciones_articulo,
+                    t("equipos_label_articulo"), options=_opciones_articulo,
                     index=_idx_articulo, key=f"articulo_{i}",
-                    help="Elegí la variante exacta del catálogo real de Flower Turbines que vas a "
-                         "cotizar (unidad simple, bouquet, on/off-grid, con o sin accesorio) -- "
-                         "también define la capacidad de la electrónica que se usa para calcular "
-                         "la producción (pestaña \"Resultados\") y el costeo (pestaña \"Análisis "
-                         "Financiero\").",
+                    help=t("equipos_help_articulo"),
                 )
                 _precio_unitario = get_precio_exworks_usd(c["modelo"], c["articulo"])
-                st.caption(
-                    f"Precio: \\${_precio_unitario:,.0f} c/u -- "
-                    f"Total del clúster ({int(c['N'])}x): \\${_precio_unitario * c['N']:,.0f}"
-                )
+                st.caption(t(
+                    "equipos_caption_precio",
+                    precio_unitario=f"{_precio_unitario:,.0f}", cantidad=int(c["N"]),
+                    precio_total=f"{_precio_unitario * c['N']:,.0f}",
+                ))
             else:
                 c["articulo"] = None
-                st.caption(
-                    "Precio no disponible todavía (no hay artículo cargado en el catálogo para "
-                    "este modelo)."
-                )
+                st.caption(t("equipos_caption_sin_precio"))
 
             _specs = SPECS_TURBINAS.get(c["modelo"])
             _ruta_img = RUTA_IMAGEN.get(c["modelo"])
-            with st.expander(f"Ficha técnica -- {NOMBRES_MODELO.get(c['modelo'], c['modelo'])}"):
+            with st.expander(t("equipos_expander_ficha_tecnica",
+                                nombre_modelo=NOMBRES_MODELO.get(c["modelo"], c["modelo"]))):
                 if not _specs:
-                    st.caption("Sin ficha técnica cargada todavía para este modelo.")
+                    st.caption(t("equipos_caption_sin_ficha"))
                 else:
                     col_img, col_specs = st.columns([1, 2])
                     with col_img:
                         if _ruta_img and os.path.exists(_ruta_img):
                             st.image(_ruta_img)
                         else:
-                            st.caption("Sin imagen todavía.")
+                            st.caption(t("equipos_caption_sin_imagen"))
                     with col_specs:
-                        st.caption(f"N° de parte: {_specs['numero_parte']} -- {_specs['clase_iec']}")
-                        st.markdown(
-                            f"- **Potencia nominal:** {_specs['potencia_nominal_w']} W "
-                            f"a {_specs['viento_potencia_nominal_ms']} m/s\n"
-                            f"- **Cut-in / supervivencia:** {_specs['velocidad_cutin_ms']} m/s / "
-                            f"{_specs['velocidad_supervivencia_ms']} m/s\n"
-                            f"- **Generador:** {t(_specs['tipo_generador'])} ({_specs['polos_generador']} polos)\n"
-                            f"- **Salida:** {_specs['voltaje_salida']}\n"
-                            f"- **Dimensiones:** {_specs['altura_total_m']} m altura total, "
-                            f"{_specs['diametro_rotor_m']} m diámetro de rotor, "
-                            f"{_specs['peso_total_kg']} kg\n"
-                            f"- **Vida de diseño:** {_specs['vida_diseno_anos']} años\n"
-                            f"- **Cimentación requerida:** {t(_specs['cimentacion_requerida'])}"
-                        )
+                        st.caption(t("equipos_caption_numero_parte",
+                                      numero_parte=_specs["numero_parte"], clase_iec=_specs["clase_iec"]))
+                        st.markdown(t(
+                            "equipos_ficha_markdown",
+                            potencia_nominal_w=_specs["potencia_nominal_w"],
+                            viento_potencia_nominal_ms=_specs["viento_potencia_nominal_ms"],
+                            velocidad_cutin_ms=_specs["velocidad_cutin_ms"],
+                            velocidad_supervivencia_ms=_specs["velocidad_supervivencia_ms"],
+                            tipo_generador=t(_specs["tipo_generador"]), polos_generador=_specs["polos_generador"],
+                            voltaje_salida=_specs["voltaje_salida"], altura_total_m=_specs["altura_total_m"],
+                            diametro_rotor_m=_specs["diametro_rotor_m"], peso_total_kg=_specs["peso_total_kg"],
+                            vida_diseno_anos=_specs["vida_diseno_anos"],
+                            cimentacion_requerida=t(_specs["cimentacion_requerida"]),
+                        ))
 
-    if st.button("+ Agregar clúster"):
+    if st.button(t("equipos_boton_agregar_cluster")):
         st.session_state.clusters.append({"modelo": "medium_tulip", "N": 1, "altura_buje": 3.0})
         st.rerun()
 
     st.divider()
 
-    with st.expander("Parámetros avanzados"):
+    with st.expander(t("equipos_expander_avanzados")):
         z0 = st.selectbox(
-            "Rugosidad DEL SITIO donde va la turbina (z0)", options=[0.03, 0.1, 0.3, 1.0],
-            format_func=lambda z: {0.03: "0.03 — campo abierto", 0.1: "0.1 — cultivos bajos",
-                                    0.3: "0.3 — suburbano (default)", 1.0: "1.0 — urbano denso"}[z],
+            t("equipos_label_z0"), options=[0.03, 0.1, 0.3, 1.0],
+            format_func=lambda z: f"{z} — " + {
+                0.03: t("equipos_z0_campo_abierto"), 0.1: t("equipos_z0_cultivos_bajos"),
+                0.3: t("equipos_z0_suburbano"), 1.0: t("equipos_z0_urbano_denso"),
+            }[z],
             index=2, key="z0_avanzado",
-            help="Rugosidad del sitio DESTINO (donde se instala la turbina), no la del sitio "
-                 "de referencia climática -- son dos valores distintos (ver el detalle en "
-                 "\"Resultados\").",
+            help=t("equipos_help_z0"),
         )
         metodo_bouquet = st.radio(
-            "Modelo de Efecto Bouquet", options=["real", "lineal"], key="metodo_bouquet_radio",
-            format_func=lambda m: "Real (exponencial, validado R²≥0.999996)" if m == "real"
-            else "Lineal de marketing (solo referencia, subestima fuerte)",
+            t("equipos_label_metodo_bouquet"), options=["real", "lineal"], key="metodo_bouquet_radio",
+            format_func=lambda m: t("equipos_metodo_real") if m == "real" else t("equipos_metodo_lineal"),
         )
 
     st.divider()
 
     if not st.session_state.get("sitio_activo"):
-        st.warning("Elegí un sitio en la pestaña \"Selección de clima\" antes de calcular.")
+        st.warning(t("equipos_warning_sin_sitio"))
 
-    if st.button("Calcular producción del proyecto", type="primary"):
+    if st.button(t("equipos_boton_calcular"), type="primary"):
         st.session_state.calculo_listo = True
         st.session_state.seccion_activa = "resultados"
         st.rerun()
@@ -891,10 +878,7 @@ with tab_config:
 # --- Tab: Resultados -- por ahora, producción de energía (Hallazgo 12/17) ---
 
 with tab_resultados:
-    st.caption(
-        "Producción de energía del proyecto -- el cálculo financiero (CAPEX, tarifa eléctrica, "
-        "payback) está en la pestaña \"Análisis Financiero\"."
-    )
+    st.caption(t("resultados_caption_intro"))
 
     # Se resetea acá y sólo se sobreescribe en el camino exitoso de abajo -- así el
     # informe ejecutivo (pestaña "Especificación Técnica") nunca arrastra un resultado
@@ -908,9 +892,7 @@ with tab_resultados:
         metodo_bouquet = st.session_state.metodo_bouquet_radio
 
         if resultado_clima is None:
-            st.error(
-                "Elegí primero una estación (o subí un EPW) en la pestaña \"Selección de clima\".",
-            )
+            st.error(t("resultados_error_sin_estacion"))
         elif error:
             st.error(error)
         else:
@@ -940,34 +922,31 @@ with tab_resultados:
             n_total = sum(c["N"] for c in st.session_state.clusters)
 
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Producción anual total", f"{kwh_total:,.0f} kWh")
-            c2.metric("Turbinas totales", f"{n_total}")
-            c3.metric("Corrección por densidad (elevación)",
-                      f"{(1 - resultados[0]['factor_correccion_densidad']) * 100:.1f}% menos")
-            c4.metric("Altura de buje", f"{resultados[0]['altura_buje']:.0f} m")
+            c1.metric(t("resultados_metric_produccion_anual"), f"{kwh_total:,.0f} kWh")
+            c2.metric(t("resultados_metric_turbinas_totales"), f"{n_total}")
+            c3.metric(t("resultados_metric_correccion_densidad"), t(
+                "resultados_metric_correccion_densidad_valor",
+                pct=f"{(1 - resultados[0]['factor_correccion_densidad']) * 100:.1f}",
+            ))
+            c4.metric(t("resultados_metric_altura_buje"), f"{resultados[0]['altura_buje']:.0f} m")
 
-            st.markdown("**Detalle por clúster**")
+            st.markdown(t("resultados_subheader_detalle_cluster"))
             tabla = pd.DataFrame([{
-                "Modelo": NOMBRES_MODELO.get(r["modelo"], r["modelo"]), "N": r["N"],
-                "Buje (m)": r["altura_buje"], "kWh/año": round(r["kwh_anual"]),
-                "V. medio buje (m/s)": round(r["v_hub_medio"], 2),
-                "% bajo cut-in": round(r["pct_horas_bajo_cutin"], 1),
-                "% horas con recorte": round(r["pct_horas_con_recorte"], 1),
-                "kWh/año perdidos por recorte": round(r["energia_perdida_por_recorte_kwh"]),
+                t("resultados_col_modelo"): NOMBRES_MODELO.get(r["modelo"], r["modelo"]),
+                t("resultados_col_n"): r["N"],
+                t("resultados_col_buje"): r["altura_buje"],
+                t("resultados_col_kwh_anio"): round(r["kwh_anual"]),
+                t("resultados_col_v_media_buje"): round(r["v_hub_medio"], 2),
+                t("resultados_col_pct_bajo_cutin"): round(r["pct_horas_bajo_cutin"], 1),
+                t("resultados_col_pct_recorte"): round(r["pct_horas_con_recorte"], 1),
+                t("resultados_col_kwh_perdidos_recorte"): round(r["energia_perdida_por_recorte_kwh"]),
             } for r in resultados])
             st.dataframe(tabla, hide_index=True)
             if any(r["energia_perdida_por_recorte_kwh"] > 0 for r in resultados):
-                st.caption(
-                    "\"Recorte\": horas donde el viento (+ Efecto Bouquet) le daría más "
-                    "energía a la turbina de la que su controlador/inversor puede procesar -- "
-                    "ese excedente se pierde, no se cuenta en el kWh/año. Depende de qué "
-                    "artículo (capacidad de electrónica) elegiste para cada clúster en "
-                    "\"Equipos y configuración\" -- sin elegir ninguno todavía, se asume el "
-                    "tamaño de fábrica del modelo, el más conservador."
-                )
+                st.caption(t("resultados_caption_recorte"))
 
             media_confirmada = resultado_clima["media"]
-            with st.expander("Perfil de viento por altura: dos rugosidades, y una verificación independiente"):
+            with st.expander(t("resultados_expander_perfil_viento")):
                 _r0 = resultados[0]
                 # El cross-check usa el MISMO z0 de destino que ya eligió el usuario arriba
                 # (mapeado a la clase de TERRENOS_ENERGYPLUS más cercana) -- antes quedaba fijo
@@ -976,45 +955,31 @@ with tab_resultados:
                 _terreno_dst = terreno_mas_cercano_por_z0(z0)
                 _v_pot = wind_at_height_potencia(
                     media_confirmada, 10, _r0["altura_buje"], terreno=_terreno_dst, terreno_met="country")
-                st.write(
-                    f"El viento de referencia (10m, aeropuerto/EPW) y el sitio real donde va la "
-                    f"turbina casi nunca tienen la misma rugosidad. Por eso esta app usa z0 del "
-                    f"sitio destino (seleccionable arriba en esta pestaña) **distinto** de z0 de "
-                    f"referencia (0.1, clase \"country\"/aeropuerto -- fórmula logarítmica)."
-                )
-                st.write(
-                    f"**Verificación independiente** (ley de potencia que usa EnergyPlus por default, "
-                    f"misma tabla de terrenos que ladybug-tools/ladybug, con el mismo **z0={z0}** elegido "
-                    f"arriba -- internamente la clase con ese z0 tabulado se llama \"{_terreno_dst}\" en "
-                    f"la tabla original de EnergyPlus, aunque el nombre no siempre calce 1 a 1 con las "
-                    f"etiquetas en español de esta app): "
-                    f"{_v_pot:.2f} m/s a {_r0['altura_buje']:.1f}m de buje, vs. "
-                    f"**{_r0['v_hub_medio']:.2f} m/s** con la fórmula logarítmica usada arriba -- "
-                    f"{'concuerdan razonablemente' if abs(_v_pot/_r0['v_hub_medio']-1) < 0.15 else 'difieren más de lo esperado, revisar'}."
-                )
+                st.write(t("resultados_perfil_texto1"))
+                st.write(t(
+                    "resultados_perfil_texto2", z0=z0, terreno_dst=_terreno_dst, v_pot=f"{_v_pot:.2f}",
+                    altura_buje=f"{_r0['altura_buje']:.1f}", v_hub_medio=f"{_r0['v_hub_medio']:.2f}",
+                    conclusion=t("resultados_perfil_concuerdan") if abs(_v_pot / _r0['v_hub_medio'] - 1) < 0.15
+                    else t("resultados_perfil_difieren"),
+                ))
 
-            with st.expander("¿Por qué el cálculo es hora por hora, y no con la velocidad media?"):
+            with st.expander(t("resultados_expander_horario_vs_media")):
                 cmp = comparar_metodo_ingenuo_vs_horario(
                     df_clima, altura_buje=resultados[0]["altura_buje"], modelo=resultados[0]["modelo"],
                     N=int(resultados[0]["N"]), elevacion_m=elevacion_m, z0=z0, metodo_bouquet=metodo_bouquet)
-                st.write(
-                    f"Para el primer clúster: método correcto (P=k·v³ en cada una de las 8,760 horas) = "
-                    f"**{cmp['kwh_anual_correcto']:.0f} kWh/año**. Método ingenuo (P evaluada en la velocidad "
-                    f"media {cmp['v_media']:.2f} m/s, ×8,760 horas) = **{cmp['kwh_anual_ingenuo']:.0f} kWh/año** "
-                    f"-- el método ingenuo subestima **{cmp['razon_correcto_sobre_ingenuo']:.2f}x**. "
-                    f"Es la desigualdad de Jensen (P∝v³ es convexa, E[v³]≥(E[v])³): con un recurso variable, "
-                    f"nunca es válido sustituir la velocidad media directo en la fórmula de potencia."
-                )
+                st.write(t(
+                    "resultados_jensen_texto",
+                    kwh_correcto=f"{cmp['kwh_anual_correcto']:.0f}", v_media=f"{cmp['v_media']:.2f}",
+                    kwh_ingenuo=f"{cmp['kwh_anual_ingenuo']:.0f}",
+                    razon=f"{cmp['razon_correcto_sobre_ingenuo']:.2f}",
+                ))
 
             st.divider()
             kwh_mensual_total = pd.concat([r["kwh_mensual"] for r in resultados], axis=1).sum(axis=1)
             st.plotly_chart(crear_produccion_mensual_plotly(kwh_mensual_total), use_container_width=True)
             st.plotly_chart(crear_curva_duracion_plotly(serie_total_w), use_container_width=True)
 
-            st.caption(
-                "Cálculo validado con datos de campo, con corrección por densidad de aire según "
-                "elevación. Fuente climática: EPW real de la estación elegida o subida por el usuario."
-            )
+            st.caption(t("resultados_caption_validado"))
 
             # Mismos datos que se acaban de calcular y mostrar arriba, disponibles para
             # el informe ejecutivo en "Especificación Técnica" sin volver a simular nada.
@@ -1025,17 +990,13 @@ with tab_resultados:
                 "correccion_densidad_pct": (1 - resultados[0]["factor_correccion_densidad"]) * 100,
             }
     else:
-        st.info("Configurá el proyecto en la pestaña \"Equipos y configuración\" y presioná "
-                 "**Calcular producción del proyecto**.")
+        st.info(t("resultados_info_sin_calculo"))
 
 
 # --- Tab: Análisis Financiero (Hallazgo 40-48) -- CAPEX, inversor/BESS recomendados, payback/ROI/NPV ---
 
 with tab_financiero:
-    st.caption(
-        "Viabilidad económica del proyecto (CAPEX, Payback, ROI, NPV) -- usa las turbinas ya "
-        "configuradas en \"Equipos y configuración\" y la producción ya calculada en \"Resultados\"."
-    )
+    st.caption(t("financiero_caption_intro"))
 
     # Igual que en "Resultados": se resetea acá y sólo se sobreescribe si el cálculo
     # financiero termina en un resultado válido, para que el informe ejecutivo nunca
@@ -1043,29 +1004,22 @@ with tab_financiero:
     st.session_state["ultimo_resultado_financiero"] = None
 
     modulo_financiero_activo = st.toggle(
-        "Activar módulo financiero (viabilidad económica)",
+        t("financiero_toggle_label"),
         value=True,
         key="fin_modulo_activo",
-        help="Apagalo si por ahora sólo te interesa el dimensionamiento técnico (pestaña "
-             "\"Especificación Técnica\") y no necesitás calcular CAPEX/Payback/ROI todavía.",
+        help=t("financiero_toggle_help"),
     )
 
     if not modulo_financiero_activo:
-        st.info(
-            "Módulo financiero desactivado. Activá el switch de arriba para ingresar costos "
-            "reales y calcular Payback, ROI, NPV y viabilidad económica."
-        )
+        st.info(t("financiero_info_desactivado"))
     elif not st.session_state.get("calculo_listo"):
-        st.info("Configurá el proyecto en la pestaña \"Equipos y configuración\" y presioná "
-                 "**Calcular producción del proyecto** primero.")
+        st.info(t("financiero_info_sin_calculo"))
     else:
         resultado_clima = st.session_state.sitio_activo
         error = None if resultado_clima is None else resultado_clima.get("error")
 
         if resultado_clima is None:
-            st.error(
-                "Elegí primero una estación (o subí un EPW) en la pestaña \"Selección de clima\".",
-            )
+            st.error(t("resultados_error_sin_estacion"))
         elif error:
             st.error(error)
         else:
@@ -1107,51 +1061,54 @@ with tab_financiero:
             # ya no dimensionan nada.
             sistema_tipo = "Standalone"
 
-            st.markdown("**Tarifa eléctrica**")
+            st.markdown(t("financiero_subheader_tarifa"))
+            _opciones_modo_tarifa = ["Tarifa plana (USD/kWh)", "Tarifa horaria real de Costa Rica (ARESEP)",
+                                      "Tarifa comercial de Costa Rica (T-CO)"]
+            _modo_tarifa_t = {
+                "Tarifa plana (USD/kWh)": t("financiero_tarifa_plana"),
+                "Tarifa horaria real de Costa Rica (ARESEP)": t("financiero_tarifa_aresep"),
+                "Tarifa comercial de Costa Rica (T-CO)": t("financiero_tarifa_tco"),
+            }
             modo_tarifa = st.radio(
-                "¿Cómo querés valorar el ahorro de electricidad?",
-                ["Tarifa plana (USD/kWh)", "Tarifa horaria real de Costa Rica (ARESEP)",
-                 "Tarifa comercial de Costa Rica (T-CO)"],
+                t("financiero_label_modo_tarifa"), _opciones_modo_tarifa,
+                format_func=lambda o: _modo_tarifa_t[o],
                 horizontal=True,
                 key="fin_modo_tarifa",
-                help="La tarifa horaria cruza la producción REAL hora por hora de la turbina "
-                     "contra los periodos Punta/Valle/Nocturno de CNFL/ICE -- un kWh generado "
-                     "en horario Punta vale varias veces más que uno generado de noche, algo "
-                     "que una tarifa plana no puede reflejar. La tarifa comercial (T-CO) es "
-                     "para gimnasios/estadios/comercios -- precio plano por kWh según el "
-                     "consumo mensual del sitio, sin periodos horarios.",
+                help=t("financiero_help_modo_tarifa"),
             )
 
             resultado_tou = None
             resultado_co = None
             if modo_tarifa == "Tarifa plana (USD/kWh)":
                 tarifa_kwh_USD = st.number_input(
-                    "Tarifa eléctrica ($/kWh)", min_value=0.01, value=0.15, step=0.01, format="%.2f",
-                    key="fin_tarifa_kwh")
+                    t("financiero_label_tarifa_plana_valor"), min_value=0.01, value=0.15, step=0.01,
+                    format="%.2f", key="fin_tarifa_kwh")
             elif modo_tarifa == "Tarifa comercial de Costa Rica (T-CO)":
                 col_c1, col_c2, col_c3 = st.columns(3)
                 with col_c1:
                     proveedor_co = st.selectbox(
-                        "Proveedor", ["CNFL", "ICE"], key="fin_co_proveedor",
-                        help="CNFL cubre el Gran Área Metropolitana; ICE el resto del país.",
+                        t("financiero_label_proveedor"), ["CNFL", "ICE"], key="fin_co_proveedor",
+                        help=t("financiero_help_proveedor"),
                     )
                 with col_c2:
+                    _opciones_tramo = ["≤ 3000 kWh/mes (sin medidor de potencia)",
+                                        "> 3000 kWh/mes (con medidor de potencia)"]
+                    _tramo_t = {
+                        _opciones_tramo[0]: t("financiero_tramo_pequeno"),
+                        _opciones_tramo[1]: t("financiero_tramo_grande"),
+                    }
                     tramo_label = st.selectbox(
-                        "Consumo mensual del sitio",
-                        ["≤ 3000 kWh/mes (sin medidor de potencia)",
-                         "> 3000 kWh/mes (con medidor de potencia)"],
+                        t("financiero_label_tramo"), _opciones_tramo,
+                        format_func=lambda o: _tramo_t[o],
                         key="fin_co_tramo",
-                        help="Determina qué tarifa T-CO aplica -- gimnasios/estadios grandes "
-                             "normalmente caen en el tramo >3000 kWh/mes.",
+                        help=t("financiero_help_tramo"),
                     )
                 tramo_co = "pequeno" if tramo_label.startswith("≤") else "grande"
                 with col_c3:
                     tipo_cambio_crc_usd = st.number_input(
-                        "Tipo de cambio (₡ por USD)", min_value=1.0, value=_tipo_cambio, step=1.0,
+                        t("financiero_label_tipo_cambio"), min_value=1.0, value=_tipo_cambio, step=1.0,
                         key="fin_co_tipo_cambio",
-                        help="Precargado con el tipo de cambio de venta del día del Banco Central "
-                             "de Costa Rica (BCCR, ver sidebar) -- cambia a diario, es un punto de "
-                             "partida editable, no un valor fijo del sistema.",
+                        help=t("financiero_help_tipo_cambio"),
                     )
 
                 try:
@@ -1162,24 +1119,19 @@ with tab_financiero:
                     st.error(str(e))
 
                 if resultado_co:
-                    st.caption(
-                        f"Tarifa T-CO: ₡{resultado_co['precio_crc_kwh']:.2f}/kWh → "
-                        f"\\${resultado_co['ahorro_anual_usd']:,.0f}/año "
-                        f"({resultado_co['ahorro_anual_crc']:,.0f} ₡/año)."
-                    )
-                    st.info(
-                        "Esta tarifa NO incluye el cargo por demanda máxima (kW) que T-CO "
-                        "también cobra en el tramo >3000 kWh -- calcularlo requeriría el perfil "
-                        "de demanda horaria del sitio (no sólo el consumo diario promedio) para "
-                        "saber si la turbina genera justo en el instante del pico. Este número "
-                        "es sólo el ahorro de energía, no el ahorro total de la factura."
-                    )
+                    st.caption(t(
+                        "financiero_caption_tco",
+                        precio_crc_kwh=f"{resultado_co['precio_crc_kwh']:.2f}",
+                        ahorro_usd=f"{resultado_co['ahorro_anual_usd']:,.0f}",
+                        ahorro_crc=f"{resultado_co['ahorro_anual_crc']:,.0f}",
+                    ))
+                    st.info(t("financiero_info_tco_sin_demanda"))
             else:
                 col_t1, col_t2, col_t3 = st.columns(3)
                 with col_t1:
                     proveedor_tou = st.selectbox(
-                        "Proveedor", ["CNFL", "ICE"], key="fin_tou_proveedor",
-                        help="CNFL cubre el Gran Área Metropolitana; ICE el resto del país.",
+                        t("financiero_label_proveedor"), ["CNFL", "ICE"], key="fin_tou_proveedor",
+                        help=t("financiero_help_proveedor"),
                     )
                 opciones_tarifa_tou = {
                     "CNFL": ["T-REH (0-500 kWh)", "T-REH (>500 kWh)"],
@@ -1187,16 +1139,14 @@ with tab_financiero:
                 }[proveedor_tou]
                 with col_t2:
                     tarifa_tou = st.selectbox(
-                        "Tarifa", opciones_tarifa_tou, key="fin_tou_tarifa",
-                        help="T-REH/T-RH: residencial. T-MT: media tensión (proyectos más grandes).",
+                        t("financiero_label_tarifa_tou"), opciones_tarifa_tou, key="fin_tou_tarifa",
+                        help=t("financiero_help_tarifa_tou"),
                     )
                 with col_t3:
                     tipo_cambio_crc_usd = st.number_input(
-                        "Tipo de cambio (₡ por USD)", min_value=1.0, value=_tipo_cambio, step=1.0,
+                        t("financiero_label_tipo_cambio"), min_value=1.0, value=_tipo_cambio, step=1.0,
                         key="fin_tipo_cambio",
-                        help="Precargado con el tipo de cambio de venta del día del Banco Central "
-                             "de Costa Rica (BCCR, ver sidebar) -- cambia a diario, es un punto de "
-                             "partida editable, no un valor fijo del sistema.",
+                        help=t("financiero_help_tipo_cambio"),
                     )
 
                 try:
@@ -1209,32 +1159,36 @@ with tab_financiero:
                 if resultado_tou:
                     # Dos "$" en el mismo st.caption() arman un par que Streamlit interpreta
                     # como LaTeX ($...$) -- se escapan con "\$" (mismo bug real de Hallazgo 48).
-                    st.caption(
-                        f"Tarifa efectiva ponderada por producción real: "
-                        f"\\${resultado_tou['tarifa_efectiva_usd_kwh']:.4f}/kWh "
-                        f"({resultado_tou['ahorro_anual_crc']:,.0f} ₡/año → "
-                        f"\\${resultado_tou['ahorro_anual_usd']:,.0f}/año)."
+                    st.caption(t(
+                        "financiero_caption_tou",
+                        tarifa_efectiva=f"{resultado_tou['tarifa_efectiva_usd_kwh']:.4f}",
+                        ahorro_crc=f"{resultado_tou['ahorro_anual_crc']:,.0f}",
+                        ahorro_usd=f"{resultado_tou['ahorro_anual_usd']:,.0f}",
+                    ))
+                    _col_periodo, _col_kwh, _col_precio, _col_valor = (
+                        t("financiero_col_periodo"), t("financiero_col_kwh_anio"),
+                        t("financiero_col_precio_crc_kwh"), t("financiero_col_valor_usd_anio"),
                     )
                     tabla_periodos = pd.DataFrame([
-                        {"Periodo": periodo, "kWh/año": v["kwh"],
-                         "Precio (₡/kWh)": v["precio_crc_kwh"], "Valor (USD/año)": v["usd"]}
+                        {_col_periodo: periodo, _col_kwh: v["kwh"],
+                         _col_precio: v["precio_crc_kwh"], _col_valor: v["usd"]}
                         for periodo, v in resultado_tou["desglose_por_periodo"].items()
                     ])
                     st.dataframe(
                         tabla_periodos.style.format({
-                            "kWh/año": "{:,.0f}", "Precio (₡/kWh)": "{:,.2f}", "Valor (USD/año)": "${:,.0f}",
+                            _col_kwh: "{:,.0f}", _col_precio: "{:,.2f}", _col_valor: "${:,.0f}",
                         }),
                         hide_index=True,
                     )
 
-            with st.expander("Parámetros avanzados"):
+            with st.expander(t("equipos_expander_avanzados")):
                 col_a1, col_a2 = st.columns(2)
                 with col_a1:
                     vida_util_anos = st.number_input(
-                        "Vida útil del proyecto (años)", min_value=1, value=40, step=1)
+                        t("financiero_label_vida_util"), min_value=1, value=40, step=1)
                 with col_a2:
                     tasa_descuento_pct = st.number_input(
-                        "Tasa de descuento para NPV (%)", min_value=0.0, value=8.0, step=0.5)
+                        t("financiero_label_tasa_descuento"), min_value=0.0, value=8.0, step=0.5)
 
             # Hallazgo 57: se deja de dimensionar/costear el inversor Sol-Ark y el BESS acá --
             # por ahora la app sólo valora equipo Flower Turbines (turbinas), a pedido explícito
@@ -1247,97 +1201,70 @@ with tab_financiero:
             _cantidad_turbinas_total = len(turbinas_seleccionadas)
 
             st.divider()
-            st.markdown("**Equipo elegido -- precio EXWORKS**")
-            st.caption(
-                "El artículo exacto del catálogo (unidad simple, bouquet, on/off-grid, con o sin "
-                "accesorio) se elige por clúster en \"Equipos y configuración\" -- acá solo se "
-                "muestra el precio resultante, de referencia para el costeo de abajo (no se usa "
-                "solo para calcular Payback/ROI)."
-            )
+            st.markdown(t("financiero_subheader_equipo_elegido"))
+            st.caption(t("financiero_caption_equipo_elegido"))
             _precio_total_proyecto = 0.0
             _algun_modelo_sin_precio = False
             for _c in st.session_state.clusters:
                 _nombre_modelo = NOMBRES_MODELO.get(_c["modelo"], _c["modelo"])
                 _articulo = _c.get("articulo")
                 if not _articulo:
-                    st.caption(
-                        f"{_nombre_modelo}: precio no disponible todavía (no hay artículo cargado "
-                        "en el catálogo, o no se eligió ninguno en \"Equipos y configuración\")."
-                    )
+                    st.caption(t("financiero_caption_cluster_sin_precio", nombre_modelo=_nombre_modelo))
                     _algun_modelo_sin_precio = True
                     continue
                 _precio_unitario = get_precio_exworks_usd(_c["modelo"], _articulo)
                 _precio_total_proyecto += _precio_unitario * _c["N"]
                 # Dos "$" en el mismo st.caption() arman un par que Streamlit interpreta
                 # como LaTeX ($...$) -- se escapan con "\$" (mismo bug real de Hallazgo 48).
-                st.caption(
-                    f"{_nombre_modelo} -- {_articulo}: \\${_precio_unitario:,.0f} c/u -- "
-                    f"Total del clúster ({int(_c['N'])}x): \\${_precio_unitario * _c['N']:,.0f}"
-                )
-            st.metric("Precio total del proyecto (equipos, EXWORKS)", f"${_precio_total_proyecto:,.0f}")
+                st.caption(t(
+                    "financiero_caption_cluster_precio",
+                    nombre_modelo=_nombre_modelo, articulo=_articulo,
+                    precio_unitario=f"{_precio_unitario:,.0f}", cantidad=int(_c["N"]),
+                    precio_total=f"{_precio_unitario * _c['N']:,.0f}",
+                ))
+            st.metric(t("financiero_metric_precio_total"), f"${_precio_total_proyecto:,.0f}")
             st.caption(
-                "Precio de venta de fábrica del artículo elegido en cada clúster. NO incluye "
-                "flete, importación ni instalación -- eso lo agrega ECO Consultor aparte. Es el "
-                "precio del artículo elegido × cantidad de turbinas del clúster -- si elegís un "
-                "artículo de \"bouquet\" (varias turbinas con un solo inversor), revisá que la "
-                "cantidad (N) del clúster tenga sentido con ese artículo."
-                + (" Al menos un modelo elegido todavía no tiene ningún artículo cargado." if _algun_modelo_sin_precio else "")
+                t("financiero_caption_precio_nota")
+                + (t("financiero_caption_falta_articulo") if _algun_modelo_sin_precio else "")
             )
 
             st.divider()
-            st.markdown("**Costeo real del proyecto**")
-            st.caption(
-                "En vez de estimar el CAPEX con costo de fábrica + margen + flete supuestos, "
-                "ingresá acá los números reales de tu cotización: cuánto cuestan los equipos, a "
-                "cuánto se los vas a vender al cliente, y cuánto vas a cobrar de mantenimiento al "
-                "año. Payback, ROI, NPV y viabilidad se calculan directo de esos datos."
-            )
+            st.markdown(t("financiero_subheader_costeo_real"))
+            st.caption(t("financiero_caption_costeo_real"))
             col_c1, col_c2, col_c3 = st.columns(3)
             with col_c1:
                 costo_equipos_usd = st.number_input(
-                    "Costo de los equipos (turbinas + inversor + BESS, USD)",
+                    t("financiero_label_costo_equipos"),
                     min_value=0.0, value=0.0, step=100.0, format="%.2f",
                     key="fin_costo_equipos",
-                    help="Lo que ECO Consultor paga por comprar/importar los equipos -- sólo "
-                         "informativo, para ver el margen (no entra en el cálculo de Payback).",
+                    help=t("financiero_help_costo_equipos"),
                 )
             with col_c2:
                 precio_venta_usd = st.number_input(
-                    "Precio de venta al cliente (USD)",
+                    t("financiero_label_precio_venta"),
                     min_value=0.0, value=0.0, step=100.0, format="%.2f",
                     key="fin_precio_venta",
-                    help="Precio final cotizado al cliente, llave en mano (equipos + instalación) "
-                         "-- este es el CAPEX real que se usa para Payback/ROI/NPV.",
+                    help=t("financiero_help_precio_venta"),
                 )
             with col_c3:
                 mantenimiento_anual_usd = st.number_input(
-                    "Mantenimiento anual (USD/año)",
+                    t("financiero_label_mantenimiento"),
                     min_value=0.0, value=0.0, step=50.0, format="%.2f",
                     key="fin_mantenimiento_anual",
-                    help="Costo real esperado de mantenimiento al año -- reemplaza el % del "
-                         "CAPEX que se adivinaba antes.",
+                    help=t("financiero_help_mantenimiento"),
                 )
 
             if costo_equipos_usd > 0 and precio_venta_usd > 0:
                 margen_usd = precio_venta_usd - costo_equipos_usd
                 margen_pct = (margen_usd / costo_equipos_usd) * 100
-                st.caption(f"Margen sobre costo de equipos: ${margen_usd:,.2f} ({margen_pct:.0f}%).")
+                st.caption(t("financiero_caption_margen", margen_usd=f"{margen_usd:,.2f}", margen_pct=f"{margen_pct:.0f}"))
 
             if precio_venta_usd <= 0:
-                st.info(
-                    "Ingresá el precio de venta al cliente para calcular Payback, ROI, NPV y "
-                    "viabilidad económica."
-                )
+                st.info(t("financiero_info_falta_precio_venta"))
             elif modo_tarifa == "Tarifa horaria real de Costa Rica (ARESEP)" and resultado_tou is None:
-                st.info(
-                    "No se pudo calcular el ahorro con tarifa horaria (ver el error arriba) -- "
-                    "cambiá a \"Tarifa plana (USD/kWh)\" o revisá la selección de proveedor/tarifa."
-                )
+                st.info(t("financiero_info_error_tarifa_horaria"))
             elif modo_tarifa == "Tarifa comercial de Costa Rica (T-CO)" and resultado_co is None:
-                st.info(
-                    "No se pudo calcular el ahorro con tarifa comercial (ver el error arriba) -- "
-                    "cambiá a \"Tarifa plana (USD/kWh)\" o revisá la selección de proveedor/tramo."
-                )
+                st.info(t("financiero_info_error_tarifa_comercial"))
             else:
                 if modo_tarifa == "Tarifa plana (USD/kWh)":
                     fe = FinancialEngineEolico(
@@ -1395,22 +1322,29 @@ with tab_financiero:
                 # "esos kWh cuántos dólares representan" (ahorro de electricidad NO
                 # comprada a la red, no el valor de venta del kWh al mercado).
                 b1, b2, b3 = st.columns(3)
-                b1.metric("Energía anual generada", f"{kwh_anual_total:,.0f} kWh/año")
-                b2.metric("Ahorro anual (electricidad no comprada)",
-                          f"${fin['ahorro_anual_USD']:,.0f}/año")
-                b3.metric("Mantenimiento anual", f"${fin['mantenimiento_anual_USD']:,.0f}/año")
+                b1.metric(t("financiero_metric_energia_generada"),
+                          f"{kwh_anual_total:,.0f} {t('financiero_col_kwh_anio')}")
+                b2.metric(t("financiero_metric_ahorro_anual"),
+                          f"${fin['ahorro_anual_USD']:,.0f}{t('unidad_por_anio')}")
+                b3.metric(t("financiero_metric_mantenimiento_anual"),
+                          f"${fin['mantenimiento_anual_USD']:,.0f}{t('unidad_por_anio')}")
 
-                st.markdown("**Retorno de la inversión**")
+                st.markdown(t("financiero_subheader_retorno"))
                 c1, c2, c3, c4 = st.columns(4)
-                c1.metric("CAPEX (precio de venta)", f"${fin['capex']:,.0f}")
-                c2.metric("Payback",
-                          f"{fin['payback_years']:.1f} años" if fin["payback_years"] is not None else "N/A")
-                c3.metric("ROI (vida útil)",
-                          f"{fin['roi_percentage']:.0f}%" if fin["roi_percentage"] is not None else "N/A")
+                c1.metric(t("financiero_metric_capex"), f"${fin['capex']:,.0f}")
+                c2.metric(t("financiero_metric_payback"),
+                          t("financiero_valor_anos", val=f"{fin['payback_years']:.1f}")
+                          if fin["payback_years"] is not None else t("financiero_na"))
+                c3.metric(t("financiero_metric_roi"),
+                          f"{fin['roi_percentage']:.0f}%" if fin["roi_percentage"] is not None else t("financiero_na"))
+                # viabilidad_economica queda en español fijo -- es el valor interno que se
+                # guarda en session_state y compara pdf_reporte.py (fin["viable"]), no un
+                # texto para mostrar; la traducción va aparte, solo en el metric de abajo.
                 viabilidad_economica = (
                     "VIABLE" if fin["roi_percentage"] and fin["roi_percentage"] > 0 else "NO VIABLE"
                 )
-                c4.metric("Viabilidad", viabilidad_economica)
+                c4.metric(t("financiero_metric_viabilidad"),
+                          t("financiero_viable") if viabilidad_economica == "VIABLE" else t("financiero_no_viable"))
 
                 # Mismo resultado que se acaba de mostrar arriba, disponible para el
                 # informe ejecutivo en "Especificación Técnica" sin recalcular nada.
@@ -1425,62 +1359,46 @@ with tab_financiero:
                 }
 
                 if fin["npv_usd"] is not None:
-                    st.caption(
-                        f"NPV a {int(vida_util_anos)} años, tasa de descuento {tasa_descuento_pct:.1f}%: "
-                        f"${fin['npv_usd']:,.0f}"
-                    )
+                    st.caption(t(
+                        "financiero_caption_npv", anos=int(vida_util_anos),
+                        tasa=f"{tasa_descuento_pct:.1f}", valor=f"{fin['npv_usd']:,.0f}",
+                    ))
 
                 if fin["opex_anual_neto"] <= 0:
                     # Nota (bug real encontrado con Playwright, Hallazgo 48): dos "$" en el mismo
                     # st.caption() arman un par que Streamlit interpreta como LaTeX ($...$) y
                     # rompe el texto -- se escapan con "\$" para que se muestren literales.
-                    st.caption(
-                        "El ahorro anual estimado en electricidad no alcanza a cubrir el "
-                        f"mantenimiento anual ingresado (ahorro: \\${fin['ahorro_anual_USD']:,.0f}/año "
-                        f"vs. mantenimiento: \\${fin['mantenimiento_anual_USD']:,.0f}/año) -- por eso "
-                        "Payback/ROI/NPV muestran N/A."
-                    )
-                    st.info(
-                        "Con el precio de venta y la tarifa eléctrica ingresados, este proyecto NO "
-                        "recupera el mantenimiento sólo con ahorro de electricidad. Si el objetivo "
-                        "del cliente es respaldo/resiliencia energética (no depender 100% de la red) "
-                        "en vez de recuperar la inversión sólo con el ahorro eléctrico, ese es el "
-                        "valor que hay que presentar -- este cálculo no lo cuantifica en dólares."
-                    )
+                    st.caption(t(
+                        "financiero_caption_no_cubre_mantenimiento",
+                        ahorro=f"{fin['ahorro_anual_USD']:,.0f}",
+                        mantenimiento=f"{fin['mantenimiento_anual_USD']:,.0f}",
+                    ))
+                    st.info(t("financiero_info_no_recupera_mantenimiento"))
 
-            st.caption(
-                "CAPEX, mantenimiento y precio de venta ingresados directo por el usuario. "
-                "Tarifas horarias reales de CNFL/ICE cruzadas contra la producción hora por "
-                "hora, en vez de una tarifa plana adivinada."
-            )
+            st.caption(t("financiero_caption_footer"))
 
 
 # --- Tab: Especificación Técnica (Hallazgo 49) -- datos generales + ficha de cada equipo,
 # pensada para imprimir/exportar y llevar a una reunión con el cliente ---
 
 with tab_especificacion:
-    st.caption(
-        "Datos generales del sistema y ficha técnica de fábrica de las turbinas -- usa las "
-        "turbinas ya configuradas en \"Equipos y configuración\" y la producción ya calculada "
-        "en \"Resultados\"."
-    )
+    st.caption(t("especificacion_caption_intro"))
 
     if not st.session_state.get("calculo_listo"):
-        st.info("Configurá el proyecto en la pestaña \"Equipos y configuración\" y presioná "
-                 "Calcular producción del proyecto primero.")
+        st.info(t("especificacion_info_sin_calculo"))
     else:
         resultado_clima = st.session_state.sitio_activo
         error = None if resultado_clima is None else resultado_clima.get("error")
 
         if resultado_clima is None:
-            st.error("Elegí primero una estación (o subí un EPW) en la pestaña \"Selección de clima\".")
+            st.error(t("resultados_error_sin_estacion"))
         elif error:
             st.error(error)
         elif not st.session_state.get("ultimo_resultado_produccion"):
             # Misma condición de arriba (calculo_listo + sitio válido) ya corrió en
             # "Resultados" en este mismo rerun -- si igual no hay nada guardado, algo
             # puntual falló ahí (revisar esa pestaña) en vez de repetir el cálculo acá.
-            st.error("No se pudo leer el resultado de producción -- revisá la pestaña \"Resultados\".")
+            st.error(t("especificacion_error_sin_resultado"))
         else:
             _prod = st.session_state["ultimo_resultado_produccion"]
             elevacion_m = resultado_clima["elevacion_m"]
@@ -1509,21 +1427,17 @@ with tab_especificacion:
                 "turbinas": [],
             }
 
-            st.markdown("### Datos generales del sistema")
+            st.markdown(t("especificacion_subheader_datos_generales"))
             g1, g2, g3, g4 = st.columns(4)
-            g1.metric("Sitio", st.session_state.get("sitio_nombre_activo") or "--")
-            g2.metric("Potencia pico instalada", f"{potencia_pico_W / 1000:.2f} kW")
-            g3.metric("Energía anual estimada", f"{kwh_anual_total:,.0f} kWh/año")
-            g4.metric("Elevación del sitio", f"{elevacion_m:.0f} m")
-            st.write(
-                f"**Arquitectura eléctrica:** bus de corriente continua a {VOLTAJE_TURBINAS_V}V -- "
-                "cada turbina entrega su salida a través de un controlador individual de fábrica; "
-                "todos los controladores se conectan en paralelo al mismo bus, que alimenta "
-                "directamente el puerto de batería del inversor (no el puerto solar/MPPT)."
-            )
+            g1.metric(t("especificacion_metric_sitio"), st.session_state.get("sitio_nombre_activo") or "--")
+            g2.metric(t("especificacion_metric_potencia_pico"), f"{potencia_pico_W / 1000:.2f} kW")
+            g3.metric(t("especificacion_metric_energia_anual"),
+                      f"{kwh_anual_total:,.0f} {t('financiero_col_kwh_anio')}")
+            g4.metric(t("especificacion_metric_elevacion"), f"{elevacion_m:.0f} m")
+            st.write(t("especificacion_texto_arquitectura", voltaje=VOLTAJE_TURBINAS_V))
 
             st.divider()
-            st.markdown("### Turbinas eólicas")
+            st.markdown(t("especificacion_subheader_turbinas"))
             # Se agrupa por (modelo, artículo) -- no solo por modelo -- para que dos
             # clústers del mismo modelo con distinto controlador/inversor elegido (ej.
             # "...1 kilowatt" vs. "...3 kilowatts") aparezcan como filas separadas, cada
@@ -1542,22 +1456,22 @@ with tab_especificacion:
                     with col_img:
                         _ruta_img = RUTA_IMAGEN.get(_clave)
                         if _ruta_img and os.path.exists(_ruta_img):
-                            st.image(_ruta_img, use_column_width=True)
+                            st.image(_ruta_img, use_container_width=True)
                     with col_specs:
                         _titulo = f"**{_specs['nombre']}**" + (f" -- {_articulo}" if _articulo else "")
-                        st.markdown(f"{_titulo} -- cantidad: {_cantidad}")
-                        st.caption(f"Fabricante: Flower Turbines -- N° de parte: {_specs['numero_parte']}")
+                        st.markdown(t("especificacion_turbina_titulo_cantidad", titulo=_titulo, cantidad=_cantidad))
+                        st.caption(t("especificacion_caption_fabricante", numero_parte=_specs["numero_parte"]))
                         _filas_turbina = [
-                            ("Potencia nominal (generador)", f"{_specs['potencia_nominal_w']:.0f} W"),
-                            ("Velocidad a potencia nominal", f"{_specs['viento_potencia_nominal_ms']} m/s"),
-                            ("Velocidad de arranque (cut-in)", f"{_specs['velocidad_cutin_ms']} m/s"),
-                            ("Velocidad de supervivencia", f"{_specs['velocidad_supervivencia_ms']} m/s"),
-                            ("Tipo de rotor", t(_specs["tipo_rotor"])),
-                            ("Tipo de generador", t(_specs["tipo_generador"])),
-                            ("Diámetro del rotor", f"{_specs['diametro_rotor_m']} m"),
-                            ("Altura de pala", f"{_specs['altura_pala_m']} m"),
-                            ("Peso", f"{_specs['peso_total_kg']} kg"),
-                            ("Cimentación requerida", t(_specs["cimentacion_requerida"])),
+                            (t("especificacion_fila_potencia_nominal"), f"{_specs['potencia_nominal_w']:.0f} W"),
+                            (t("especificacion_fila_velocidad_nominal"), f"{_specs['viento_potencia_nominal_ms']} m/s"),
+                            (t("especificacion_fila_cutin"), f"{_specs['velocidad_cutin_ms']} m/s"),
+                            (t("especificacion_fila_supervivencia"), f"{_specs['velocidad_supervivencia_ms']} m/s"),
+                            (t("especificacion_fila_tipo_rotor"), t(_specs["tipo_rotor"])),
+                            (t("especificacion_fila_tipo_generador"), t(_specs["tipo_generador"])),
+                            (t("especificacion_fila_diametro_rotor"), f"{_specs['diametro_rotor_m']} m"),
+                            (t("especificacion_fila_altura_pala"), f"{_specs['altura_pala_m']} m"),
+                            (t("especificacion_fila_peso"), f"{_specs['peso_total_kg']} kg"),
+                            (t("especificacion_fila_cimentacion"), t(_specs["cimentacion_requerida"])),
                         ]
                         if _capacidad_controlador_w is not None:
                             # Dato del controlador/inversor incluido en ESE artículo --
@@ -1565,10 +1479,11 @@ with tab_especificacion:
                             # suman ni se reemplazan entre sí (ver docstring de
                             # capacidad_controlador_articulo_w).
                             _filas_turbina.insert(
-                                1, ("Capacidad del controlador/inversor incluido", f"{_capacidad_controlador_w:.0f} W")
+                                1, (t("especificacion_fila_capacidad_controlador"), f"{_capacidad_controlador_w:.0f} W")
                             )
+                        _col_espec, _col_val = t("especificacion_col_especificacion"), t("especificacion_col_valor")
                         st.dataframe(
-                            pd.DataFrame([{"Especificación": f, "Valor": v} for f, v in _filas_turbina]),
+                            pd.DataFrame([{_col_espec: f, _col_val: v} for f, v in _filas_turbina]),
                             hide_index=True, use_container_width=True,
                         )
                         _datos_pdf["turbinas"].append({
@@ -1577,17 +1492,11 @@ with tab_especificacion:
                         })
 
             st.divider()
-            st.caption(
-                "Fuente de los datos: fichas técnicas oficiales de fábrica de Flower Turbines."
-            )
+            st.caption(t("especificacion_caption_fuente"))
 
             st.divider()
-            st.markdown("### Informe ejecutivo")
-            st.caption(
-                "Resumen de las 6 pestañas -- clima, equipos, producción y viabilidad "
-                "financiera (si ya la completaste) -- en un solo PDF listo para imprimir o "
-                "enviar al cliente."
-            )
+            st.markdown(t("especificacion_subheader_informe"))
+            st.caption(t("especificacion_caption_informe_resumen"))
 
             # BUG REAL corregido acá: esto generaba los gráficos (vía kaleido, que
             # necesita un navegador Chrome/Chromium real) SIN estar detrás de un botón --
@@ -1599,9 +1508,9 @@ with tab_especificacion:
             # ni navegar a otras pestañas sin perder los datos cargados. Ahora sólo corre
             # cuando el usuario aprieta este botón, y una falla acá ya no rompe el resto
             # de la app.
-            if st.button("Generar informe ejecutivo (PDF)"):
+            if st.button(t("especificacion_boton_generar_pdf")):
                 try:
-                    with st.spinner("Armando el informe ejecutivo..."):
+                    with st.spinner(t("especificacion_spinner_generando")):
                         # Contexto climático: mismos gráficos que la pestaña "Contexto
                         # climático", generados de nuevo acá (no reutiliza el objeto ya
                         # mostrado en pantalla) para poder exportarlos a PNG sin tocar lo
@@ -1612,13 +1521,14 @@ with tab_especificacion:
 
                         if "meta" in resultado_clima:
                             _meta = resultado_clima["meta"]
-                            _fuente_texto = (
-                                f"Estación real: {_meta['estacion']} ({_meta['pais']}, WMO {_meta['wmo']}) -- "
-                                f"lat={_meta['lat']:.4f}, lon={_meta['lon']:.4f}, elevación={_meta['elevacion_m']:.0f}m. "
-                                f"Media anual real: {_media_confirmada:.2f} m/s."
+                            _fuente_texto = t(
+                                "especificacion_pdf_fuente_estacion",
+                                estacion=_meta["estacion"], pais=_meta["pais"], wmo=_meta["wmo"],
+                                lat=f"{_meta['lat']:.4f}", lon=f"{_meta['lon']:.4f}",
+                                elevacion_m=f"{_meta['elevacion_m']:.0f}", media=f"{_media_confirmada:.2f}",
                             )
                         else:
-                            _fuente_texto = f"Media anual real del viento en el sitio: {_media_confirmada:.2f} m/s."
+                            _fuente_texto = t("especificacion_pdf_fuente_generico", media=f"{_media_confirmada:.2f}")
 
                         _fig_heatmap_pdf, _ = crear_heatmap_plotly(
                             resultado_clima["hm_json"], media_anual=_media_confirmada,
@@ -1654,21 +1564,13 @@ with tab_especificacion:
                         st.session_state["informe_ejecutivo_sin_financiero"] = not _datos_pdf["financiero"]
                 except Exception as e:
                     st.session_state["informe_ejecutivo_pdf"] = None
-                    st.error(
-                        f"No se pudo generar el informe ejecutivo: {e} -- si el problema persiste, "
-                        "puede ser que falte un navegador Chrome/Chromium instalado en este entorno "
-                        "(hace falta para exportar los gráficos al PDF)."
-                    )
+                    st.error(t("especificacion_error_generar_pdf", error=e))
 
             if st.session_state.get("informe_ejecutivo_pdf"):
                 if st.session_state.get("informe_ejecutivo_sin_financiero"):
-                    st.caption(
-                        "El informe no incluye CAPEX/Payback/ROI/NPV -- completá el precio de "
-                        "venta y la tarifa eléctrica en \"Análisis Financiero\" y volvé a generar "
-                        "el informe para sumarlos."
-                    )
+                    st.caption(t("especificacion_caption_informe_sin_financiero"))
                 st.download_button(
-                    "📄 Descargar informe ejecutivo (PDF)",
+                    t("especificacion_boton_descargar_pdf"),
                     data=st.session_state["informe_ejecutivo_pdf"],
                     file_name=f"ECO-Wind_informe_ejecutivo_{date.today().isoformat()}.pdf",
                     mime="application/pdf",
