@@ -91,10 +91,15 @@ def cargar_epw_real(ruta_epw, year=2023):
     velocidad de viento a 10m (m/s) -- 1-indexado, ver EPW Data Dictionary.
 
     Devuelve (df_clima, meta): df_clima con índice datetime horario y
-    columnas WS10M/WD10/T2M (mismo formato que generar_clima_gwa(), para
-    poder pasarlo directo a simular() sin cambios); meta con la ubicación y
-    elevación real que trae el propio archivo (más confiable que un valor
-    tecleado a mano).
+    columnas WS10M/WD10/T2M/GHI/DNI/DHI (mismo formato que generar_clima_gwa()
+    para las 3 primeras, para poder pasarlo directo a simular() sin cambios);
+    meta con la ubicación y elevación real que trae el propio archivo (más
+    confiable que un valor tecleado a mano).
+
+    GHI/DNI/DHI (W/m², campos 14/15/16 del EPW Data Dictionary -- Global/Direct
+    Normal/Diffuse Horizontal Radiation) se agregan acá para el bloque solar
+    del Eco-Roof (engine/eco_roof_solar.py) -- columnas nuevas, no tocan
+    WS10M/WD10/T2M ni ningún resultado ya calculado con este parser.
     """
     with open(ruta_epw, encoding="latin-1") as f:
         header = [next(f) for _ in range(8)]
@@ -111,13 +116,17 @@ def cargar_epw_real(ruta_epw, year=2023):
     ws = np.array([float(r[21]) for r in filas])
     wd = np.array([float(r[20]) for r in filas])
     t2m = np.array([float(r[6]) for r in filas])
+    ghi = np.array([float(r[13]) for r in filas])
+    dni = np.array([float(r[14]) for r in filas])
+    dhi = np.array([float(r[15]) for r in filas])
 
     n_horas = len(ws)
     if n_horas not in (8760, 8784):
         raise ValueError(f"{ruta_epw}: {n_horas} horas de datos, se esperaban 8760 u 8784.")
 
     idx = pd.date_range(f"{year}-01-01", periods=n_horas, freq="h")
-    df_clima = pd.DataFrame({"WS10M": ws, "WD10": wd, "T2M": t2m}, index=idx)
+    df_clima = pd.DataFrame(
+        {"WS10M": ws, "WD10": wd, "T2M": t2m, "GHI": ghi, "DNI": dni, "DHI": dhi}, index=idx)
     return df_clima, meta
 
 

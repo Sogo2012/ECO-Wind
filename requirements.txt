@@ -7,6 +7,15 @@ plotly>=5.0.0
 kaleido>=1.0.0
 geopy>=2.4.0
 reportlab>=4.0.0
+# Eco-Roof Energy Hub -- bloque solar (engine/eco_roof_solar.py): arma el modelo
+# Generator:PVWatts y lo traduce a IDF para el binario real de EnergyPlus (instalado
+# aparte en el Dockerfile, no es un paquete pip). Trae como dependencias honeybee-core,
+# ladybug-core y ladybug-geometry -- no hace falta listarlas aparte.
+# Cota superior <2.0.0: engine/eco_roof_solar.py usa APIs relativamente internas
+# (honeybee_energy.generator.pv.PVProperties, honeybee_energy.writer.energyplus_idf_version)
+# de un paquete con ritmo de release rápido -- sin tope, un build futuro podría resolver
+# una versión mayor que las cambie sin aviso.
+honeybee-energy>=1.100.0,<2.0.0
 # Google Cloud integrations
 google-cloud-secret-manager>=2.16.0
 google-auth>=2.25.0
