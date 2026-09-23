@@ -1389,14 +1389,16 @@ TRANSLATIONS = {
                "the one uploaded by the user."),
     },
     "pdf_ecoroof_caja_advertencia_solar": {
-        "es": ("PRODUCCIÓN SOLAR ESTIMADA: modelo genérico de irradiancia (posición solar + "
-               "transposición al plano del arreglo, física de EnergyPlus), sin ficha de panel "
-               "Eco-Roof específica -- no hay una todavía. No usar como cotización firme, sólo "
-               "como orden de magnitud."),
-        "en": ("ESTIMATED SOLAR OUTPUT: generic irradiance model (solar position + "
-               "plane-of-array transposition, EnergyPlus physics), without an Eco-Roof-specific "
-               "panel datasheet -- none exists yet. Do not use as a firm quote, only as an "
-               "order-of-magnitude estimate."),
+        "es": ("PRODUCCIÓN SOLAR ESTIMADA: simulación real con el motor EnergyPlus 23.2 "
+               "(generador Generator:PVWatts, vía Honeybee) hora por hora contra el EPW del "
+               "sitio, pero con un panel GENÉRICO (eficiencia, área activa y pérdidas de sistema "
+               "tipo PVWatts/NREL) -- no hay todavía una ficha de panel Eco-Roof específica de "
+               "fábrica. No usar como cotización firme, sólo como orden de magnitud."),
+        "en": ("ESTIMATED SOLAR OUTPUT: real hour-by-hour simulation with the EnergyPlus 23.2 "
+               "engine (Generator:PVWatts, via Honeybee) against the site's EPW, but with a "
+               "GENERIC panel (efficiency, active area and system losses per PVWatts/NREL "
+               "defaults) -- no factory-specific Eco-Roof panel datasheet exists yet. Do not use "
+               "as a firm quote, only as an order-of-magnitude estimate."),
     },
 
     # --- Tab: Eco-Roof Energy Hub (tab_eco_roof, app.py) -- producto de fábrica ------
@@ -1415,6 +1417,10 @@ TRANSLATIONS = {
         "en": "Choose or upload an EPW in \"Climate selection\" first.",
     },
     "ecoroof_selectbox_producto": {"es": "Producto Eco-Roof", "en": "Eco-Roof product"},
+    "ecoroof_spinner_solar": {
+        "es": "Simulando producción solar con EnergyPlus real (puede tardar unos segundos)...",
+        "en": "Simulating solar output with real EnergyPlus (this can take a few seconds)...",
+    },
     "ecoroof_metric_eolica": {"es": "Producción eólica", "en": "Wind output"},
     "ecoroof_metric_solar": {"es": "Producción solar (est.)", "en": "Solar output (est.)"},
     "ecoroof_metric_total": {"es": "Producción total", "en": "Total output"},

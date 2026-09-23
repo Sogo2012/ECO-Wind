@@ -33,17 +33,19 @@ class PresetSinTablaOficialError(ValueError):
     engine/eco_roof_catalog.py::ECO_ROOF_PRESETS."""
 
 
-def simular_eco_roof(clave_preset, df_clima, elevacion_m, lat_deg, lon_deg, utc_offset_h,
+def simular_eco_roof(clave_preset, df_clima, ruta_epw, elevacion_m,
                       h_ref=10, z0=Z0_DEFAULT, z0_met=Z0_MET_DEFAULT):
     """
     Producción anual (eólica + solar) de un preset fijo del catálogo Eco-Roof,
     hora por hora, contra un df_clima real (el mismo formato que ya usa
-    simular() -- columna WS10M, más GHI/DNI/DHI para el bloque solar, ver
-    engine.epw_real.cargar_epw_real()).
+    simular() -- columna WS10M, ver engine.epw_real.cargar_epw_real()).
 
     clave_preset: una clave de ECO_ROOF_PRESETS (ej. "eco_roof_1m_3_flat").
-    elevacion_m, lat_deg, lon_deg, utc_offset_h: del EPW real del sitio (meta
-    de cargar_epw_real() -- elevacion_m/lat/lon/utc).
+    ruta_epw: ruta al MISMO archivo .epw que produjo df_clima -- lo necesita el
+    bloque solar para correr EnergyPlus real (engine/eco_roof_solar.py); el
+    bloque eólico no lo usa, sólo df_clima.
+    elevacion_m: del EPW real del sitio (meta["elevacion_m"] de
+    cargar_epw_real()) -- corrección de densidad de aire del bloque eólico.
     h_ref, z0, z0_met: mismo significado que en simular() (Pista A) -- alturas
     y rugosidades del perfil logarítmico de viento.
 
@@ -75,9 +77,9 @@ def simular_eco_roof(clave_preset, df_clima, elevacion_m, lat_deg, lon_deg, utc_
     serie_kwh_eolico = pd.Series(potencia_w_por_turbina * N / 1000.0, index=df_clima.index,
                                   name="kwh_eolico")
 
-    # --- Solar (ver engine/eco_roof_solar.py -- modelo estimado, sin ficha de panel real) ---
+    # --- Solar (ver engine/eco_roof_solar.py -- EnergyPlus real, panel genérico) ---
     resultado_solar = simular_solar_eco_roof(
-        df_clima, lat_deg, lon_deg, utc_offset_h, preset["capacidad_solar_kwp"],
+        df_clima, ruta_epw, preset["capacidad_solar_kwp"],
         tilt_deg=preset["tilt_deg"], acimut_superficie_deg=preset["acimut_superficie_deg"],
     )
 

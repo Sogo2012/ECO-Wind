@@ -15,6 +15,24 @@ RUN apt-get update && apt-get install -y \
     chromium \
     && rm -rf /var/lib/apt/lists/*
 
+# EnergyPlus 23.2.0 -- motor real de simulación del bloque solar del Eco-Roof Energy Hub
+# (engine/eco_roof_solar.py: genera un modelo Honeybee mínimo con un generador
+# Generator:PVWatts, lo traduce a IDF y corre este binario por subprocess -- ya no es
+# una aproximación en Python puro). Mismo build oficial de NREL y mismo patrón de
+# instalación (descargar tarball -> extraer -> symlink) que usa Sogo2012/Skyplus en
+# producción; el build "Ubuntu22.04-x86_64" corre igual sobre esta base Debian (glibc
+# compatible, verificado). Aumenta la imagen ~800MB-1GB -- costo aceptado a cambio de
+# una simulación física real en vez de una reimplementación aparte.
+ENV ENERGYPLUS_DIR=/usr/local/EnergyPlus-23-2-0
+ENV ENERGYPLUS_EXEC=/usr/local/bin/energyplus
+RUN curl -sSL \
+    "https://github.com/NREL/EnergyPlus/releases/download/v23.2.0/EnergyPlus-23.2.0-7636e6b3e9-Linux-Ubuntu22.04-x86_64.tar.gz" \
+    -o /tmp/energyplus.tar.gz \
+    && mkdir -p ${ENERGYPLUS_DIR} \
+    && tar -xzf /tmp/energyplus.tar.gz -C ${ENERGYPLUS_DIR} --strip-components=1 \
+    && ln -sf ${ENERGYPLUS_DIR}/energyplus ${ENERGYPLUS_EXEC} \
+    && rm /tmp/energyplus.tar.gz
+
 # Copiar requirements
 COPY requirements.txt .
 

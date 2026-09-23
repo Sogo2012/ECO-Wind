@@ -63,6 +63,16 @@ from engine.pdf_reporte import generar_pdf_informe_ejecutivo, generar_pdf_inform
 from engine.eco_roof_catalog import ECO_ROOF_PRESETS, preset_disponible
 from engine.eco_roof_curves import potencia_tabla_w
 from engine.eco_roof_simulador import simular_eco_roof
+
+
+@st.cache_data(show_spinner=False)
+def _simular_eco_roof_cacheado(clave_preset, df_clima, ruta_epw, elevacion_m, z0):
+    """Cachea la corrida de simular_eco_roof() por (preset, EPW, elevación, z0) --
+    ahora incluye una simulación REAL de EnergyPlus (unos segundos, ver
+    engine/eco_roof_solar.py), y Streamlit ejecuta el cuerpo de TODAS las pestañas en
+    cada rerun (cualquier clic en cualquier pestaña) -- sin este cache la app se
+    volvería inutilizable, recorriendo EnergyPlus en cada interacción."""
+    return simular_eco_roof(clave_preset, df_clima, ruta_epw, elevacion_m, z0=z0)
 from engine.i18n import t, tr, meses_abreviados, IDIOMA_DEFAULT, IDIOMAS_DISPONIBLES
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -207,15 +217,21 @@ if "calculo_listo" not in st.session_state:
 
 # --- Helpers de clima/geometría ---
 
-def _resultado_desde_epw(df_clima, meta):
+def _resultado_desde_epw(df_clima, meta, ruta_epw):
     """Arma el dict unificado (mismo formato para las 2 rutas que terminan en un EPW
     real: estación de la lista -- precacheada o recién descargada -- y EPW subido por
     el usuario). Hallazgo 36: ya no existe una tercera ruta de "aproximación" -- toda
-    esta app corre sobre EPW real, nunca sobre una fuente sensibilizada externamente."""
+    esta app corre sobre EPW real, nunca sobre una fuente sensibilizada externamente.
+
+    ruta_epw: ruta del archivo .epw real en disco que se acaba de cargar -- se guarda
+    acá (no sólo df_clima/meta) porque el bloque solar del Eco-Roof
+    (engine/eco_roof_solar.py) necesita el ARCHIVO real para correr EnergyPlus, no le
+    alcanza con las columnas ya extraídas en df_clima."""
     hm_json = heatmap_json_desde_epw(df_clima)
     rosa_detallada = rosa_vientos_detallada_desde_epw(df_clima)
     return dict(df_clima=df_clima, media=float(df_clima["WS10M"].mean()), hm_json=hm_json,
-                rosa_detallada=rosa_detallada, elevacion_m=meta["elevacion_m"], error=None, meta=meta)
+                rosa_detallada=rosa_detallada, elevacion_m=meta["elevacion_m"], error=None, meta=meta,
+                ruta_epw=ruta_epw)
 
 
 def cargar_estacion_elegida(row):
@@ -229,12 +245,13 @@ def cargar_estacion_elegida(row):
     """
     clave = sitio_precacheado_cercano(row["lat"], row["lon"]) if pd.notna(row.get("lat")) else None
     if clave in SITIOS_EPW_REAL:
-        df_clima, meta = cargar_epw_real(SITIOS_EPW_REAL[clave]["ruta_epw"])
-        return _resultado_desde_epw(df_clima, meta)
+        ruta = SITIOS_EPW_REAL[clave]["ruta_epw"]
+        df_clima, meta = cargar_epw_real(ruta)
+        return _resultado_desde_epw(df_clima, meta, ruta)
     try:
         ruta = descargar_y_extraer_epw(row["url"])
         df_clima, meta = cargar_epw_real(ruta)
-        return _resultado_desde_epw(df_clima, meta)
+        return _resultado_desde_epw(df_clima, meta, ruta)
     except Exception as e:
         return dict(error=t("clima_error_descarga_estacion", nombre=row["name"]))
 
@@ -250,7 +267,7 @@ def cargar_epw_subido(ruta):
         df_clima, meta = cargar_epw_real(ruta)
     except Exception as e:
         return dict(error=t("clima_error_epw_invalido", error=str(e)))
-    return _resultado_desde_epw(df_clima, meta)
+    return _resultado_desde_epw(df_clima, meta, ruta)
 
 
 # --- Helpers de gráficos ---
@@ -801,8 +818,10 @@ with tab_clima:
             with tempfile.NamedTemporaryFile(suffix=".epw", delete=False) as _tmp:
                 _tmp.write(_epw_subido.getvalue())
                 _ruta_tmp = _tmp.name
+            # NO se borra _ruta_tmp acá (antes sí, apenas se leía df_clima) -- el bloque
+            # solar del Eco-Roof (engine/eco_roof_solar.py) necesita el ARCHIVO real más
+            # adelante en la sesión, para correr EnergyPlus, no le alcanza con df_clima.
             _res_subido = cargar_epw_subido(_ruta_tmp)
-            os.remove(_ruta_tmp)
             if _res_subido.get("error"):
                 st.error(_res_subido["error"])
             else:
@@ -1727,6 +1746,7 @@ with tab_eco_roof:
         df_clima_er = resultado_clima_er["df_clima"]
         meta_er = resultado_clima_er["meta"]
         elevacion_er = resultado_clima_er["elevacion_m"]
+        ruta_epw_er = resultado_clima_er["ruta_epw"]
 
         _opciones_er = {clave: t(f"ecoroof_nombre_{clave}") for clave in ECO_ROOF_PRESETS
                          if preset_disponible(clave)}
@@ -1737,11 +1757,12 @@ with tab_eco_roof:
         specs_turbina_er = SPECS_TURBINAS[preset_er["turbina_key"]]
         z0_er = st.session_state.get("z0_avanzado", Z0_DEFAULT)
 
-        resultado_er = simular_eco_roof(
-            _clave_er, df_clima_er, elevacion_m=elevacion_er,
-            lat_deg=meta_er["lat"], lon_deg=meta_er["lon"], utc_offset_h=meta_er["utc"],
-            z0=z0_er,
-        )
+        # El bloque solar corre una simulación REAL de EnergyPlus (unos segundos) --
+        # _simular_eco_roof_cacheado() evita repetirla en cada rerun de Streamlit.
+        with st.spinner(t("ecoroof_spinner_solar")):
+            resultado_er = _simular_eco_roof_cacheado(
+                _clave_er, df_clima_er, ruta_epw_er, elevacion_er, z0_er,
+            )
 
         c1, c2, c3 = st.columns(3)
         c1.metric(t("ecoroof_metric_eolica"), f"{resultado_er['kwh_anual_eolico']:,.0f} kWh")
