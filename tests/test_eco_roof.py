@@ -36,9 +36,15 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from engine.eco_roof_catalog import ECO_ROOF_PRESETS, preset_disponible
+from engine.eco_roof_catalog import (
+    ECO_ROOF_PRESETS, PRESET_POR_MODELO, articulo_incluye_solar, es_modelo_eco_roof, preset_disponible,
+)
 from engine.eco_roof_curves import TABLA_N3, TABLA_N5, potencia_tabla_w
-from engine.eco_roof_simulador import PresetSinTablaOficialError, simular_eco_roof
+from engine.eco_roof_simulador import (
+    PresetSinTablaOficialError, simular_cluster_eco_roof, simular_eco_roof,
+)
+from engine.precios_flower_turbines import get_articulos_disponibles
+from engine.simulador_pista_a import simular
 from engine.epw_real import SITIOS_EPW_REAL, cargar_epw_real
 from engine.eco_roof_solar import (
     ACTIVE_AREA_FRACTION_GENERICO,
@@ -312,6 +318,128 @@ class TestSimularEcoRoofCompleto:
         r_alto = simular_eco_roof("eco_roof_1m_3_flat", df_clima, ruta, elevacion_m=3000.0)
         assert r_alto["kwh_anual_eolico"] < resultado_3flat["kwh_anual_eolico"]
         assert r_alto["factor_correccion_densidad"] < 1.0
+
+
+_ART_FLAT3_CON_SOLAR = "ecoroof with 3 1-meter turbines on grid with inverter plus solar panels"
+_ART_FLAT3_SIN_SOLAR = "ecoroof with 3 1-meter turbines on grid with inverter"
+
+
+class TestCarteraEcoRoof:
+    """Eco-Roof como producto más de la cartera (selector "Modelo") -- puro catálogo,
+    no necesita EnergyPlus."""
+
+    def test_mapa_modelo_a_preset(self):
+        assert PRESET_POR_MODELO == {
+            "ecoroof_flat_3": "eco_roof_1m_3_flat",
+            "ecoroof_flat_5": "eco_roof_1m_5_flat",
+            "ecoroof_slanted": "eco_roof_1m_3_sloped",
+        }
+
+    def test_eco_roof_2m_2_no_entra_a_la_cartera(self):
+        assert "eco_roof_2m_2" not in PRESET_POR_MODELO.values()
+
+    def test_es_modelo_eco_roof(self):
+        assert es_modelo_eco_roof("ecoroof_flat_3")
+        assert es_modelo_eco_roof("ecoroof_slanted")
+        assert not es_modelo_eco_roof("three_m_tulip")
+        assert not es_modelo_eco_roof("small_tulip")
+
+    def test_solar_sigue_al_articulo_del_catalogo(self):
+        """Los artículos reales del catálogo de precios: la mitad dice "plus solar
+        panels" y la otra mitad no -- la regla tiene que separarlos exacto."""
+        for modelo in ("ecoroof_flat_3", "ecoroof_flat_5"):
+            articulos = [art for art, _ in get_articulos_disponibles(modelo)]
+            con_solar = [art for art in articulos if articulo_incluye_solar(art)]
+            assert len(articulos) == 4
+            assert len(con_solar) == 2
+            assert all("plus solar panels" in art for art in con_solar)
+        assert not articulo_incluye_solar(None)
+        assert not articulo_incluye_solar("")
+
+
+class TestSimularClusterEcoRoofSinPaneles:
+    """Fila Eco-Roof con un artículo SIN paneles: no corre EnergyPlus (ruta_epw nunca
+    se usa), así que alcanza con un clima sintético -- pruebas rápidas del formato y de
+    la escala por cantidad de equipos."""
+
+    @staticmethod
+    def _fila(N_equipos, df=None, articulo=_ART_FLAT3_SIN_SOLAR, modelo="ecoroof_flat_3"):
+        df = df if df is not None else _clima_horas_fijas([8.0] * 48)
+        return simular_cluster_eco_roof(modelo, N_equipos, df, ruta_epw="", elevacion_m=0.0,
+                                        articulo=articulo)
+
+    def test_mismas_claves_que_simular(self):
+        df = _clima_horas_fijas([8.0] * 48)
+        referencia = simular(df, altura_buje=3.0, modelo="three_m_tulip", N=3)
+        assert set(referencia) <= set(self._fila(1, df))
+
+    def test_n_es_cantidad_de_equipos(self):
+        uno, cuatro = self._fila(1), self._fila(4)
+        assert cuatro["kwh_anual"] == pytest.approx(uno["kwh_anual"] * 4)
+        assert cuatro["turbinas_por_equipo"] == 3
+
+    def test_eolica_igual_a_un_equipo_del_motor_eco_roof(self):
+        """La fila con N equipos = N × la producción de un equipo que ya calcula
+        simular_eco_roof() (tabla oficial, sin multiplicador Bouquet)."""
+        df = _clima_horas_fijas([8.0] * 48)
+        un_equipo = simular_eco_roof("eco_roof_1m_3_flat", df, ruta_epw="", elevacion_m=0.0,
+                                     incluir_solar=False)
+        fila = self._fila(3, df)
+        assert fila["kwh_anual_eolico"] == pytest.approx(un_equipo["kwh_anual_eolico"] * 3)
+
+    def test_sin_paneles_no_hay_solar_ni_recorte(self):
+        fila = self._fila(2)
+        assert not fila["incluye_solar"]
+        assert fila["kwh_anual_solar"] == 0.0
+        assert fila["kwh_anual"] == pytest.approx(fila["kwh_anual_eolico"])
+        assert (fila["serie_horaria_kwh_solar"] == 0.0).all()
+        assert fila["energia_perdida_por_recorte_kwh"] == 0.0
+        assert fila["capacidad_electronica_w"] is None
+
+    def test_serie_por_equipo_por_n_suma_la_eolica(self):
+        """El resto de la app arma el total horario como serie_horaria_W_por_turbina × N
+        -- con N = equipos tiene que dar exacto la eólica del clúster."""
+        fila = self._fila(5)
+        assert (fila["serie_horaria_W_por_turbina"] * 5 / 1000.0).sum() == pytest.approx(
+            fila["kwh_anual_eolico"])
+        assert fila["kwh_mensual"].sum() == pytest.approx(fila["kwh_anual"])
+
+    def test_flat_5_usa_tabla_n5(self):
+        df = _clima_horas_fijas([8.0] * 48)
+        fila = simular_cluster_eco_roof("ecoroof_flat_5", 1, df, ruta_epw="", elevacion_m=0.0,
+                                        articulo=None)
+        un_equipo = simular_eco_roof("eco_roof_1m_5_flat", df, ruta_epw="", elevacion_m=0.0,
+                                     incluir_solar=False)
+        assert fila["turbinas_por_equipo"] == 5
+        assert fila["kwh_anual"] == pytest.approx(un_equipo["kwh_anual_eolico"])
+
+
+@_requiere_energyplus
+class TestSimularClusterEcoRoofConPaneles:
+    """Artículo "plus solar panels": la solar (EnergyPlus real) se suma a la fila."""
+
+    @staticmethod
+    @pytest.fixture(scope="class")
+    def filas_sj():
+        ruta = SITIOS_EPW_REAL["san_jose"]["ruta_epw"]
+        df_clima, meta = cargar_epw_real(ruta)
+        uno = simular_cluster_eco_roof("ecoroof_flat_3", 1, df_clima, ruta, meta["elevacion_m"],
+                                       _ART_FLAT3_CON_SOLAR)
+        tres = simular_cluster_eco_roof("ecoroof_flat_3", 3, df_clima, ruta, meta["elevacion_m"],
+                                        _ART_FLAT3_CON_SOLAR)
+        return uno, tres
+
+    def test_total_es_eolica_mas_solar(self, filas_sj):
+        uno, _tres = filas_sj
+        assert uno["incluye_solar"]
+        assert uno["kwh_anual_solar"] > 0
+        assert uno["kwh_anual"] == pytest.approx(uno["kwh_anual_eolico"] + uno["kwh_anual_solar"])
+        assert uno["serie_horaria_kwh_solar"].sum() == pytest.approx(uno["kwh_anual_solar"])
+
+    def test_solar_escala_con_la_cantidad_de_equipos(self, filas_sj):
+        uno, tres = filas_sj
+        assert tres["kwh_anual_solar"] == pytest.approx(uno["kwh_anual_solar"] * 3)
+        assert tres["kwh_anual"] == pytest.approx(uno["kwh_anual"] * 3)
 
 
 class TestNoUsaMultiplicadorBouquetDel3MTulip:

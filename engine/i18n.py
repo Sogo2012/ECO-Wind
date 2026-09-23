@@ -1317,31 +1317,75 @@ TRANSLATIONS = {
                "-- Energy Conservation Opportunities."),
     },
 
-    # --- Informe ejecutivo Eco-Roof Energy Hub (engine/pdf_reporte.py::generar_pdf_informe_eco_roof, --
-    # --- producto de fábrica preconfigurado, Small Tulip -- separado del informe del 3-M Tulip) -----
-    "pdf_ecoroof_intro": {
-        "es": ("Este informe resume la propuesta técnica del {producto} para {sitio}, calculada "
-               "a partir de datos climáticos reales (EPW de la estación elegida) y la tabla de "
-               "potencia oficial de fábrica de Flower Turbines para este producto."),
-        "en": ("This report summarizes the technical proposal for the {producto} at {sitio}, "
-               "calculated from real climate data (EPW of the chosen station) and Flower "
-               "Turbines' official factory power table for this product."),
+    # --- Eco-Roof Energy Hub como producto de la cartera (selector "Modelo" de "Equipos y --
+    # --- configuración", Especificación Técnica e informe PDF del proyecto) -----------------
+    "equipos_label_n_equipos": {"es": "Equipos (N)", "en": "Units (N)"},
+    "equipos_help_n_equipos": {
+        "es": ("Cantidad de equipos Eco-Roof, no de turbinas sueltas: cada equipo ya trae su "
+               "bouquet fijo de fábrica (3 o 5 turbinas Small Tulip de 1m) y se cotiza por "
+               "unidad."),
+        "en": ("Number of Eco-Roof units, not individual turbines: each unit already comes "
+               "with its fixed factory bouquet (3 or 5 Small Tulip 1m turbines) and is priced "
+               "per unit."),
     },
-    "pdf_ecoroof_kpi_produccion_total": {"es": "Producción anual total", "en": "Total annual output"},
-    "pdf_ecoroof_kpi_produccion_eolica": {"es": "Producción eólica", "en": "Wind output"},
-    "pdf_ecoroof_kpi_produccion_solar": {"es": "Producción solar (est.)", "en": "Solar output (est.)"},
+    "equipos_help_buje_ecoroof": {
+        "es": ("Fija en Eco-Roof: altura de pala del Small Tulip (1.149 m), la misma que usa la "
+               "tabla oficial del producto."),
+        "en": ("Fixed for Eco-Roof: Small Tulip blade height (1.149 m), the same used by the "
+               "product's official table."),
+    },
+    "equipos_caption_ecoroof_solar_si": {
+        "es": ("Incluye paneles solares ({w} W por equipo): su producción se simula con "
+               "EnergyPlus y se suma al proyecto."),
+        "en": ("Includes solar panels ({w} W per unit): their output is simulated with "
+               "EnergyPlus and added to the project."),
+    },
+    "equipos_caption_ecoroof_solar_no": {
+        "es": "El artículo elegido no trae paneles solares: esta fila produce sólo energía eólica.",
+        "en": "The chosen item has no solar panels: this row produces wind energy only.",
+    },
+    "ecoroof_spinner_solar": {
+        "es": "Simulando producción solar con EnergyPlus real (puede tardar unos segundos)...",
+        "en": "Simulating solar output with real EnergyPlus (this can take a few seconds)...",
+    },
+    "resultados_error_simulacion": {
+        "es": "No se pudo simular la producción del proyecto: {error}",
+        "en": "Could not simulate the project's output: {error}",
+    },
+    "resultados_col_kwh_eolico": {"es": "kWh/año eólico", "en": "Wind kWh/year"},
+    "resultados_col_kwh_solar": {"es": "kWh/año solar", "en": "Solar kWh/year"},
+    "resultados_caption_ecoroof": {
+        "es": ("Eco-Roof: N es la cantidad de equipos (cada uno con 3 o 5 turbinas). Su "
+               "producción eólica sale de la tabla oficial de fábrica del producto (no del "
+               "multiplicador Bouquet), sin recorte por electrónica, y la solar se suma sólo si "
+               "el artículo elegido trae paneles. La curva de duración y el desglose por "
+               "velocidad de viento muestran sólo la parte eólica."),
+        "en": ("Eco-Roof: N is the number of units (each with 3 or 5 turbines). Its wind "
+               "output comes from the product's official factory table (not the Bouquet "
+               "multiplier), with no electronics clipping, and solar is added only if the "
+               "chosen item includes panels. The duration curve and the wind-speed breakdown "
+               "show the wind part only."),
+    },
+    "especificacion_fila_turbinas_por_equipo": {
+        "es": "Turbinas Small Tulip (1m) por equipo", "en": "Small Tulip (1m) turbines per unit",
+    },
+    "especificacion_fila_potencia_tabla": {
+        "es": "Potencia por turbina (tabla oficial)", "en": "Power per turbine (official table)",
+    },
+    "especificacion_valor_potencia_tabla": {
+        "es": "{w5} W a 5 m/s · {w11} W a 11 m/s · {w15} W a 15 m/s",
+        "en": "{w5} W at 5 m/s · {w11} W at 11 m/s · {w15} W at 15 m/s",
+    },
+    "especificacion_valor_sin_solar": {
+        "es": "No incluida en el artículo elegido", "en": "Not included in the chosen item",
+    },
     "pdf_ecoroof_texto_preconfigurado": {
-        "es": ("El Eco-Roof Energy Hub es un PRODUCTO PRECONFIGURADO DE FÁBRICA -- turbina, "
-               "cantidad (N) y capacidad solar vienen fijas de fábrica, no es un layout de "
-               "clúster armado libremente (a diferencia de la pestaña \"Equipos y "
-               "configuración\" del resto de la app)."),
-        "en": ("The Eco-Roof Energy Hub is a PRECONFIGURED FACTORY PRODUCT -- turbine count (N) "
-               "and solar capacity are fixed at the factory, not a freely-assembled cluster "
-               "layout (unlike the rest of the app's \"Equipment & configuration\" tab)."),
-    },
-    "pdf_ecoroof_titulo_producto": {
-        "es": "{nombre} -- {n} turbinas Small Tulip (1m)",
-        "en": "{nombre} -- {n} Small Tulip (1m) turbines",
+        "es": ("Producto preconfigurado de fábrica: cada equipo trae su bouquet fijo de turbinas "
+               "Small Tulip (1m) y, según el artículo, paneles solares. La cantidad indicada es "
+               "de equipos, no de turbinas sueltas."),
+        "en": ("Preconfigured factory product: each unit comes with its fixed bouquet of Small "
+               "Tulip (1m) turbines and, depending on the item, solar panels. The quantity shown "
+               "is in units, not individual turbines."),
     },
     "pdf_ecoroof_fila_tipo_techo": {"es": "Tipo de instalación", "en": "Installation type"},
     "pdf_ecoroof_techo_plano": {"es": "Techo plano", "en": "Flat roof"},
@@ -1349,7 +1393,7 @@ TRANSLATIONS = {
     "pdf_ecoroof_fila_iec": {"es": "Clase IEC 61400 (turbina)", "en": "IEC 61400 class (turbine)"},
     "pdf_ecoroof_fila_peso": {"es": "Peso transmitido al techo", "en": "Weight transmitted to roof"},
     "pdf_ecoroof_fila_angulo_max": {"es": "Ángulo máximo de techo", "en": "Maximum roof angle"},
-    "pdf_ecoroof_fila_capacidad_solar": {"es": "Capacidad solar incluida", "en": "Included solar capacity"},
+    "pdf_ecoroof_fila_capacidad_solar": {"es": "Paneles solares por equipo", "en": "Solar panels per unit"},
     "pdf_ecoroof_nota_potencia": {
         "es": ("La \"potencia nominal\" de fábrica no es un solo número representativo -- crece "
                "con la velocidad de viento igual que cualquier turbina. Se muestra la tabla "
@@ -1366,28 +1410,6 @@ TRANSLATIONS = {
     },
     "pdf_ecoroof_col_velocidad": {"es": "Viento (m/s)", "en": "Wind (m/s)"},
     "pdf_ecoroof_col_potencia": {"es": "Potencia/turbina (W)", "en": "Power/turbine (W)"},
-    "pdf_ecoroof_subheader_produccion_eolica": {
-        "es": "Producción eólica mensual", "en": "Monthly wind output",
-    },
-    "pdf_ecoroof_subheader_produccion_solar": {
-        "es": "Producción solar mensual (estimada)", "en": "Monthly solar output (estimated)",
-    },
-    "pdf_ecoroof_caption_eolico_mensual": {
-        "es": "Producción eólica mensual (Eco-Roof)", "en": "Monthly wind output (Eco-Roof)",
-    },
-    "pdf_ecoroof_caption_solar_mensual": {
-        "es": "Producción solar mensual estimada (Eco-Roof)", "en": "Estimated monthly solar output (Eco-Roof)",
-    },
-    "pdf_ecoroof_texto_validado_eolico": {
-        "es": ("Producción eólica calculada hora por hora contra la tabla oficial de potencia de "
-               "fábrica del Small Tulip (interpolación lineal, sin fórmula genérica), con "
-               "corrección por densidad de aire según elevación. Fuente climática: EPW real de "
-               "la estación elegida o subida por el usuario."),
-        "en": ("Wind output calculated hour by hour against the Small Tulip's official factory "
-               "power table (linear interpolation, no generic formula), with air-density "
-               "correction by elevation. Climate source: real EPW from the chosen station or "
-               "the one uploaded by the user."),
-    },
     "pdf_ecoroof_caja_advertencia_solar": {
         "es": ("PRODUCCIÓN SOLAR ESTIMADA: simulación real con el motor EnergyPlus 23.2 "
                "(generador Generator:PVWatts, vía Honeybee) hora por hora contra el EPW del "
@@ -1401,34 +1423,8 @@ TRANSLATIONS = {
                "as a firm quote, only as an order-of-magnitude estimate."),
     },
 
-    # --- Tab: Eco-Roof Energy Hub (tab_eco_roof, app.py) -- producto de fábrica ------
-    # --- preconfigurado, separado del sistema de clústers libres --------------------
-    "tabs_eco_roof": {"es": "Eco-Roof Energy Hub", "en": "Eco-Roof Energy Hub"},
-    "ecoroof_caption_intro": {
-        "es": ("Productos preconfigurados de fábrica (Small Tulip, 1m) -- turbina, cantidad y "
-               "capacidad solar vienen fijas, no se arman como en \"Equipos y configuración\". "
-               "Usa el mismo sitio/EPW ya cargado en \"Selección de clima\"."),
-        "en": ("Preconfigured factory products (Small Tulip, 1m) -- turbine count and solar "
-               "capacity are fixed, not assembled like in \"Equipment & configuration\". Uses "
-               "the same site/EPW already loaded in \"Climate selection\"."),
-    },
-    "ecoroof_info_sin_clima": {
-        "es": "Elegí o subí un EPW en \"Selección de clima\" primero.",
-        "en": "Choose or upload an EPW in \"Climate selection\" first.",
-    },
-    "ecoroof_selectbox_producto": {"es": "Producto Eco-Roof", "en": "Eco-Roof product"},
-    "ecoroof_spinner_solar": {
-        "es": "Simulando producción solar con EnergyPlus real (puede tardar unos segundos)...",
-        "en": "Simulating solar output with real EnergyPlus (this can take a few seconds)...",
-    },
-    "ecoroof_metric_eolica": {"es": "Producción eólica", "en": "Wind output"},
-    "ecoroof_metric_solar": {"es": "Producción solar (est.)", "en": "Solar output (est.)"},
-    "ecoroof_metric_total": {"es": "Producción total", "en": "Total output"},
-
-    # Nombres de los presets del catálogo (engine/eco_roof_catalog.py::ECO_ROOF_PRESETS) --
-    # el catálogo guarda un "nombre" en español como identificador interno/fallback, pero
-    # para mostrarlo (selector de la pestaña, título del PDF) siempre se resuelve acá, por
-    # clave de preset, para que el toggle ES/EN también aplique a este producto nuevo.
+    # Nombres de los productos Eco-Roof en la cartera -- por clave de preset
+    # (engine/eco_roof_catalog.py::ECO_ROOF_PRESETS), resueltos por idioma.
     "ecoroof_nombre_eco_roof_1m_3_flat": {
         "es": "Eco-Roof Energy Hub -- Flat, 3 turbinas", "en": "Eco-Roof Energy Hub -- Flat, 3 turbines",
     },
@@ -1438,10 +1434,6 @@ TRANSLATIONS = {
     "ecoroof_nombre_eco_roof_1m_3_sloped": {
         "es": "Eco-Roof Energy Hub -- Techo inclinado, 3 turbinas",
         "en": "Eco-Roof Energy Hub -- Slanted roof, 3 turbines",
-    },
-    "ecoroof_nombre_eco_roof_2m_2": {
-        "es": "Eco-Roof Energy Hub -- 2m, 2 turbinas (SIN TABLA OFICIAL)",
-        "en": "Eco-Roof Energy Hub -- 2m, 2 turbines (NO OFFICIAL TABLE)",
     },
 }
 
