@@ -174,6 +174,30 @@ class TestGeometriaSuperficiePV:
         assert shade.geometry.area == pytest.approx(area_esperada, rel=1e-6)
 
 
+class TestValidacionCapacidadKwp:
+    """capacidad_kwp<=0 se rechaza ANTES de tocar geometría/EnergyPlus -- sin esto, un
+    valor negativo hace area_m2 negativa y area_m2**0.5 se vuelve un número complejo
+    (Python no lanza ValueError ahí), que después revienta con un TypeError confuso
+    adentro de ladybug_geometry en vez de decir claramente cuál es el problema real. No
+    necesita EnergyPlus instalado -- la validación ocurre antes de cualquier subprocess."""
+
+    @staticmethod
+    def _df_y_ruta():
+        ruta = SITIOS_EPW_REAL["san_jose"]["ruta_epw"]
+        df_clima, _meta = cargar_epw_real(ruta)
+        return df_clima, ruta
+
+    def test_capacidad_negativa_da_value_error_claro(self):
+        df_clima, ruta = self._df_y_ruta()
+        with pytest.raises(ValueError, match="capacidad_kwp"):
+            simular_solar_eco_roof(df_clima, ruta, capacidad_kwp=-0.2)
+
+    def test_capacidad_cero_da_value_error_claro(self):
+        df_clima, ruta = self._df_y_ruta()
+        with pytest.raises(ValueError, match="capacidad_kwp"):
+            simular_solar_eco_roof(df_clima, ruta, capacidad_kwp=0.0)
+
+
 @_requiere_energyplus
 class TestSimularSolarEcoRoofEnergyPlusReal:
     """Corrida real de punta a punta (Honeybee -> IDF -> subprocess EnergyPlus ->
@@ -223,6 +247,28 @@ class TestSimularSolarEcoRoofEnergyPlusReal:
         df_clima, _meta = cargar_epw_real(ruta)
         with pytest.raises(ValueError):
             simular_solar_eco_roof(df_clima, "/no/existe/este/archivo.epw", capacidad_kwp=0.2)
+
+    def test_epw_corrupto_el_error_trae_la_causa_real_no_generica(self, tmp_path):
+        """Una corrida real que SÍ falla adentro de EnergyPlus (EPW con encabezado pero
+        sin ninguna fila de datos horaria) -- el RuntimeError debe traer el detalle real
+        de eplusout.err (la causa concreta que EnergyPlus imprime ahí), no sólo el texto
+        genérico de "EnergyPlus terminó con error". Antes de la corrección, eplusout.err
+        nunca se leía y se perdía apenas el TemporaryDirectory se borraba."""
+        ruta_real = SITIOS_EPW_REAL["san_jose"]["ruta_epw"]
+        df_clima, _meta = cargar_epw_real(ruta_real)
+
+        with open(ruta_real, encoding="latin-1") as f:
+            encabezado = [next(f) for _ in range(8)]
+        ruta_corrupta = tmp_path / "sin_datos.epw"
+        ruta_corrupta.write_text("".join(encabezado), encoding="latin-1")
+
+        with pytest.raises(RuntimeError) as exc_info:
+            simular_solar_eco_roof(df_clima, str(ruta_corrupta), capacidad_kwp=0.2)
+        mensaje = str(exc_info.value)
+        assert "eplusout.err" in mensaje
+        # No es sólo el texto genérico de "el proceso terminó con error" -- tiene que
+        # incluir algo del detalle real que EnergyPlus imprime en eplusout.err.
+        assert "Severe" in mensaje or "Fatal" in mensaje
 
 
 @_requiere_energyplus

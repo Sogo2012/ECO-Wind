@@ -217,7 +217,7 @@ if "calculo_listo" not in st.session_state:
 
 # --- Helpers de clima/geometría ---
 
-def _resultado_desde_epw(df_clima, meta, ruta_epw):
+def _resultado_desde_epw(df_clima, meta, ruta_epw, es_temporal=False):
     """Arma el dict unificado (mismo formato para las 2 rutas que terminan en un EPW
     real: estación de la lista -- precacheada o recién descargada -- y EPW subido por
     el usuario). Hallazgo 36: ya no existe una tercera ruta de "aproximación" -- toda
@@ -226,12 +226,16 @@ def _resultado_desde_epw(df_clima, meta, ruta_epw):
     ruta_epw: ruta del archivo .epw real en disco que se acaba de cargar -- se guarda
     acá (no sólo df_clima/meta) porque el bloque solar del Eco-Roof
     (engine/eco_roof_solar.py) necesita el ARCHIVO real para correr EnergyPlus, no le
-    alcanza con las columnas ya extraídas en df_clima."""
+    alcanza con las columnas ya extraídas en df_clima.
+    es_temporal: True sólo para el EPW subido por el usuario (tempfile.NamedTemporaryFile
+    propio de esta sesión, seguro de borrar cuando se reemplaza) -- False para las
+    estaciones precacheadas/descargadas, cuyo archivo puede seguir sirviendo a otras
+    sesiones y nunca se borra desde acá."""
     hm_json = heatmap_json_desde_epw(df_clima)
     rosa_detallada = rosa_vientos_detallada_desde_epw(df_clima)
     return dict(df_clima=df_clima, media=float(df_clima["WS10M"].mean()), hm_json=hm_json,
                 rosa_detallada=rosa_detallada, elevacion_m=meta["elevacion_m"], error=None, meta=meta,
-                ruta_epw=ruta_epw)
+                ruta_epw=ruta_epw, es_temporal=es_temporal)
 
 
 def cargar_estacion_elegida(row):
@@ -267,7 +271,7 @@ def cargar_epw_subido(ruta):
         df_clima, meta = cargar_epw_real(ruta)
     except Exception as e:
         return dict(error=t("clima_error_epw_invalido", error=str(e)))
-    return _resultado_desde_epw(df_clima, meta, ruta)
+    return _resultado_desde_epw(df_clima, meta, ruta, es_temporal=True)
 
 
 # --- Helpers de gráficos ---
@@ -815,6 +819,17 @@ with tab_clima:
     _epw_subido = st.file_uploader(t("clima_uploader_epw_label"), type=["epw"], key="epw_subido_uploader")
     if _epw_subido is not None:
         if st.button(t("clima_boton_usar_epw")):
+            # Antes de escribir el nuevo archivo, borrar el EPW temporal de una subida
+            # ANTERIOR (si la hubo) -- si no, cada "Usar este EPW" deja un .epw huérfano en
+            # el disco del contenedor (nunca se borra solo, la sesión de Streamlit puede
+            # vivir horas). Sólo se borra si es_temporal=True (nuestro propio tempfile) --
+            # nunca el .epw de una estación precacheada/descargada, que no es nuestro.
+            _sitio_previo = st.session_state.get("sitio_activo")
+            if _sitio_previo and _sitio_previo.get("es_temporal") and _sitio_previo.get("ruta_epw"):
+                try:
+                    os.remove(_sitio_previo["ruta_epw"])
+                except OSError:
+                    pass
             with tempfile.NamedTemporaryFile(suffix=".epw", delete=False) as _tmp:
                 _tmp.write(_epw_subido.getvalue())
                 _ruta_tmp = _tmp.name
@@ -824,6 +839,10 @@ with tab_clima:
             _res_subido = cargar_epw_subido(_ruta_tmp)
             if _res_subido.get("error"):
                 st.error(_res_subido["error"])
+                try:
+                    os.remove(_ruta_tmp)
+                except OSError:
+                    pass
             else:
                 st.session_state.sitio_activo = _res_subido
                 st.session_state.sitio_nombre_activo = t("clima_epw_subido_nombre", nombre=_epw_subido.name)
@@ -1758,118 +1777,130 @@ with tab_eco_roof:
         z0_er = st.session_state.get("z0_avanzado", Z0_DEFAULT)
 
         # El bloque solar corre una simulación REAL de EnergyPlus (unos segundos) --
-        # _simular_eco_roof_cacheado() evita repetirla en cada rerun de Streamlit.
-        with st.spinner(t("ecoroof_spinner_solar")):
-            resultado_er = _simular_eco_roof_cacheado(
-                _clave_er, df_clima_er, ruta_epw_er, elevacion_er, z0_er,
-            )
+        # _simular_eco_roof_cacheado() evita repetirla en cada rerun de Streamlit. Esto
+        # corre SIN botón (a diferencia del PDF de abajo) apenas hay un sitio activo, así
+        # que sí necesita su propio try/except -- una falla real de EnergyPlus (binario
+        # ausente, EPW corrupto, etc.) no debe tumbar toda la pestaña con una traza cruda.
+        idioma_er = st.session_state.get("idioma", IDIOMA_DEFAULT)
+        resultado_er = None
+        try:
+            with st.spinner(t("ecoroof_spinner_solar")):
+                resultado_er = _simular_eco_roof_cacheado(
+                    _clave_er, df_clima_er, ruta_epw_er, elevacion_er, z0_er,
+                )
+        except Exception as e:
+            st.error(t("especificacion_error_generar_pdf", error=e))
 
-        c1, c2, c3 = st.columns(3)
-        c1.metric(t("ecoroof_metric_eolica"), f"{resultado_er['kwh_anual_eolico']:,.0f} kWh")
-        c2.metric(t("ecoroof_metric_solar"), f"{resultado_er['kwh_anual_solar']:,.0f} kWh")
-        c3.metric(t("ecoroof_metric_total"), f"{resultado_er['kwh_anual_total']:,.0f} kWh")
-        st.caption(resultado_er["solar"]["advertencia"])
+        if resultado_er is not None:
+            c1, c2, c3 = st.columns(3)
+            c1.metric(t("ecoroof_metric_eolica"), f"{resultado_er['kwh_anual_eolico']:,.0f} kWh")
+            c2.metric(t("ecoroof_metric_solar"), f"{resultado_er['kwh_anual_solar']:,.0f} kWh")
+            c3.metric(t("ecoroof_metric_total"), f"{resultado_er['kwh_anual_total']:,.0f} kWh")
+            # tr() con el mismo texto/clave que ya usa el PDF (pdf_ecoroof_caja_advertencia_solar)
+            # -- antes esto mostraba resultado_er["solar"]["advertencia"] crudo, siempre en
+            # español, sin importar el idioma elegido en el toggle ES/EN.
+            st.caption(tr("pdf_ecoroof_caja_advertencia_solar", idioma_er))
 
-        st.divider()
-        st.markdown(t("pdf_ecoroof_subheader_produccion_eolica"))
-        st.plotly_chart(crear_produccion_mensual_plotly(resultado_er["kwh_mensual_eolico"]),
-                         use_container_width=True, key="ecoroof_chart_mensual_eolico")
-        st.markdown(t("pdf_ecoroof_subheader_produccion_solar"))
-        st.plotly_chart(crear_produccion_mensual_plotly(resultado_er["solar"]["kwh_mensual"]),
-                         use_container_width=True, key="ecoroof_chart_mensual_solar")
+            st.divider()
+            st.markdown(t("pdf_ecoroof_subheader_produccion_eolica"))
+            st.plotly_chart(crear_produccion_mensual_plotly(resultado_er["kwh_mensual_eolico"]),
+                             use_container_width=True, key="ecoroof_chart_mensual_eolico")
+            st.markdown(t("pdf_ecoroof_subheader_produccion_solar"))
+            st.plotly_chart(crear_produccion_mensual_plotly(resultado_er["solar"]["kwh_mensual"]),
+                             use_container_width=True, key="ecoroof_chart_mensual_solar")
 
-        st.divider()
-        st.markdown(t("pdf_ecoroof_tabla_potencia_titulo"))
-        st.caption(t("pdf_ecoroof_nota_potencia"))
-        st.dataframe(pd.DataFrame({
-            t("pdf_ecoroof_col_velocidad"): [f"{v} m/s" for v in range(16)],
-            t("pdf_ecoroof_col_potencia"): [
-                f"{potencia_tabla_w(float(v), preset_er['tabla_potencia']):.1f} W" for v in range(16)
-            ],
-        }), hide_index=True, use_container_width=True)
+            st.divider()
+            st.markdown(t("pdf_ecoroof_tabla_potencia_titulo"))
+            st.caption(t("pdf_ecoroof_nota_potencia"))
+            st.dataframe(pd.DataFrame({
+                t("pdf_ecoroof_col_velocidad"): [f"{v} m/s" for v in range(16)],
+                t("pdf_ecoroof_col_potencia"): [
+                    f"{potencia_tabla_w(float(v), preset_er['tabla_potencia']):.1f} W" for v in range(16)
+                ],
+            }), hide_index=True, use_container_width=True)
 
-        st.divider()
-        st.markdown(t("especificacion_subheader_informe"))
-        # Mismo patrón que el informe del 3-M Tulip (ver comentario ahí): SOLO corre
-        # detrás de un botón explícito -- Streamlit ejecuta el cuerpo de todas las
-        # pestañas en cada rerun, generar esto sin botón tumbaría la app entera si
-        # kaleido/Chrome no están disponibles, cada vez que se aprieta cualquier botón
-        # en cualquier pestaña.
-        if st.button(t("especificacion_boton_generar_pdf"), key="ecoroof_boton_generar_pdf"):
-            try:
-                with st.spinner(t("especificacion_spinner_generando")):
-                    if "meta" in resultado_clima_er:
-                        _fuente_texto_er = t(
-                            "especificacion_pdf_fuente_estacion",
-                            estacion=meta_er["estacion"], pais=meta_er["pais"], wmo=meta_er["wmo"],
-                            lat=f"{meta_er['lat']:.4f}", lon=f"{meta_er['lon']:.4f}",
-                            elevacion_m=f"{meta_er['elevacion_m']:.0f}",
-                            media=f"{resultado_clima_er['media']:.2f}",
+            st.divider()
+            st.markdown(t("especificacion_subheader_informe"))
+            # Mismo patrón que el informe del 3-M Tulip (ver comentario ahí): SOLO corre
+            # detrás de un botón explícito -- Streamlit ejecuta el cuerpo de todas las
+            # pestañas en cada rerun, generar esto sin botón tumbaría la app entera si
+            # kaleido/Chrome no están disponibles, cada vez que se aprieta cualquier botón
+            # en cualquier pestaña.
+            if st.button(t("especificacion_boton_generar_pdf"), key="ecoroof_boton_generar_pdf"):
+                try:
+                    with st.spinner(t("especificacion_spinner_generando")):
+                        if "meta" in resultado_clima_er:
+                            _fuente_texto_er = t(
+                                "especificacion_pdf_fuente_estacion",
+                                estacion=meta_er["estacion"], pais=meta_er["pais"], wmo=meta_er["wmo"],
+                                lat=f"{meta_er['lat']:.4f}", lon=f"{meta_er['lon']:.4f}",
+                                elevacion_m=f"{meta_er['elevacion_m']:.0f}",
+                                media=f"{resultado_clima_er['media']:.2f}",
+                            )
+                        else:
+                            _fuente_texto_er = t("especificacion_pdf_fuente_generico",
+                                                  media=f"{resultado_clima_er['media']:.2f}")
+
+                        _fig_heatmap_er, _ = crear_heatmap_plotly(
+                            resultado_clima_er["hm_json"], media_anual=resultado_clima_er["media"],
+                            altura_m=preset_er["altura_buje_m"], z0=z0_er,
                         )
-                    else:
-                        _fuente_texto_er = t("especificacion_pdf_fuente_generico",
-                                              media=f"{resultado_clima_er['media']:.2f}")
 
-                    _fig_heatmap_er, _ = crear_heatmap_plotly(
-                        resultado_clima_er["hm_json"], media_anual=resultado_clima_er["media"],
-                        altura_m=preset_er["altura_buje_m"], z0=z0_er,
-                    )
+                        _datos_pdf_er = {
+                            "sitio_nombre": st.session_state.get("sitio_nombre_activo") or "--",
+                            "elevacion_m": elevacion_er,
+                            "preset": {
+                                "nombre": t(f"ecoroof_nombre_{_clave_er}"), "n_turbinas": preset_er["N"],
+                                "numero_parte": specs_producto_er["numero_parte"],
+                                "clase_iec": specs_turbina_er["clase_iec"],
+                                "tipo_techo": preset_er["tipo_techo"],
+                                "peso_kg_m2": specs_producto_er["peso_total_kg"],
+                                "cimentacion_texto": t(specs_producto_er["cimentacion_requerida"]),
+                                "angulo_max_techo_deg": preset_er["angulo_max_techo_deg"],
+                                "tabla_potencia_w": preset_er["tabla_potencia"],
+                                "capacidad_solar_kwp": preset_er["capacidad_solar_kwp"],
+                                "ruta_imagen": RUTA_IMAGEN.get(preset_er["specs_key"]),
+                            },
+                            "clima": {
+                                "fuente_texto": _fuente_texto_er,
+                                "img_rosa": fig_a_png(crear_rosa_vientos_plotly(
+                                    resultado_clima_er["rosa_detallada"])),
+                                "img_heatmap": fig_a_png(_fig_heatmap_er) if _fig_heatmap_er else None,
+                                "img_perfil": fig_a_png(crear_perfil_viento_plotly(
+                                    resultado_clima_er["media"], z0=z0_er,
+                                    altura_max=max(preset_er["altura_buje_m"] * 1.15, 10.0),
+                                    altura_marcada=preset_er["altura_buje_m"],
+                                )),
+                            },
+                            "produccion": {
+                                "kwh_anual_eolico": resultado_er["kwh_anual_eolico"],
+                                "kwh_anual_solar": resultado_er["kwh_anual_solar"],
+                                "kwh_anual_total": resultado_er["kwh_anual_total"],
+                                "img_mensual_eolico": fig_a_png(
+                                    crear_produccion_mensual_plotly(resultado_er["kwh_mensual_eolico"])),
+                                "img_mensual_solar": fig_a_png(
+                                    crear_produccion_mensual_plotly(resultado_er["solar"]["kwh_mensual"])),
+                            },
+                            # CAPEX sin módulo financiero propio para Eco-Roof todavía --
+                            # None acá muestra la misma caja "completá estos datos" que ya
+                            # usa el informe del 3-M Tulip cuando falta, nunca se inventa
+                            # un CAPEX.
+                            "financiero": None,
+                        }
+                        st.session_state["informe_eco_roof_pdf"] = generar_pdf_informe_eco_roof(
+                            _datos_pdf_er, logo_path=LOGO_ECO if os.path.exists(LOGO_ECO) else None,
+                            idioma=idioma_er)
+                except Exception as e:
+                    st.session_state["informe_eco_roof_pdf"] = None
+                    st.error(t("especificacion_error_generar_pdf", error=e))
 
-                    _datos_pdf_er = {
-                        "sitio_nombre": st.session_state.get("sitio_nombre_activo") or "--",
-                        "elevacion_m": elevacion_er,
-                        "preset": {
-                            "nombre": t(f"ecoroof_nombre_{_clave_er}"), "n_turbinas": preset_er["N"],
-                            "numero_parte": specs_producto_er["numero_parte"],
-                            "clase_iec": specs_turbina_er["clase_iec"],
-                            "tipo_techo": preset_er["tipo_techo"],
-                            "peso_kg_m2": specs_producto_er["peso_total_kg"],
-                            "cimentacion_texto": t(specs_producto_er["cimentacion_requerida"]),
-                            "angulo_max_techo_deg": preset_er["angulo_max_techo_deg"],
-                            "tabla_potencia_w": preset_er["tabla_potencia"],
-                            "capacidad_solar_kwp": preset_er["capacidad_solar_kwp"],
-                            "ruta_imagen": RUTA_IMAGEN.get(preset_er["specs_key"]),
-                        },
-                        "clima": {
-                            "fuente_texto": _fuente_texto_er,
-                            "img_rosa": fig_a_png(crear_rosa_vientos_plotly(
-                                resultado_clima_er["rosa_detallada"])),
-                            "img_heatmap": fig_a_png(_fig_heatmap_er) if _fig_heatmap_er else None,
-                            "img_perfil": fig_a_png(crear_perfil_viento_plotly(
-                                resultado_clima_er["media"], z0=z0_er,
-                                altura_max=max(preset_er["altura_buje_m"] * 1.15, 10.0),
-                                altura_marcada=preset_er["altura_buje_m"],
-                            )),
-                        },
-                        "produccion": {
-                            "kwh_anual_eolico": resultado_er["kwh_anual_eolico"],
-                            "kwh_anual_solar": resultado_er["kwh_anual_solar"],
-                            "kwh_anual_total": resultado_er["kwh_anual_total"],
-                            "img_mensual_eolico": fig_a_png(
-                                crear_produccion_mensual_plotly(resultado_er["kwh_mensual_eolico"])),
-                            "img_mensual_solar": fig_a_png(
-                                crear_produccion_mensual_plotly(resultado_er["solar"]["kwh_mensual"])),
-                        },
-                        # CAPEX sin módulo financiero propio para Eco-Roof todavía --
-                        # None acá muestra la misma caja "completá estos datos" que ya
-                        # usa el informe del 3-M Tulip cuando falta, nunca se inventa
-                        # un CAPEX.
-                        "financiero": None,
-                    }
-                    st.session_state["informe_eco_roof_pdf"] = generar_pdf_informe_eco_roof(
-                        _datos_pdf_er, logo_path=LOGO_ECO if os.path.exists(LOGO_ECO) else None,
-                        idioma=st.session_state.get("idioma", IDIOMA_DEFAULT))
-            except Exception as e:
-                st.session_state["informe_eco_roof_pdf"] = None
-                st.error(t("especificacion_error_generar_pdf", error=e))
-
-        if st.session_state.get("informe_eco_roof_pdf"):
-            st.download_button(
-                t("especificacion_boton_descargar_pdf"),
-                data=st.session_state["informe_eco_roof_pdf"],
-                file_name=f"ECO-Wind_informe_eco_roof_{date.today().isoformat()}.pdf",
-                mime="application/pdf",
-                type="primary",
-                key="ecoroof_boton_descargar_pdf",
-            )
+            if st.session_state.get("informe_eco_roof_pdf"):
+                st.download_button(
+                    t("especificacion_boton_descargar_pdf"),
+                    data=st.session_state["informe_eco_roof_pdf"],
+                    file_name=f"ECO-Wind_informe_eco_roof_{date.today().isoformat()}.pdf",
+                    mime="application/pdf",
+                    type="primary",
+                    key="ecoroof_boton_descargar_pdf",
+                )
 

@@ -151,14 +151,21 @@ def _construir_superficie_pv(capacidad_kwp, tilt_deg, acimut_superficie_deg,
 
         tilt_obtenido_deg = math.degrees(geo.tilt)
         az_obtenido_deg = math.degrees(geo.azimuth)
-        assert abs(tilt_obtenido_deg - tilt_deg) < 0.5, (
-            f"Geometría del arreglo Eco-Roof: tilt esperado {tilt_deg}°, "
-            f"obtenido {tilt_obtenido_deg:.2f}°"
-        )
-        assert abs((az_obtenido_deg - acimut_superficie_deg + 180) % 360 - 180) < 0.5, (
-            f"Geometría del arreglo Eco-Roof: acimut esperado {acimut_superficie_deg}°, "
-            f"obtenido {az_obtenido_deg:.2f}°"
-        )
+        # Antes eran `assert` -- Python los quita por completo con -O/PYTHONOPTIMIZE=1, y
+        # esto no es un invariante de depuración sino la única validación de que la
+        # geometría realmente quedó orientada como se pidió (si Face3D.rotate() cambiara
+        # de convención en una futura versión de ladybug_geometry, un assert deshabilitado
+        # dejaría pasar un arreglo mal orientado sin ningún aviso).
+        if abs(tilt_obtenido_deg - tilt_deg) >= 0.5:
+            raise RuntimeError(
+                f"Geometría del arreglo Eco-Roof: tilt esperado {tilt_deg}°, "
+                f"obtenido {tilt_obtenido_deg:.2f}°"
+            )
+        if abs((az_obtenido_deg - acimut_superficie_deg + 180) % 360 - 180) >= 0.5:
+            raise RuntimeError(
+                f"Geometría del arreglo Eco-Roof: acimut esperado {acimut_superficie_deg}°, "
+                f"obtenido {az_obtenido_deg:.2f}°"
+            )
 
     shade = Shade("eco_roof_pv_array", geo)
     shade.properties.energy.pv_properties = PVProperties(
@@ -191,6 +198,18 @@ def _armar_idf(shade):
     return "\n\n".join(s for s in (ver_str, sim_par_str, model_str) if s)
 
 
+def _leer_eplusout_err(carpeta_trabajo):
+    """eplusout.err trae el detalle real de los Fatal/Severe de EnergyPlus -- stdout/stderr
+    del proceso casi nunca lo repiten. Se lee acá, ANTES de que el TemporaryDirectory que
+    llama a _correr_energyplus() borre la carpeta al salir del `with` -- si no se lee ahora,
+    se pierde para siempre y el error que le llega al usuario queda genérico e inútil."""
+    err_path = os.path.join(carpeta_trabajo, "eplusout.err")
+    if not os.path.exists(err_path):
+        return ""
+    with open(err_path, encoding="latin-1", errors="replace") as f:
+        return f.read()[-4000:]
+
+
 def _correr_energyplus(idf_str, ruta_epw, carpeta_trabajo):
     """Escribe el IDF y corre el binario real -- mismo patrón (subprocess, capture_output)
     que motor/termico.py::traducir_y_simular() de Skyplus."""
@@ -199,21 +218,32 @@ def _correr_energyplus(idf_str, ruta_epw, carpeta_trabajo):
         f.write(idf_str)
 
     ep_exec = _detectar_energyplus()
-    resultado = subprocess.run(
-        [ep_exec, "-w", ruta_epw, "-d", carpeta_trabajo, idf_path],
-        capture_output=True, text=True, timeout=600,
-    )
+    try:
+        resultado = subprocess.run(
+            [ep_exec, "-w", ruta_epw, "-d", carpeta_trabajo, idf_path],
+            capture_output=True, text=True, timeout=600,
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(
+            "EnergyPlus no terminó la simulación solar del Eco-Roof en 600 segundos -- "
+            "se interrumpió (revisar si el EPW/modelo es válido, o si el contenedor está "
+            "sobrecargado)."
+        )
     if resultado.returncode != 0:
+        detalle_err = _leer_eplusout_err(carpeta_trabajo)
         raise RuntimeError(
             f"EnergyPlus terminó con error (código {resultado.returncode}) simulando la "
-            f"producción solar del Eco-Roof:\n{resultado.stdout[-3000:]}\n{resultado.stderr[-3000:]}"
+            f"producción solar del Eco-Roof.\n"
+            f"--- eplusout.err (detalle real del error) ---\n{detalle_err or '(no se generó eplusout.err)'}\n"
+            f"--- salida estándar ---\n{resultado.stdout[-2000:]}\n{resultado.stderr[-2000:]}"
         )
 
     sql_path = os.path.join(carpeta_trabajo, "eplusout.sql")
     if not os.path.exists(sql_path):
+        detalle_err = _leer_eplusout_err(carpeta_trabajo)
         raise RuntimeError(
             "EnergyPlus terminó sin errores pero no generó eplusout.sql -- no se puede leer "
-            "la producción solar."
+            f"la producción solar.\n--- eplusout.err ---\n{detalle_err or '(no se generó eplusout.err)'}"
         )
     return sql_path
 
@@ -288,6 +318,15 @@ def simular_solar_eco_roof(df_clima, ruta_epw, capacidad_kwp, tilt_deg=0.0,
         raise ValueError(
             f"No existe el archivo EPW '{ruta_epw}' -- necesario para simular la "
             "producción solar del Eco-Roof con EnergyPlus real."
+        )
+    if capacidad_kwp <= 0:
+        # Sin esto, un capacidad_kwp<=0 llega crudo a _area_para_capacidad_m2() -- negativo
+        # da un área negativa y area_m2**0.5 se vuelve un número complejo (Python no lanza
+        # ValueError ahí), que después revienta con un TypeError confuso adentro de
+        # ladybug_geometry.Point3D en vez de decir claramente cuál es el problema real.
+        raise ValueError(
+            f"capacidad_kwp debe ser mayor que 0 (llegó {capacidad_kwp!r}) -- no se puede "
+            "simular un arreglo solar sin capacidad."
         )
 
     shade = _construir_superficie_pv(capacidad_kwp, tilt_deg, acimut_superficie_deg,
