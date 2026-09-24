@@ -1,15 +1,16 @@
 """
-Catálogo FIJO de productos Eco-Roof Energy Hub -- Pista Eco-Roof, módulo nuevo
-y separado del sistema de clústers libres (engine/simulador_pista_a.py +
-tab "Equipos y configuración" de app.py).
+Catálogo FIJO de productos Eco-Roof Energy Hub -- módulo nuevo y separado del
+motor de curvas del 3-M Tulip (engine/simulador_pista_a.py /
+flower_turbines_curves.py, que no se tocan).
 
-A PROPÓSITO no es generalizable a cualquier N: cada preset es un producto de
-fábrica ya definido (turbina + N + capacidad solar + peso/huella fijos), no
-un layout que arma el usuario -- ver Hallazgo de diseño en el prompt original
-("catálogo fijo, no generalizable a cualquier N"). Si mañana Flower Turbines
-saca un producto nuevo con su propia tabla de potencia oficial, se agrega acá
-como una entrada más, no generalizando la interpolación a un N arbitrario sin
-tabla real detrás.
+En la app, cada producto Eco-Roof es un modelo más de la cartera (selector
+"Modelo" de "Equipos y configuración", ver PRESET_POR_MODELO más abajo), pero
+A PROPÓSITO no es generalizable a cualquier N de turbinas: cada preset es un
+producto de fábrica ya definido (turbina + turbinas por equipo + capacidad solar
++ peso/huella fijos) -- el N de la fila del proyecto es la cantidad de EQUIPOS,
+no de turbinas sueltas. Si mañana Flower Turbines saca un producto nuevo con su
+propia tabla de potencia oficial, se agrega acá como una entrada más, no
+generalizando la interpolación a un N arbitrario sin tabla real detrás.
 
 Cada preset reference dos claves YA existentes en engine/turbine_specs.py
 (cargadas ahí desde antes de este módulo, con peso/huella/costo/cimentación
@@ -24,12 +25,14 @@ reales de la ficha de Pablo -- no se duplican esos valores acá):
 from engine.eco_roof_curves import TABLA_N3, TABLA_N5
 
 # Altura de pala del Small Tulip (engine/turbine_specs.py -- SPECS_TURBINAS["small_tulip"]
-# ["altura_pala_m"]) -- se usa como altura de buje efectiva porque el producto empacado
-# (specs_key) no trae un valor de "altura de buje" separado del de la turbina individual;
-# es la mejor aproximación disponible, no un dato inventado (mismo número que ya está en
-# la ficha oficial). Sub-metro, así que wind_at_height() con esto siempre corrige HACIA
-# ABAJO respecto al dato de referencia a 10m (nunca hacia arriba) -- físicamente esperado
-# para un producto de techo, muy bajo comparado con la altura de referencia meteorológica.
+# ["altura_pala_m"]) -- se usa como altura del buje SOBRE EL TECHO porque el producto
+# empacado (specs_key) no trae un valor de "altura de buje" separado del de la turbina
+# individual; es la mejor aproximación disponible, no un dato inventado (mismo número que
+# ya está en la ficha oficial). La altura del buje sobre el TERRENO, que es la que entra al
+# perfil logarítmico de viento, es altura del techo + este valor (ver
+# engine/eco_roof_simulador.py::simular_eco_roof(), parámetro altura_techo_m) -- sin sumar
+# el techo, la turbina quedaría a ~1 m del suelo y el eólico se subestimaría del orden de
+# 10 veces para un edificio real.
 ALTURA_BUJE_ECO_ROOF_M = 1.149
 
 ECO_ROOF_PRESETS = {
@@ -113,3 +116,29 @@ def preset_disponible(clave):
     """True solo si el preset tiene tabla de potencia oficial y puede simularse."""
     preset = ECO_ROOF_PRESETS.get(clave)
     return preset is not None and preset["status"] == "ok"
+
+
+# Eco-Roof como producto más de la cartera (selector "Modelo" de "Equipos y
+# configuración"): la cartera identifica cada producto por su clave de
+# turbine_specs.py/precios_flower_turbines.py ("ecoroof_flat_3", ...), que es el
+# specs_key de cada preset. Sólo entran los presets con tabla oficial --
+# eco_roof_2m_2 no tiene specs_key y queda afuera de la cartera.
+PRESET_POR_MODELO = {
+    preset["specs_key"]: clave
+    for clave, preset in ECO_ROOF_PRESETS.items()
+    if preset["status"] == "ok"
+}
+
+
+def es_modelo_eco_roof(modelo):
+    """True si la clave de la cartera es un producto Eco-Roof (tabla oficial), no
+    una turbina del motor de curvas k·v³×M(N)."""
+    return modelo in PRESET_POR_MODELO
+
+
+def articulo_incluye_solar(articulo):
+    """True si el artículo elegido del catálogo de precios trae paneles solares --
+    los artículos Eco-Roof con paneles dicen "... plus solar panels" (ver
+    engine/precios_flower_turbines.py). Sin artículo elegido (o un producto sin
+    artículos en el catálogo, como ecoroof_slanted), no se asume que haya paneles."""
+    return bool(articulo) and "solar" in articulo.lower()

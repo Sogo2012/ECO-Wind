@@ -52,6 +52,7 @@ versión anterior en Python puro daba 296.9 kWh/año para el mismo caso, ~0.4%
 de diferencia contra la DC de acá. Confirma que ambas implementaciones son
 físicamente consistentes entre sí.
 """
+import functools
 import math
 import os
 import shutil
@@ -291,6 +292,31 @@ def _leer_serie_horaria_kwh(sql_path, nombre_variable, n_horas_esperadas):
     return joules / 3.6e6  # J -> kWh
 
 
+@functools.lru_cache(maxsize=32)
+def _kwh_ac_horario_cacheado(ruta_epw, _mtime_ns, _tamano_bytes, capacidad_kwp, tilt_deg,
+                              acimut_superficie_deg, rated_efficiency, active_area_fraction,
+                              system_loss_fraction, n_horas):
+    """
+    La corrida real de EnergyPlus (unos segundos), cacheada por archivo EPW + parámetros
+    del arreglo. La app llama a la simulación del proyecto desde varias pestañas y
+    Streamlit re-ejecuta todas en cada interacción -- sin este caché se repetiría la
+    misma corrida idéntica una y otra vez. _mtime_ns/_tamano_bytes entran a la clave
+    para que, si el archivo en esa ruta cambia, no se reuse un resultado viejo. Una
+    corrida que falla no queda cacheada (lru_cache no guarda excepciones).
+
+    Devuelve un arreglo de sólo lectura -- quien lo use debe copiarlo antes de armar
+    su propia serie, para que nadie pueda modificar el valor guardado en el caché.
+    """
+    shade = _construir_superficie_pv(capacidad_kwp, tilt_deg, acimut_superficie_deg,
+                                      rated_efficiency, active_area_fraction, system_loss_fraction)
+    idf_str = _armar_idf(shade)
+    with tempfile.TemporaryDirectory(prefix="eco_roof_ep_") as carpeta:
+        sql_path = _correr_energyplus(idf_str, ruta_epw, carpeta)
+        kwh_ac = _leer_serie_horaria_kwh(sql_path, _NOMBRE_VARIABLE_AC, n_horas)
+    kwh_ac.setflags(write=False)
+    return kwh_ac
+
+
 def simular_solar_eco_roof(df_clima, ruta_epw, capacidad_kwp, tilt_deg=0.0,
                             acimut_superficie_deg=0.0,
                             rated_efficiency=RATED_EFFICIENCY_GENERICO,
@@ -329,15 +355,14 @@ def simular_solar_eco_roof(df_clima, ruta_epw, capacidad_kwp, tilt_deg=0.0,
             "simular un arreglo solar sin capacidad."
         )
 
-    shade = _construir_superficie_pv(capacidad_kwp, tilt_deg, acimut_superficie_deg,
-                                      rated_efficiency, active_area_fraction, system_loss_fraction)
-    idf_str = _armar_idf(shade)
+    estado_epw = os.stat(ruta_epw)
+    kwh_ac = _kwh_ac_horario_cacheado(
+        ruta_epw, estado_epw.st_mtime_ns, estado_epw.st_size, float(capacidad_kwp),
+        float(tilt_deg), float(acimut_superficie_deg), float(rated_efficiency),
+        float(active_area_fraction), float(system_loss_fraction), len(df_clima),
+    )
 
-    with tempfile.TemporaryDirectory(prefix="eco_roof_ep_") as carpeta:
-        sql_path = _correr_energyplus(idf_str, ruta_epw, carpeta)
-        kwh_ac = _leer_serie_horaria_kwh(sql_path, _NOMBRE_VARIABLE_AC, len(df_clima))
-
-    serie_kwh = pd.Series(kwh_ac, index=df_clima.index, name="kwh_solar")
+    serie_kwh = pd.Series(kwh_ac.copy(), index=df_clima.index, name="kwh_solar")
     return {
         "serie_horaria_kwh": serie_kwh,
         "kwh_anual": float(serie_kwh.sum()),

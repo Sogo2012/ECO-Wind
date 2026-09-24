@@ -285,7 +285,9 @@ def generar_pdf_informe_ejecutivo(datos, logo_path=None, idioma=IDIOMA_DEFAULT):
         "clima": {"fuente_texto": str, "media_viento_ms": float,
                    "img_rosa": png_bytes, "img_heatmap": png_bytes o None,
                    "img_perfil": png_bytes},
-        "turbinas": [{"nombre", "cantidad", "numero_parte", "filas": [(campo, valor), ...]}, ...],
+        "turbinas": [{"nombre", "cantidad", "numero_parte", "filas": [(campo, valor), ...],
+                      "tabla_potencia_w": dict o ausente -- sólo equipos Eco-Roof}, ...],
+        "incluye_solar": bool o ausente -- True si algún equipo Eco-Roof trae paneles,
         "produccion": {"filas_tabla": [(modelo, n, buje, kwh, v_media, pct_cutin), ...],
                         "correccion_densidad_pct": float,
                         "img_mensual": png_bytes, "img_duracion": png_bytes},
@@ -403,6 +405,18 @@ def generar_pdf_informe_ejecutivo(datos, logo_path=None, idioma=IDIOMA_DEFAULT):
             bloque.append(_tabla_specs(t_turbina["filas"], idioma))
         bloque.append(Spacer(1, 8))
         story.append(KeepTogether(bloque))
+        if t_turbina.get("tabla_potencia_w"):
+            # Equipo Eco-Roof: sus "filas" ya no traen "Potencia nominal" (hallazgo del
+            # business case de CNFL) -- acá va la tabla oficial de fábrica completa.
+            story.append(KeepTogether([
+                Paragraph(tr("pdf_ecoroof_texto_preconfigurado", idioma), estilos["cuerpo"]),
+                Spacer(1, 4),
+                Paragraph(tr("pdf_ecoroof_tabla_potencia_titulo", idioma), estilos["equipo"]),
+                Paragraph(tr("pdf_ecoroof_nota_potencia", idioma), estilos["cuerpo"]),
+                Spacer(1, 4),
+                _tabla_potencia_eco_roof(t_turbina["tabla_potencia_w"], idioma),
+                Spacer(1, 8),
+            ]))
 
     # --- Resultados de producción -------------------------------------------------------
     # KeepTogether en el encabezado + KPIs + tabla (bloque chico) para que no quede el
@@ -441,6 +455,9 @@ def generar_pdf_informe_ejecutivo(datos, logo_path=None, idioma=IDIOMA_DEFAULT):
             _fila_imagenes([(prod["img_duracion"], tr("pdf_caption_duracion", idioma))]),
             Paragraph(tr("pdf_texto_validado", idioma), estilos["cuerpo"]),
         ]))
+    if datos.get("incluye_solar"):
+        story.append(Spacer(1, 6))
+        story.append(_caja_info(tr("pdf_ecoroof_caja_advertencia_solar", idioma), color_borde=AMBAR))
 
     # --- Análisis financiero -------------------------------------------------------------
     # Sin PageBreak: que aproveche el espacio que quede después de Producción en vez de
@@ -493,12 +510,12 @@ def generar_pdf_informe_ejecutivo(datos, logo_path=None, idioma=IDIOMA_DEFAULT):
 
 
 def _tabla_potencia_eco_roof(tabla_watts, idioma=IDIOMA_DEFAULT):
-    """Tabla Velocidad (m/s) / Potencia por turbina (W), a pasos de 1 m/s (0-15) --
-    reemplaza el campo "Potencia nominal" de un solo número que sí usa
-    generar_pdf_informe_ejecutivo() para el 3-M Tulip. Ese campo fue justamente el
-    hallazgo del business case de CNFL (mezclaba, mal etiquetado, la capacidad del
-    controlador con la del generador) -- acá se muestra la tabla real de fábrica
-    completa en vez de reducirla a un número que podría inducir al mismo error."""
+    """Tabla Velocidad (m/s) / Potencia por turbina (W), a pasos de 1 m/s (0-15), de un
+    equipo Eco-Roof -- reemplaza, sólo para Eco-Roof, el campo "Potencia nominal" de un
+    solo número que el informe muestra para las turbinas sueltas. Ese campo fue
+    justamente el hallazgo del business case de CNFL (mezclaba, mal etiquetado, la
+    capacidad del controlador con la del generador) -- acá se muestra la tabla real de
+    fábrica completa en vez de reducirla a un número que podría inducir al mismo error."""
     from engine.eco_roof_curves import potencia_tabla_w
     encabezados = [tr("pdf_ecoroof_col_velocidad", idioma), tr("pdf_ecoroof_col_potencia", idioma)]
     data = [[Paragraph(h, _estilo_celda_header) for h in encabezados]]
@@ -515,226 +532,6 @@ def _tabla_potencia_eco_roof(tabla_watts, idioma=IDIOMA_DEFAULT):
         ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
     ]))
     return t
-
-
-def generar_pdf_informe_eco_roof(datos, logo_path=None, idioma=IDIOMA_DEFAULT):
-    """
-    Informe ejecutivo del Eco-Roof Energy Hub (Small Tulip, 1m) -- producto de
-    fábrica preconfigurado, Pista Eco-Roof. FUNCIÓN SEPARADA de
-    generar_pdf_informe_ejecutivo() (el informe del 3-M Tulip): mismo estilo
-    visual (reutiliza _estilos/_fila_kpis/_kpi_card/_fila_imagenes/_pie_pagina/
-    _caja_info/_tabla_specs, ver arriba) y las mismas secciones (contexto
-    climático, equipos, producción, financiero), pero NO se llama a la función
-    del 3-M Tulip ni se toca su código -- evita cualquier riesgo de que un
-    cambio acá afecte ese informe ya validado (Estadio Heredia/business case
-    CNFL).
-
-    Diferencia clave en "Equipos Configurados": en vez de una fila "Potencia
-    nominal" de un solo número (lo que ya causó el hallazgo de CNFL -- mezclar
-    capacidad de controlador con potencia de generador), se muestra la tabla
-    de potencia oficial completa (_tabla_potencia_eco_roof()).
-
-    Estructura esperada de `datos`:
-      {
-        "sitio_nombre": str, "fecha_generado": str, "elevacion_m": float,
-        "preset": {
-          "nombre": str, "n_turbinas": int, "numero_parte": str,
-          "clase_iec": str, "tipo_techo": "flat"|"sloped",
-          "peso_kg_m2": float, "cimentacion_texto": str,
-          "angulo_max_techo_deg": float o None,
-          "tabla_potencia_w": dict {velocidad_ms: W_por_turbina},
-          "capacidad_solar_kwp": float, "ruta_imagen": str o None,
-        },
-        "clima": {"fuente_texto": str, "img_rosa": png_bytes,
-                   "img_heatmap": png_bytes o None, "img_perfil": png_bytes},
-        "produccion": {
-          "kwh_anual_eolico": float, "kwh_anual_solar": float,
-          "kwh_anual_total": float,
-          "img_mensual_eolico": png_bytes, "img_mensual_solar": png_bytes,
-        },
-        "financiero": None o {mismo formato que generar_pdf_informe_ejecutivo()},
-      }
-    """
-    estilos = _estilos()
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(
-        buffer, pagesize=letter,
-        leftMargin=1.8 * cm, rightMargin=1.8 * cm, topMargin=1.8 * cm, bottomMargin=1.8 * cm,
-        title=tr("pdf_pie_titulo", idioma),
-    )
-    story = []
-    preset = datos["preset"]
-    prod = datos["produccion"]
-    fin = datos.get("financiero")
-
-    # --- Portada / Resumen ejecutivo ------------------------------------------------
-    if logo_path:
-        try:
-            story.append(Image(logo_path, width=3.6 * cm, height=1.6 * cm, kind="proportional"))
-        except Exception:
-            pass
-
-    story.append(Spacer(1, 8))
-    story.append(Paragraph(tr("pdf_titulo_informe", idioma), estilos["titulo"]))
-    story.append(Paragraph(
-        tr("pdf_subtitulo", idioma, sitio=datos["sitio_nombre"],
-           fecha=datos.get("fecha_generado") or date.today().strftime("%d/%m/%Y")),
-        estilos["subtitulo"],
-    ))
-    story.append(HRFlowable(width="100%", thickness=1.5, color=VERDE, spaceAfter=12))
-    story.append(Paragraph(
-        tr("pdf_ecoroof_intro", idioma, sitio=datos["sitio_nombre"], producto=preset["nombre"]),
-        estilos["intro"],
-    ))
-    story.append(_fila_kpis([
-        _kpi_card(tr("pdf_ecoroof_kpi_produccion_total", idioma), f"{prod['kwh_anual_total']:,.0f} kWh"),
-        _kpi_card(tr("pdf_ecoroof_kpi_produccion_eolica", idioma), f"{prod['kwh_anual_eolico']:,.0f} kWh",
-                   accent=AZUL),
-        _kpi_card(tr("pdf_ecoroof_kpi_produccion_solar", idioma), f"{prod['kwh_anual_solar']:,.0f} kWh",
-                   accent=AMBAR),
-        _kpi_card(tr("pdf_kpi_elevacion", idioma), f"{datos['elevacion_m']:.0f} m"),
-    ]))
-
-    story.append(PageBreak())
-
-    # --- Contexto climático (mismas imágenes/estilo que el informe del 3-M Tulip) ---
-    clima = datos["clima"]
-    story.append(Paragraph(tr("pdf_seccion_contexto_climatico", idioma), estilos["seccion"]))
-    story.append(Paragraph(clima["fuente_texto"], estilos["cuerpo"]))
-    story.append(Spacer(1, 6))
-    imgs_clima = [(clima["img_rosa"], tr("pdf_caption_rosa", idioma))]
-    if clima.get("img_heatmap"):
-        imgs_clima.append((clima["img_heatmap"], tr("pdf_caption_heatmap", idioma)))
-    imgs_clima.append((clima["img_perfil"], tr("pdf_caption_perfil", idioma)))
-    for i, img_con_leyenda in enumerate(imgs_clima):
-        if i > 0:
-            story.append(Spacer(1, 8))
-        story.append(KeepTogether(_fila_imagenes([img_con_leyenda])))
-
-    # --- Equipos configurados: producto de fábrica preconfigurado, NO clúster libre ---
-    story.append(KeepTogether([
-        Paragraph(tr("pdf_seccion_equipos", idioma), estilos["seccion"]),
-        Paragraph(tr("pdf_ecoroof_texto_preconfigurado", idioma), estilos["cuerpo"]),
-    ]))
-    story.append(Spacer(1, 8))
-
-    _bloque_producto = [Paragraph(
-        tr("pdf_ecoroof_titulo_producto", idioma, nombre=preset["nombre"], n=preset["n_turbinas"]),
-        estilos["equipo"],
-    )]
-    _bloque_producto.append(Paragraph(
-        tr("pdf_caption_fabricante", idioma, numero_parte=preset["numero_parte"]), estilos["cuerpo"],
-    ))
-    _bloque_producto.append(Spacer(1, 3))
-    _filas_producto = [
-        (tr("pdf_ecoroof_fila_tipo_techo", idioma),
-         tr("pdf_ecoroof_techo_plano", idioma) if preset["tipo_techo"] == "flat"
-         else tr("pdf_ecoroof_techo_inclinado", idioma)),
-        (tr("pdf_ecoroof_fila_iec", idioma), preset["clase_iec"]),
-        (tr("pdf_ecoroof_fila_peso", idioma), f"{preset['peso_kg_m2']:.1f} kg/m²"),
-        (tr("especificacion_fila_cimentacion", idioma), preset["cimentacion_texto"]),
-    ]
-    if preset.get("angulo_max_techo_deg") is not None:
-        _filas_producto.append(
-            (tr("pdf_ecoroof_fila_angulo_max", idioma), f"{preset['angulo_max_techo_deg']:.0f}°"))
-    _filas_producto.append(
-        (tr("pdf_ecoroof_fila_capacidad_solar", idioma), f"{preset['capacidad_solar_kwp'] * 1000:.0f} W"))
-
-    _ruta_img = preset.get("ruta_imagen")
-    if _ruta_img and os.path.exists(_ruta_img):
-        _fila_img = Table(
-            [[Image(_ruta_img, width=3.2 * cm, height=3.2 * cm, kind="proportional"),
-              _tabla_specs(_filas_producto, idioma)]],
-            colWidths=[3.6 * cm, ANCHO_UTIL - 3.6 * cm],
-        )
-        _fila_img.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
-        _bloque_producto.append(_fila_img)
-    else:
-        _bloque_producto.append(_tabla_specs(_filas_producto, idioma))
-    _bloque_producto.append(Spacer(1, 8))
-    story.append(KeepTogether(_bloque_producto))
-
-    story.append(Paragraph(tr("pdf_ecoroof_tabla_potencia_titulo", idioma), estilos["equipo"]))
-    story.append(Paragraph(tr("pdf_ecoroof_nota_potencia", idioma), estilos["cuerpo"]))
-    story.append(Spacer(1, 4))
-    story.append(_tabla_potencia_eco_roof(preset["tabla_potencia_w"], idioma))
-
-    # --- Resultados de producción (eólico tabla-a-tabla + solar estimado) -----------
-    story.append(KeepTogether([
-        Paragraph(tr("pdf_seccion_resultados", idioma), estilos["seccion"]),
-        _fila_kpis([
-            _kpi_card(tr("pdf_ecoroof_kpi_produccion_eolica", idioma), f"{prod['kwh_anual_eolico']:,.0f} kWh",
-                       accent=AZUL),
-            _kpi_card(tr("pdf_ecoroof_kpi_produccion_solar", idioma), f"{prod['kwh_anual_solar']:,.0f} kWh",
-                       accent=AMBAR),
-            _kpi_card(tr("pdf_ecoroof_kpi_produccion_total", idioma), f"{prod['kwh_anual_total']:,.0f} kWh"),
-        ]),
-    ]))
-    story.append(Spacer(1, 10))
-
-    story.append(KeepTogether(_fila_imagenes([
-        (prod["img_mensual_eolico"], tr("pdf_ecoroof_caption_eolico_mensual", idioma)),
-    ])))
-    story.append(Spacer(1, 8))
-    story.append(KeepTogether([
-        Paragraph(tr("pdf_ecoroof_texto_validado_eolico", idioma), estilos["cuerpo"]),
-    ]))
-    story.append(Spacer(1, 10))
-
-    story.append(KeepTogether(_fila_imagenes([
-        (prod["img_mensual_solar"], tr("pdf_ecoroof_caption_solar_mensual", idioma)),
-    ])))
-    story.append(Spacer(1, 6))
-    story.append(_caja_info(tr("pdf_ecoroof_caja_advertencia_solar", idioma), color_borde=AMBAR))
-
-    story.append(PageBreak())
-
-    # --- Análisis financiero (idéntico en comportamiento al informe del 3-M Tulip: --
-    # --- CAPEX lo llena el usuario, nunca se inventa) ---------------------------------
-    color_viabilidad = VERDE if fin and fin["viable"] else AMBAR
-    if fin:
-        story.append(KeepTogether([
-            Paragraph(tr("pdf_seccion_financiero", idioma), estilos["seccion"]),
-            _fila_kpis([
-                _kpi_card(tr("pdf_kpi_capex", idioma), f"${fin['capex']:,.0f}", accent=AZUL),
-                _kpi_card(tr("pdf_kpi_ahorro_anual", idioma), f"${fin['ahorro_anual_USD']:,.0f}", accent=VERDE),
-                _kpi_card(tr("pdf_kpi_mantenimiento_anual", idioma), f"${fin['mantenimiento_anual_USD']:,.0f}",
-                          accent=AZUL),
-            ]),
-        ]))
-        story.append(Spacer(1, 10))
-        story.append(_fila_kpis([
-            _kpi_card(tr("pdf_kpi_payback", idioma),
-                      tr("pdf_valor_anos", idioma, val=f"{fin['payback_years']:.1f}")
-                      if fin["payback_years"] is not None else tr("pdf_na", idioma),
-                      accent=color_viabilidad),
-            _kpi_card(tr("pdf_kpi_roi", idioma),
-                      f"{fin['roi_percentage']:.0f}%" if fin["roi_percentage"] is not None else tr("pdf_na", idioma),
-                      accent=color_viabilidad),
-            _kpi_card(tr("pdf_kpi_npv", idioma),
-                      f"${fin['npv_usd']:,.0f}" if fin.get("npv_usd") is not None else tr("pdf_na", idioma),
-                      accent=color_viabilidad),
-            _kpi_card(tr("pdf_kpi_viabilidad", idioma),
-                      tr("pdf_viable", idioma) if fin["viable"] else tr("pdf_a_evaluar", idioma),
-                      accent=color_viabilidad),
-        ]))
-        story.append(Spacer(1, 12))
-        story.append(_tabla_specs([
-            (tr("pdf_fila_modalidad_tarifa", idioma), _tr_modo_tarifa(fin["modo_tarifa"], idioma)),
-            (tr("pdf_fila_vida_util", idioma), tr("pdf_valor_anos", idioma, val=fin['vida_util_anos'])),
-            (tr("pdf_fila_tasa_descuento", idioma), f"{fin['tasa_descuento_pct']:.1f}%"),
-        ], idioma))
-        story.append(Spacer(1, 8))
-        story.append(Paragraph(tr("pdf_texto_footer_financiero", idioma), estilos["cuerpo"]))
-    else:
-        story.append(KeepTogether([
-            Paragraph(tr("pdf_seccion_financiero", idioma), estilos["seccion"]),
-            _caja_info(tr("pdf_caja_sin_financiero", idioma)),
-        ]))
-
-    doc.build(story, onFirstPage=lambda c, d: _pie_pagina(c, d, idioma),
-              onLaterPages=lambda c, d: _pie_pagina(c, d, idioma))
-    return buffer.getvalue()
 
 
 def _flete_por_unidad_optimo(peso_kg):

@@ -27,6 +27,7 @@ ALCANCE:
 - Elevación: siempre del encabezado del EPW real elegido o subido -- nunca
   tecleada a mano.
 """
+import contextlib
 import json
 import os
 import sys
@@ -59,21 +60,19 @@ from engine.precios_flower_turbines import (
     get_articulos_disponibles, get_precio_exworks_usd, capacidad_controlador_articulo_w,
 )
 from engine.dimensionador_sistema_eolico import VOLTAJE_TURBINAS_V
-from engine.pdf_reporte import generar_pdf_informe_ejecutivo, generar_pdf_informe_eco_roof
-from engine.eco_roof_catalog import ECO_ROOF_PRESETS, preset_disponible
+from engine.pdf_reporte import generar_pdf_informe_ejecutivo
+from engine.eco_roof_catalog import (
+    ALTURA_BUJE_ECO_ROOF_M, ECO_ROOF_PRESETS, PRESET_POR_MODELO, articulo_incluye_solar,
+    es_modelo_eco_roof,
+)
 from engine.eco_roof_curves import potencia_tabla_w
-from engine.eco_roof_simulador import simular_eco_roof
-
-
-@st.cache_data(show_spinner=False)
-def _simular_eco_roof_cacheado(clave_preset, df_clima, ruta_epw, elevacion_m, z0):
-    """Cachea la corrida de simular_eco_roof() por (preset, EPW, elevación, z0) --
-    ahora incluye una simulación REAL de EnergyPlus (unos segundos, ver
-    engine/eco_roof_solar.py), y Streamlit ejecuta el cuerpo de TODAS las pestañas en
-    cada rerun (cualquier clic en cualquier pestaña) -- sin este cache la app se
-    volvería inutilizable, recorriendo EnergyPlus en cada interacción."""
-    return simular_eco_roof(clave_preset, df_clima, ruta_epw, elevacion_m, z0=z0)
+from engine.eco_roof_simulador import simular_cluster_eco_roof
 from engine.i18n import t, tr, meses_abreviados, IDIOMA_DEFAULT, IDIOMAS_DISPONIBLES
+
+# Cartera completa del selector "Modelo": las turbinas del motor de curvas k·v³×M(N)
+# (flower_turbines_curves.py, sin tocar) más los productos Eco-Roof, que se simulan con
+# su tabla oficial de fábrica (engine/eco_roof_simulador.py::simular_cluster_eco_roof).
+MODELOS_CARTERA = list(CURVE_COEFFICIENTS.keys()) + list(PRESET_POR_MODELO.keys())
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -112,6 +111,7 @@ def _nombres_modelo():
         "al13_4m": t("modelo_al13_4m"),
         "al13_6m": t("modelo_al13_6m"),
         "al13_8m": t("modelo_al13_8m"),
+        **{modelo: t(f"ecoroof_nombre_{clave}") for modelo, clave in PRESET_POR_MODELO.items()},
     }
 
 
@@ -272,6 +272,114 @@ def cargar_epw_subido(ruta):
     except Exception as e:
         return dict(error=t("clima_error_epw_invalido", error=str(e)))
     return _resultado_desde_epw(df_clima, meta, ruta, es_temporal=True)
+
+
+# --- Helpers de la cartera: clústers de turbinas sueltas o de equipos Eco-Roof ---
+
+def _turbinas_por_equipo(modelo):
+    """Turbinas físicas por cada unidad de N: 1 para las turbinas sueltas (N = turbinas),
+    3 o 5 para Eco-Roof (N = equipos, cada uno con su bouquet fijo de fábrica)."""
+    if es_modelo_eco_roof(modelo):
+        return ECO_ROOF_PRESETS[PRESET_POR_MODELO[modelo]]["N"]
+    return 1
+
+
+def _potencia_pico_equipo_w(modelo, articulo):
+    """Potencia pico de UNA unidad de N. Turbinas sueltas: potencia del generador de la
+    ficha de fábrica (sin cambios). Eco-Roof: NO la "potencia nominal" de su ficha (300 W
+    / 500 W, justamente el número engañoso del business case de CNFL) sino el valor más
+    alto de la tabla oficial (15 m/s) × turbinas del equipo, más los paneles solares si
+    el artículo elegido los trae."""
+    if not es_modelo_eco_roof(modelo):
+        return SPECS_TURBINAS[modelo]["potencia_nominal_w"]
+    preset = ECO_ROOF_PRESETS[PRESET_POR_MODELO[modelo]]
+    pico_w = potencia_tabla_w(15.0, preset["tabla_potencia"]) * preset["N"]
+    if articulo_incluye_solar(articulo):
+        pico_w += preset["capacidad_solar_kwp"] * 1000
+    return pico_w
+
+
+def _filas_ficha_eco_roof(modelo, articulo):
+    """Filas de la ficha técnica de un equipo Eco-Roof -- sin la fila "Potencia nominal"
+    de un solo número (hallazgo del business case de CNFL): en su lugar, la tabla oficial
+    resumida a 5/11/15 m/s (la tabla completa va aparte, en pantalla y en el PDF)."""
+    preset = ECO_ROOF_PRESETS[PRESET_POR_MODELO[modelo]]
+    specs = SPECS_TURBINAS[modelo]
+    specs_turbina = SPECS_TURBINAS[preset["turbina_key"]]
+    tabla = preset["tabla_potencia"]
+    filas = [
+        (t("especificacion_fila_turbinas_por_equipo"), f"{preset['N']}"),
+        (t("especificacion_fila_potencia_tabla"), t(
+            "especificacion_valor_potencia_tabla",
+            w5=f"{potencia_tabla_w(5.0, tabla):.1f}", w11=f"{potencia_tabla_w(11.0, tabla):.1f}",
+            w15=f"{potencia_tabla_w(15.0, tabla):.1f}",
+        )),
+        (t("pdf_ecoroof_fila_capacidad_solar"),
+         f"{preset['capacidad_solar_kwp'] * 1000:.0f} W" if articulo_incluye_solar(articulo)
+         else t("especificacion_valor_sin_solar")),
+        (t("pdf_ecoroof_fila_tipo_techo"),
+         t("pdf_ecoroof_techo_plano") if preset["tipo_techo"] == "flat" else t("pdf_ecoroof_techo_inclinado")),
+    ]
+    if preset.get("angulo_max_techo_deg") is not None:
+        filas.append((t("pdf_ecoroof_fila_angulo_max"), f"{preset['angulo_max_techo_deg']:.0f}°"))
+    filas += [
+        (t("pdf_ecoroof_fila_iec"), specs_turbina["clase_iec"]),
+        (t("especificacion_fila_cutin"), f"{specs['velocidad_cutin_ms']} m/s"),
+        (t("especificacion_fila_supervivencia"), f"{specs['velocidad_supervivencia_ms']} m/s"),
+        (t("especificacion_fila_tipo_rotor"), t(specs["tipo_rotor"])),
+        (t("especificacion_fila_tipo_generador"), t(specs["tipo_generador"])),
+        (t("especificacion_fila_diametro_rotor"), f"{specs['diametro_rotor_m']} m"),
+        (t("especificacion_fila_altura_pala"), f"{specs['altura_pala_m']} m"),
+        (t("pdf_ecoroof_fila_peso"), f"{specs['peso_total_kg']} kg/m²"),
+        (t("especificacion_fila_cimentacion"), t(specs["cimentacion_requerida"])),
+    ]
+    return filas
+
+
+def _tabla_potencia_eco_roof_df(modelo):
+    """Tabla oficial completa (0-15 m/s, pasos de 1 m/s) de un producto Eco-Roof, lista
+    para st.dataframe -- mismo recorte de pasos que usa el informe PDF."""
+    tabla = ECO_ROOF_PRESETS[PRESET_POR_MODELO[modelo]]["tabla_potencia"]
+    return pd.DataFrame({
+        t("pdf_ecoroof_col_velocidad"): [f"{v} m/s" for v in range(16)],
+        t("pdf_ecoroof_col_potencia"): [f"{potencia_tabla_w(float(v), tabla):.1f} W" for v in range(16)],
+    })
+
+
+def _simular_clusters(clusters, resultado_clima, z0, metodo_bouquet):
+    """Simula cada clúster del proyecto y devuelve una lista de dicts {**clúster,
+    **resultado} con el formato de simulador_pista_a.simular(). Las turbinas sueltas van
+    por simular() exactamente igual que antes; los equipos Eco-Roof por
+    simular_cluster_eco_roof() (tabla oficial, nunca el multiplicador Bouquet), que
+    devuelve ese mismo formato -- ver su docstring para lo que cambia de significado."""
+    df_clima = resultado_clima["df_clima"]
+    elevacion_m = resultado_clima["elevacion_m"]
+    resultados = []
+    for c in clusters:
+        if es_modelo_eco_roof(c["modelo"]):
+            r = simular_cluster_eco_roof(
+                c["modelo"], int(c["N"]), df_clima, resultado_clima["ruta_epw"], elevacion_m,
+                c.get("articulo"), z0=z0, altura_techo_m=c.get("altura_techo", 0.0),
+            )
+        else:
+            # Recorte por electrónica (correo Estadio Heredia, Flower Turbines): sin este
+            # tope, kWh/año asume que TODA la energía aerodinámica se aprovecha, sin
+            # importar qué controlador/inversor se compró -- eso sobreestima la producción
+            # real en sitios de viento fuerte. Si el clúster todavía no tiene artículo
+            # elegido (pestaña Equipos y configuración), cae al valor de fábrica del modelo
+            # -- nunca al recorte más grande, para no estimar de más.
+            _capacidad_w = (capacidad_controlador_articulo_w(c.get("articulo"))
+                            or SPECS_TURBINAS[c["modelo"]]["potencia_nominal_w"])
+            r = simular(df_clima, altura_buje=c["altura_buje"], modelo=c["modelo"], N=int(c["N"]),
+                        elevacion_m=elevacion_m, z0=z0, metodo_bouquet=metodo_bouquet,
+                        capacidad_electronica_w=_capacidad_w)
+        resultados.append({**c, **r})
+    return resultados
+
+
+def _proyecto_tiene_solar(clusters):
+    return any(es_modelo_eco_roof(c["modelo"]) and articulo_incluye_solar(c.get("articulo"))
+               for c in clusters)
 
 
 # --- Helpers de gráficos ---
@@ -692,7 +800,7 @@ with st.sidebar:
         st.success(f"{st.session_state.get('sitio_nombre_activo')}")
     else:
         st.caption(t("sidebar_sin_sitio"))
-    _n_turbinas = sum(c["N"] for c in st.session_state.clusters)
+    _n_turbinas = sum(c["N"] * _turbinas_por_equipo(c["modelo"]) for c in st.session_state.clusters)
     st.caption(t("sidebar_resumen_clusters", n_clusters=len(st.session_state.clusters), n_turbinas=_n_turbinas))
     if st.session_state.get("calculo_listo"):
         st.caption(t("sidebar_calculo_listo"))
@@ -720,15 +828,13 @@ with st.sidebar:
 # Clona la estructura real de Skyplus: 4 tabs navegables en la parte superior,
 # cada uno con su contenido y controles. El sidebar es limpio (solo marca + resumen).
 
-(tab_clima, tab_contexto, tab_config, tab_resultados, tab_financiero, tab_especificacion,
- tab_eco_roof) = st.tabs([
+tab_clima, tab_contexto, tab_config, tab_resultados, tab_financiero, tab_especificacion = st.tabs([
     t("tabs_clima"),
     t("tabs_contexto"),
     t("tabs_config"),
     t("tabs_resultados"),
     t("tabs_financiero"),
     t("tabs_especificacion"),
-    t("tabs_eco_roof"),
 ])
 
 with tab_clima:
@@ -915,16 +1021,34 @@ with tab_config:
         with st.container():
             cc1, cc2, cc3, cc4 = st.columns([2, 1, 1, 0.4])
             c["modelo"] = cc1.selectbox(
-                t("equipos_label_modelo"), options=list(CURVE_COEFFICIENTS.keys()),
+                t("equipos_label_modelo"), options=MODELOS_CARTERA,
                 format_func=lambda k: NOMBRES_MODELO.get(k, k),
-                index=list(CURVE_COEFFICIENTS.keys()).index(c["modelo"]), key=f"modelo_{i}",
+                index=MODELOS_CARTERA.index(c["modelo"]), key=f"modelo_{i}",
             )
-            c["N"] = cc2.number_input(t("equipos_label_n"), min_value=1, max_value=20, value=c["N"], step=1, key=f"n_{i}")
-            c["altura_buje"] = cc3.number_input(
-                t("equipos_label_buje"), min_value=0.5, max_value=150.0,
-                value=c["altura_buje"], step=0.5, key=f"h_{i}",
-                help=t("equipos_help_buje"),
+            _es_eco_roof = es_modelo_eco_roof(c["modelo"])
+            c["N"] = cc2.number_input(
+                t("equipos_label_n_equipos") if _es_eco_roof else t("equipos_label_n"),
+                min_value=1, max_value=20, value=c["N"], step=1, key=f"n_{i}",
+                help=t("equipos_help_n_equipos") if _es_eco_roof else None,
             )
+            if _es_eco_roof:
+                # Eco-Roof va sobre un techo: se pide la altura del techo y el buje queda a
+                # esa altura + la del producto (1.149 m). Key propia (techo_{i}): la altura
+                # de buje que el usuario tenía para una turbina suelta queda guardada aparte
+                # (altura_buje_libre) y vuelve si cambia de nuevo a un modelo de turbina.
+                c["altura_techo"] = cc3.number_input(
+                    t("equipos_label_altura_techo"), min_value=0.0, max_value=150.0,
+                    value=c.get("altura_techo", 0.0), step=0.5, key=f"techo_{i}",
+                    help=t("equipos_help_altura_techo"),
+                )
+                c["altura_buje"] = c["altura_techo"] + ALTURA_BUJE_ECO_ROOF_M
+            else:
+                c["altura_buje"] = cc3.number_input(
+                    t("equipos_label_buje"), min_value=0.5, max_value=150.0,
+                    value=c.get("altura_buje_libre", c["altura_buje"]), step=0.5, key=f"h_{i}",
+                    help=t("equipos_help_buje"),
+                )
+                c["altura_buje_libre"] = c["altura_buje"]
             if cc4.button("✕", key=f"del_{i}", help=t("equipos_boton_quitar_cluster")) and len(st.session_state.clusters) > 1:
                 st.session_state.clusters.pop(i)
                 st.rerun()
@@ -952,11 +1076,36 @@ with tab_config:
                 c["articulo"] = None
                 st.caption(t("equipos_caption_sin_precio"))
 
+            if _es_eco_roof:
+                st.caption(t("equipos_caption_buje_ecoroof", techo=f"{c['altura_techo']:.1f}",
+                             buje=f"{c['altura_buje']:.2f}"))
+                if articulo_incluye_solar(c["articulo"]):
+                    _preset_fila = ECO_ROOF_PRESETS[PRESET_POR_MODELO[c["modelo"]]]
+                    st.caption(t("equipos_caption_ecoroof_solar_si",
+                                 w=f"{_preset_fila['capacidad_solar_kwp'] * 1000:.0f}"))
+                else:
+                    st.caption(t("equipos_caption_ecoroof_solar_no"))
+
             _specs = SPECS_TURBINAS.get(c["modelo"])
             _ruta_img = RUTA_IMAGEN.get(c["modelo"])
             with st.expander(t("equipos_expander_ficha_tecnica",
                                 nombre_modelo=NOMBRES_MODELO.get(c["modelo"], c["modelo"]))):
-                if not _specs:
+                if _es_eco_roof:
+                    _specs_turbina = SPECS_TURBINAS[ECO_ROOF_PRESETS[PRESET_POR_MODELO[c["modelo"]]]["turbina_key"]]
+                    st.caption(t("pdf_ecoroof_texto_preconfigurado"))
+                    st.caption(t("equipos_caption_numero_parte",
+                                  numero_parte=_specs["numero_parte"], clase_iec=_specs_turbina["clase_iec"]))
+                    _col_espec, _col_val = t("especificacion_col_especificacion"), t("especificacion_col_valor")
+                    st.dataframe(
+                        pd.DataFrame([{_col_espec: f, _col_val: v}
+                                      for f, v in _filas_ficha_eco_roof(c["modelo"], c["articulo"])]),
+                        hide_index=True, use_container_width=True,
+                    )
+                    st.markdown(t("pdf_ecoroof_tabla_potencia_titulo"))
+                    st.caption(t("pdf_ecoroof_nota_potencia"))
+                    st.dataframe(_tabla_potencia_eco_roof_df(c["modelo"]), hide_index=True,
+                                 use_container_width=True)
+                elif not _specs:
                     st.caption(t("equipos_caption_sin_ficha"))
                 else:
                     col_img, col_specs = st.columns([1, 2])
@@ -1029,39 +1178,35 @@ with tab_resultados:
         z0 = st.session_state.z0_avanzado
         metodo_bouquet = st.session_state.metodo_bouquet_radio
 
+        # Se simula antes de la cadena de abajo para poder mostrar una falla real (ej.
+        # EnergyPlus de un equipo Eco-Roof con paneles) como un st.error más, sin tumbar
+        # la pestaña con una traza cruda.
+        resultados, error_simulacion = None, None
+        if resultado_clima is not None and not error:
+            try:
+                with (st.spinner(t("ecoroof_spinner_solar"))
+                      if _proyecto_tiene_solar(st.session_state.clusters) else contextlib.nullcontext()):
+                    resultados = _simular_clusters(st.session_state.clusters, resultado_clima, z0, metodo_bouquet)
+            except Exception as e:
+                error_simulacion = t("resultados_error_simulacion", error=e)
+
         if resultado_clima is None:
             st.error(t("resultados_error_sin_estacion"))
         elif error:
             st.error(error)
+        elif error_simulacion:
+            st.error(error_simulacion)
         else:
             df_clima = resultado_clima["df_clima"]
             elevacion_m = resultado_clima["elevacion_m"]
 
-            resultados = []
-            serie_total_w = None
-            serie_perdido_total_kwh = None
-            for c in st.session_state.clusters:
-                # Recorte por electrónica (correo Estadio Heredia, Flower Turbines):
-                # sin este tope, kWh/año asume que TODA la energía aerodinámica se
-                # aprovecha, sin importar qué controlador/inversor se compró -- eso
-                # sobreestima la producción real en sitios de viento fuerte. Si el
-                # clúster todavía no tiene artículo elegido (pestaña Equipos y
-                # configuración), cae al valor de fábrica del modelo -- nunca al
-                # recorte más grande, para no estimar de más.
-                _capacidad_w = (capacidad_controlador_articulo_w(c.get("articulo"))
-                                or SPECS_TURBINAS[c["modelo"]]["potencia_nominal_w"])
-                r = simular(df_clima, altura_buje=c["altura_buje"], modelo=c["modelo"], N=int(c["N"]),
-                            elevacion_m=elevacion_m, z0=z0, metodo_bouquet=metodo_bouquet,
-                            capacidad_electronica_w=_capacidad_w)
-                resultados.append({**c, **r})
-                serie_cluster_w = r["serie_horaria_W_por_turbina"] * c["N"]
-                serie_total_w = serie_cluster_w if serie_total_w is None else serie_total_w + serie_cluster_w
-                serie_cluster_kwh_perdido = r["serie_horaria_kwh_perdido_por_turbina"] * c["N"]
-                serie_perdido_total_kwh = (serie_cluster_kwh_perdido if serie_perdido_total_kwh is None
-                                            else serie_perdido_total_kwh + serie_cluster_kwh_perdido)
+            serie_total_w = sum(r["serie_horaria_W_por_turbina"] * r["N"] for r in resultados)
+            serie_perdido_total_kwh = sum(r["serie_horaria_kwh_perdido_por_turbina"] * r["N"] for r in resultados)
 
             kwh_total = sum(r["kwh_anual"] for r in resultados)
-            n_total = sum(c["N"] for c in st.session_state.clusters)
+            n_total = sum(r["N"] * _turbinas_por_equipo(r["modelo"]) for r in resultados)
+            _hay_eco_roof = any(r.get("es_eco_roof") for r in resultados)
+            _hay_solar = any(r.get("incluye_solar") for r in resultados)
 
             c1, c2, c3, c4 = st.columns(4)
             c1.metric(t("resultados_metric_produccion_anual"), f"{kwh_total:,.0f} kWh")
@@ -1073,19 +1218,33 @@ with tab_resultados:
             c4.metric(t("resultados_metric_altura_buje"), f"{resultados[0]['altura_buje']:.0f} m")
 
             st.markdown(t("resultados_subheader_detalle_cluster"))
-            tabla = pd.DataFrame([{
-                t("resultados_col_modelo"): NOMBRES_MODELO.get(r["modelo"], r["modelo"]),
-                t("resultados_col_n"): r["N"],
-                t("resultados_col_buje"): r["altura_buje"],
-                t("resultados_col_kwh_anio"): round(r["kwh_anual"]),
-                t("resultados_col_v_media_buje"): round(r["v_hub_medio"], 2),
-                t("resultados_col_pct_bajo_cutin"): round(r["pct_horas_bajo_cutin"], 1),
-                t("resultados_col_pct_recorte"): round(r["pct_horas_con_recorte"], 1),
-                t("resultados_col_kwh_perdidos_recorte"): round(r["energia_perdida_por_recorte_kwh"]),
-            } for r in resultados])
+
+            def _fila_resultado(r):
+                fila = {
+                    t("resultados_col_modelo"): NOMBRES_MODELO.get(r["modelo"], r["modelo"]),
+                    t("resultados_col_n"): r["N"],
+                    t("resultados_col_buje"): r["altura_buje"],
+                    t("resultados_col_kwh_anio"): round(r["kwh_anual"]),
+                }
+                if _hay_eco_roof:
+                    fila[t("resultados_col_kwh_eolico")] = round(r.get("kwh_anual_eolico", r["kwh_anual"]))
+                    fila[t("resultados_col_kwh_solar")] = round(r.get("kwh_anual_solar", 0.0))
+                fila.update({
+                    t("resultados_col_v_media_buje"): round(r["v_hub_medio"], 2),
+                    t("resultados_col_pct_bajo_cutin"): round(r["pct_horas_bajo_cutin"], 1),
+                    t("resultados_col_pct_recorte"): round(r["pct_horas_con_recorte"], 1),
+                    t("resultados_col_kwh_perdidos_recorte"): round(r["energia_perdida_por_recorte_kwh"]),
+                })
+                return fila
+
+            tabla = pd.DataFrame([_fila_resultado(r) for r in resultados])
             st.dataframe(tabla, hide_index=True)
             if any(r["energia_perdida_por_recorte_kwh"] > 0 for r in resultados):
                 st.caption(t("resultados_caption_recorte"))
+            if _hay_eco_roof:
+                st.caption(t("resultados_caption_ecoroof"))
+            if _hay_solar:
+                st.caption(t("pdf_ecoroof_caja_advertencia_solar"))
 
             media_confirmada = resultado_clima["media"]
             with st.expander(t("resultados_expander_perfil_viento")):
@@ -1105,16 +1264,20 @@ with tab_resultados:
                     else t("resultados_perfil_difieren"),
                 ))
 
-            with st.expander(t("resultados_expander_horario_vs_media")):
-                cmp = comparar_metodo_ingenuo_vs_horario(
-                    df_clima, altura_buje=resultados[0]["altura_buje"], modelo=resultados[0]["modelo"],
-                    N=int(resultados[0]["N"]), elevacion_m=elevacion_m, z0=z0, metodo_bouquet=metodo_bouquet)
-                st.write(t(
-                    "resultados_jensen_texto",
-                    kwh_correcto=f"{cmp['kwh_anual_correcto']:.0f}", v_media=f"{cmp['v_media']:.2f}",
-                    kwh_ingenuo=f"{cmp['kwh_anual_ingenuo']:.0f}",
-                    razon=f"{cmp['razon_correcto_sobre_ingenuo']:.2f}",
-                ))
+            # Comparación del motor de curvas k·v³×M(N) -- sólo aplica a turbinas sueltas,
+            # no a los equipos Eco-Roof (tabla oficial): se usa el primer clúster de ese tipo.
+            _r_curva = next((r for r in resultados if not r.get("es_eco_roof")), None)
+            if _r_curva is not None:
+                with st.expander(t("resultados_expander_horario_vs_media")):
+                    cmp = comparar_metodo_ingenuo_vs_horario(
+                        df_clima, altura_buje=_r_curva["altura_buje"], modelo=_r_curva["modelo"],
+                        N=int(_r_curva["N"]), elevacion_m=elevacion_m, z0=z0, metodo_bouquet=metodo_bouquet)
+                    st.write(t(
+                        "resultados_jensen_texto",
+                        kwh_correcto=f"{cmp['kwh_anual_correcto']:.0f}", v_media=f"{cmp['v_media']:.2f}",
+                        kwh_ingenuo=f"{cmp['kwh_anual_ingenuo']:.0f}",
+                        razon=f"{cmp['razon_correcto_sobre_ingenuo']:.2f}",
+                    ))
 
             st.divider()
             kwh_mensual_total = pd.concat([r["kwh_mensual"] for r in resultados], axis=1).sum(axis=1)
@@ -1153,6 +1316,7 @@ with tab_resultados:
                 "kwh_mensual_total": kwh_mensual_total,
                 "correccion_densidad_pct": (1 - resultados[0]["factor_correccion_densidad"]) * 100,
                 "tabla_desglose_viento": tabla_desglose_viento,
+                "incluye_solar": _hay_solar,
             }
     else:
         st.info(t("resultados_info_sin_calculo"))
@@ -1182,42 +1346,42 @@ with tab_financiero:
     else:
         resultado_clima = st.session_state.sitio_activo
         error = None if resultado_clima is None else resultado_clima.get("error")
+        z0 = st.session_state.z0_avanzado
+        metodo_bouquet = st.session_state.metodo_bouquet_radio
+
+        # Mismo cálculo de kWh/año que "Resultados" (Hallazgo 12/17), recalculado acá
+        # para no depender de que el usuario haya visitado esa pestaña en esta sesión --
+        # misma función (_simular_clusters), así el recorte por electrónica y el
+        # tratamiento de los equipos Eco-Roof son idénticos en las dos pestañas y
+        # Payback/ROI/NPV nunca se calculan contra una energía distinta a la que muestra
+        # Resultados. La corrida de EnergyPlus de un Eco-Roof con paneles ya quedó en
+        # caché desde Resultados, no se repite.
+        resultados_clusters, error_simulacion = None, None
+        if resultado_clima is not None and not error:
+            try:
+                resultados_clusters = _simular_clusters(
+                    st.session_state.clusters, resultado_clima, z0, metodo_bouquet)
+            except Exception as e:
+                error_simulacion = t("resultados_error_simulacion", error=e)
 
         if resultado_clima is None:
             st.error(t("resultados_error_sin_estacion"))
         elif error:
             st.error(error)
+        elif error_simulacion:
+            st.error(error_simulacion)
         else:
-            df_clima = resultado_clima["df_clima"]
-            elevacion_m = resultado_clima["elevacion_m"]
-            z0 = st.session_state.z0_avanzado
-            metodo_bouquet = st.session_state.metodo_bouquet_radio
-
-            # Mismo cálculo de kWh/año que "Resultados" (Hallazgo 12/17), recalculado acá
-            # para no depender de que el usuario haya visitado esa pestaña en esta sesión.
-            # Se guarda también la serie horaria completa del proyecto (Hallazgo 54): la
-            # tarifa horaria de Costa Rica necesita saber A QUÉ HORA se genera cada kWh, no
-            # sólo el total anual -- serie_horaria_W_por_turbina es POR TURBINA, se escala
-            # por N de cada clúster y se suman todos para tener el perfil horario del proyecto.
-            # Mismo recorte por electrónica que en "Resultados" (correo Estadio
-            # Heredia, Flower Turbines) -- si acá diera un kWh/año distinto al de esa
-            # pestaña por no aplicar el mismo tope, Payback/ROI/NPV terminarían
-            # calculados contra una energía que la pestaña Resultados ya no muestra.
-            resultados_clusters = [
-                simular(df_clima, altura_buje=c["altura_buje"], modelo=c["modelo"], N=int(c["N"]),
-                        elevacion_m=elevacion_m, z0=z0, metodo_bouquet=metodo_bouquet,
-                        capacidad_electronica_w=(capacidad_controlador_articulo_w(c.get("articulo"))
-                                                  or SPECS_TURBINAS[c["modelo"]]["potencia_nominal_w"]))
-                for c in st.session_state.clusters
-            ]
+            # Serie horaria completa del proyecto (Hallazgo 54): la tarifa horaria de Costa
+            # Rica necesita saber A QUÉ HORA se genera cada kWh, no sólo el total anual --
+            # serie_horaria_W_por_turbina se escala por N de cada clúster (turbinas, o
+            # equipos en Eco-Roof) y se suman todos; la solar de los Eco-Roof con paneles
+            # (serie_horaria_kwh_solar, ya por clúster) se suma aparte, hora por hora.
             kwh_anual_total = sum(r["kwh_anual"] for r in resultados_clusters)
             serie_horaria_kwh_total = sum(
-                r["serie_horaria_W_por_turbina"] * int(c["N"]) / 1000.0
-                for r, c in zip(resultados_clusters, st.session_state.clusters)
+                r["serie_horaria_W_por_turbina"] * int(r["N"]) / 1000.0
+                + r.get("serie_horaria_kwh_solar", 0.0)
+                for r in resultados_clusters
             )
-            turbinas_seleccionadas = [
-                c["modelo"] for c in st.session_state.clusters for _ in range(int(c["N"]))
-            ]
 
             # Hallazgo 57: se dejó de dimensionar/costear el BESS acá -- consumo diario,
             # horas de autonomía y tipo de sistema quedaron sin efecto en Payback/ROI/NPV
@@ -1361,9 +1525,12 @@ with tab_financiero:
             # arreglo (el motor financiero las usa sólo como dato informativo, no cambian
             # Payback/ROI/NPV) -- eso no depende de qué inversor se use.
             _potencia_pico_total_W = sum(
-                SPECS_TURBINAS[modelo]["potencia_nominal_w"] for modelo in turbinas_seleccionadas
+                _potencia_pico_equipo_w(r["modelo"], r.get("articulo")) * int(r["N"])
+                for r in resultados_clusters
             )
-            _cantidad_turbinas_total = len(turbinas_seleccionadas)
+            _cantidad_turbinas_total = sum(
+                int(r["N"]) * _turbinas_por_equipo(r["modelo"]) for r in resultados_clusters
+            )
 
             st.divider()
             st.markdown(t("financiero_subheader_equipo_elegido"))
@@ -1568,16 +1735,17 @@ with tab_especificacion:
             _prod = st.session_state["ultimo_resultado_produccion"]
             elevacion_m = resultado_clima["elevacion_m"]
             kwh_anual_total = _prod["kwh_total"]
-            turbinas_seleccionadas = [
-                c["modelo"] for c in st.session_state.clusters for _ in range(int(c["N"]))
-            ]
             # Potencia del GENERADOR (ficha de fábrica) -- no cambia según qué
             # controlador/inversor se haya elegido para el clúster (ver docstring de
             # capacidad_controlador_articulo_w: son dos componentes eléctricos
-            # distintos, se corrigió acá una confusión real entre ambos).
+            # distintos, se corrigió acá una confusión real entre ambos). Para Eco-Roof,
+            # ver _potencia_pico_equipo_w (tabla oficial, no la "potencia nominal").
             potencia_pico_W = sum(
-                SPECS_TURBINAS[c["modelo"]]["potencia_nominal_w"] * int(c["N"])
+                _potencia_pico_equipo_w(c["modelo"], c.get("articulo")) * int(c["N"])
                 for c in st.session_state.clusters
+            )
+            n_turbinas_total = sum(
+                int(c["N"]) * _turbinas_por_equipo(c["modelo"]) for c in st.session_state.clusters
             )
 
             # Va acumulando los mismos datos que se muestran en pantalla (más los gráficos,
@@ -1587,9 +1755,10 @@ with tab_especificacion:
                 "potencia_pico_kw": potencia_pico_W / 1000,
                 "energia_anual_kwh": kwh_anual_total,
                 "elevacion_m": elevacion_m,
-                "n_turbinas_total": len(turbinas_seleccionadas),
+                "n_turbinas_total": n_turbinas_total,
                 "voltaje_bus_v": VOLTAJE_TURBINAS_V,
                 "turbinas": [],
+                "incluye_solar": _prod.get("incluye_solar", False),
             }
 
             st.markdown(t("especificacion_subheader_datos_generales"))
@@ -1626,6 +1795,24 @@ with tab_especificacion:
                         _titulo = f"**{_specs['nombre']}**" + (f" -- {_articulo}" if _articulo else "")
                         st.markdown(t("especificacion_turbina_titulo_cantidad", titulo=_titulo, cantidad=_cantidad))
                         st.caption(t("especificacion_caption_fabricante", numero_parte=_specs["numero_parte"]))
+                        if es_modelo_eco_roof(_clave):
+                            st.caption(t("pdf_ecoroof_texto_preconfigurado"))
+                            _filas_turbina = _filas_ficha_eco_roof(_clave, _articulo)
+                            _col_espec, _col_val = t("especificacion_col_especificacion"), t("especificacion_col_valor")
+                            st.dataframe(
+                                pd.DataFrame([{_col_espec: f, _col_val: v} for f, v in _filas_turbina]),
+                                hide_index=True, use_container_width=True,
+                            )
+                            st.markdown(t("pdf_ecoroof_tabla_potencia_titulo"))
+                            st.caption(t("pdf_ecoroof_nota_potencia"))
+                            st.dataframe(_tabla_potencia_eco_roof_df(_clave), hide_index=True,
+                                         use_container_width=True)
+                            _datos_pdf["turbinas"].append({
+                                "nombre": _titulo.replace("**", ""), "cantidad": _cantidad, "clave": _clave,
+                                "numero_parte": _specs["numero_parte"], "filas": _filas_turbina,
+                                "tabla_potencia_w": ECO_ROOF_PRESETS[PRESET_POR_MODELO[_clave]]["tabla_potencia"],
+                            })
+                            continue
                         _filas_turbina = [
                             (t("especificacion_fila_potencia_nominal"), f"{_specs['potencia_nominal_w']:.0f} W"),
                             (t("especificacion_fila_velocidad_nominal"), f"{_specs['viento_potencia_nominal_ms']} m/s"),
@@ -1747,160 +1934,5 @@ with tab_especificacion:
                     file_name=f"ECO-Wind_informe_ejecutivo_{date.today().isoformat()}.pdf",
                     mime="application/pdf",
                     type="primary",
-                )
-
-
-# --- Tab: Eco-Roof Energy Hub -- producto de fábrica preconfigurado (Small Tulip, ---
-# --- 1m), motor y catálogo separados del sistema de clústers libres (Pista A) -------
-# --- (engine/eco_roof_*.py) -- NO toca simular()/power_in_bouquet() ni ningún -------
-# --- resultado ya calculado para el Estadio Heredia o el business case de CNFL. -----
-
-with tab_eco_roof:
-    st.caption(t("ecoroof_caption_intro"))
-
-    if not st.session_state.get("sitio_activo") or st.session_state.sitio_activo.get("error"):
-        st.info(t("ecoroof_info_sin_clima"))
-    else:
-        resultado_clima_er = st.session_state.sitio_activo
-        df_clima_er = resultado_clima_er["df_clima"]
-        meta_er = resultado_clima_er["meta"]
-        elevacion_er = resultado_clima_er["elevacion_m"]
-        ruta_epw_er = resultado_clima_er["ruta_epw"]
-
-        _opciones_er = {clave: t(f"ecoroof_nombre_{clave}") for clave in ECO_ROOF_PRESETS
-                         if preset_disponible(clave)}
-        _clave_er = st.selectbox(t("ecoroof_selectbox_producto"), options=list(_opciones_er.keys()),
-                                  format_func=lambda k: _opciones_er[k])
-        preset_er = ECO_ROOF_PRESETS[_clave_er]
-        specs_producto_er = SPECS_TURBINAS[preset_er["specs_key"]]
-        specs_turbina_er = SPECS_TURBINAS[preset_er["turbina_key"]]
-        z0_er = st.session_state.get("z0_avanzado", Z0_DEFAULT)
-
-        # El bloque solar corre una simulación REAL de EnergyPlus (unos segundos) --
-        # _simular_eco_roof_cacheado() evita repetirla en cada rerun de Streamlit. Esto
-        # corre SIN botón (a diferencia del PDF de abajo) apenas hay un sitio activo, así
-        # que sí necesita su propio try/except -- una falla real de EnergyPlus (binario
-        # ausente, EPW corrupto, etc.) no debe tumbar toda la pestaña con una traza cruda.
-        idioma_er = st.session_state.get("idioma", IDIOMA_DEFAULT)
-        resultado_er = None
-        try:
-            with st.spinner(t("ecoroof_spinner_solar")):
-                resultado_er = _simular_eco_roof_cacheado(
-                    _clave_er, df_clima_er, ruta_epw_er, elevacion_er, z0_er,
-                )
-        except Exception as e:
-            st.error(t("especificacion_error_generar_pdf", error=e))
-
-        if resultado_er is not None:
-            c1, c2, c3 = st.columns(3)
-            c1.metric(t("ecoroof_metric_eolica"), f"{resultado_er['kwh_anual_eolico']:,.0f} kWh")
-            c2.metric(t("ecoroof_metric_solar"), f"{resultado_er['kwh_anual_solar']:,.0f} kWh")
-            c3.metric(t("ecoroof_metric_total"), f"{resultado_er['kwh_anual_total']:,.0f} kWh")
-            # tr() con el mismo texto/clave que ya usa el PDF (pdf_ecoroof_caja_advertencia_solar)
-            # -- antes esto mostraba resultado_er["solar"]["advertencia"] crudo, siempre en
-            # español, sin importar el idioma elegido en el toggle ES/EN.
-            st.caption(tr("pdf_ecoroof_caja_advertencia_solar", idioma_er))
-
-            st.divider()
-            st.markdown(t("pdf_ecoroof_subheader_produccion_eolica"))
-            st.plotly_chart(crear_produccion_mensual_plotly(resultado_er["kwh_mensual_eolico"]),
-                             use_container_width=True, key="ecoroof_chart_mensual_eolico")
-            st.markdown(t("pdf_ecoroof_subheader_produccion_solar"))
-            st.plotly_chart(crear_produccion_mensual_plotly(resultado_er["solar"]["kwh_mensual"]),
-                             use_container_width=True, key="ecoroof_chart_mensual_solar")
-
-            st.divider()
-            st.markdown(t("pdf_ecoroof_tabla_potencia_titulo"))
-            st.caption(t("pdf_ecoroof_nota_potencia"))
-            st.dataframe(pd.DataFrame({
-                t("pdf_ecoroof_col_velocidad"): [f"{v} m/s" for v in range(16)],
-                t("pdf_ecoroof_col_potencia"): [
-                    f"{potencia_tabla_w(float(v), preset_er['tabla_potencia']):.1f} W" for v in range(16)
-                ],
-            }), hide_index=True, use_container_width=True)
-
-            st.divider()
-            st.markdown(t("especificacion_subheader_informe"))
-            # Mismo patrón que el informe del 3-M Tulip (ver comentario ahí): SOLO corre
-            # detrás de un botón explícito -- Streamlit ejecuta el cuerpo de todas las
-            # pestañas en cada rerun, generar esto sin botón tumbaría la app entera si
-            # kaleido/Chrome no están disponibles, cada vez que se aprieta cualquier botón
-            # en cualquier pestaña.
-            if st.button(t("especificacion_boton_generar_pdf"), key="ecoroof_boton_generar_pdf"):
-                try:
-                    with st.spinner(t("especificacion_spinner_generando")):
-                        if "meta" in resultado_clima_er:
-                            _fuente_texto_er = t(
-                                "especificacion_pdf_fuente_estacion",
-                                estacion=meta_er["estacion"], pais=meta_er["pais"], wmo=meta_er["wmo"],
-                                lat=f"{meta_er['lat']:.4f}", lon=f"{meta_er['lon']:.4f}",
-                                elevacion_m=f"{meta_er['elevacion_m']:.0f}",
-                                media=f"{resultado_clima_er['media']:.2f}",
-                            )
-                        else:
-                            _fuente_texto_er = t("especificacion_pdf_fuente_generico",
-                                                  media=f"{resultado_clima_er['media']:.2f}")
-
-                        _fig_heatmap_er, _ = crear_heatmap_plotly(
-                            resultado_clima_er["hm_json"], media_anual=resultado_clima_er["media"],
-                            altura_m=preset_er["altura_buje_m"], z0=z0_er,
-                        )
-
-                        _datos_pdf_er = {
-                            "sitio_nombre": st.session_state.get("sitio_nombre_activo") or "--",
-                            "elevacion_m": elevacion_er,
-                            "preset": {
-                                "nombre": t(f"ecoroof_nombre_{_clave_er}"), "n_turbinas": preset_er["N"],
-                                "numero_parte": specs_producto_er["numero_parte"],
-                                "clase_iec": specs_turbina_er["clase_iec"],
-                                "tipo_techo": preset_er["tipo_techo"],
-                                "peso_kg_m2": specs_producto_er["peso_total_kg"],
-                                "cimentacion_texto": t(specs_producto_er["cimentacion_requerida"]),
-                                "angulo_max_techo_deg": preset_er["angulo_max_techo_deg"],
-                                "tabla_potencia_w": preset_er["tabla_potencia"],
-                                "capacidad_solar_kwp": preset_er["capacidad_solar_kwp"],
-                                "ruta_imagen": RUTA_IMAGEN.get(preset_er["specs_key"]),
-                            },
-                            "clima": {
-                                "fuente_texto": _fuente_texto_er,
-                                "img_rosa": fig_a_png(crear_rosa_vientos_plotly(
-                                    resultado_clima_er["rosa_detallada"])),
-                                "img_heatmap": fig_a_png(_fig_heatmap_er) if _fig_heatmap_er else None,
-                                "img_perfil": fig_a_png(crear_perfil_viento_plotly(
-                                    resultado_clima_er["media"], z0=z0_er,
-                                    altura_max=max(preset_er["altura_buje_m"] * 1.15, 10.0),
-                                    altura_marcada=preset_er["altura_buje_m"],
-                                )),
-                            },
-                            "produccion": {
-                                "kwh_anual_eolico": resultado_er["kwh_anual_eolico"],
-                                "kwh_anual_solar": resultado_er["kwh_anual_solar"],
-                                "kwh_anual_total": resultado_er["kwh_anual_total"],
-                                "img_mensual_eolico": fig_a_png(
-                                    crear_produccion_mensual_plotly(resultado_er["kwh_mensual_eolico"])),
-                                "img_mensual_solar": fig_a_png(
-                                    crear_produccion_mensual_plotly(resultado_er["solar"]["kwh_mensual"])),
-                            },
-                            # CAPEX sin módulo financiero propio para Eco-Roof todavía --
-                            # None acá muestra la misma caja "completá estos datos" que ya
-                            # usa el informe del 3-M Tulip cuando falta, nunca se inventa
-                            # un CAPEX.
-                            "financiero": None,
-                        }
-                        st.session_state["informe_eco_roof_pdf"] = generar_pdf_informe_eco_roof(
-                            _datos_pdf_er, logo_path=LOGO_ECO if os.path.exists(LOGO_ECO) else None,
-                            idioma=idioma_er)
-                except Exception as e:
-                    st.session_state["informe_eco_roof_pdf"] = None
-                    st.error(t("especificacion_error_generar_pdf", error=e))
-
-            if st.session_state.get("informe_eco_roof_pdf"):
-                st.download_button(
-                    t("especificacion_boton_descargar_pdf"),
-                    data=st.session_state["informe_eco_roof_pdf"],
-                    file_name=f"ECO-Wind_informe_eco_roof_{date.today().isoformat()}.pdf",
-                    mime="application/pdf",
-                    type="primary",
-                    key="ecoroof_boton_descargar_pdf",
                 )
 
