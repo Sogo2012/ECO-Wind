@@ -25,12 +25,14 @@ reales de la ficha de Pablo -- no se duplican esos valores acá):
 from engine.eco_roof_curves import TABLA_N3, TABLA_N5
 
 # Altura de pala del Small Tulip (engine/turbine_specs.py -- SPECS_TURBINAS["small_tulip"]
-# ["altura_pala_m"]) -- se usa como altura de buje efectiva porque el producto empacado
-# (specs_key) no trae un valor de "altura de buje" separado del de la turbina individual;
-# es la mejor aproximación disponible, no un dato inventado (mismo número que ya está en
-# la ficha oficial). Sub-metro, así que wind_at_height() con esto siempre corrige HACIA
-# ABAJO respecto al dato de referencia a 10m (nunca hacia arriba) -- físicamente esperado
-# para un producto de techo, muy bajo comparado con la altura de referencia meteorológica.
+# ["altura_pala_m"]) -- se usa como altura del buje SOBRE EL TECHO porque el producto
+# empacado (specs_key) no trae un valor de "altura de buje" separado del de la turbina
+# individual; es la mejor aproximación disponible, no un dato inventado (mismo número que
+# ya está en la ficha oficial). La altura del buje sobre el TERRENO, que es la que entra al
+# perfil logarítmico de viento, es altura del techo + este valor (ver
+# engine/eco_roof_simulador.py::simular_eco_roof(), parámetro altura_techo_m) -- sin sumar
+# el techo, la turbina quedaría a ~1 m del suelo y el eólico se subestimaría del orden de
+# 10 veces para un edificio real.
 ALTURA_BUJE_ECO_ROOF_M = 1.149
 
 ECO_ROOF_PRESETS = {

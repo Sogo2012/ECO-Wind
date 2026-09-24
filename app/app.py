@@ -359,7 +359,7 @@ def _simular_clusters(clusters, resultado_clima, z0, metodo_bouquet):
         if es_modelo_eco_roof(c["modelo"]):
             r = simular_cluster_eco_roof(
                 c["modelo"], int(c["N"]), df_clima, resultado_clima["ruta_epw"], elevacion_m,
-                c.get("articulo"), z0=z0,
+                c.get("articulo"), z0=z0, altura_techo_m=c.get("altura_techo", 0.0),
             )
         else:
             # Recorte por electrónica (correo Estadio Heredia, Flower Turbines): sin este
@@ -1032,14 +1032,16 @@ with tab_config:
                 help=t("equipos_help_n_equipos") if _es_eco_roof else None,
             )
             if _es_eco_roof:
-                # Buje fijo del producto, con su propia key (h_eco_{i}): la altura que el
-                # usuario tenía puesta para una turbina suelta queda guardada aparte
+                # Eco-Roof va sobre un techo: se pide la altura del techo y el buje queda a
+                # esa altura + la del producto (1.149 m). Key propia (techo_{i}): la altura
+                # de buje que el usuario tenía para una turbina suelta queda guardada aparte
                 # (altura_buje_libre) y vuelve si cambia de nuevo a un modelo de turbina.
-                cc3.number_input(
-                    t("equipos_label_buje"), value=ALTURA_BUJE_ECO_ROOF_M, format="%.3f",
-                    disabled=True, key=f"h_eco_{i}", help=t("equipos_help_buje_ecoroof"),
+                c["altura_techo"] = cc3.number_input(
+                    t("equipos_label_altura_techo"), min_value=0.0, max_value=150.0,
+                    value=c.get("altura_techo", 0.0), step=0.5, key=f"techo_{i}",
+                    help=t("equipos_help_altura_techo"),
                 )
-                c["altura_buje"] = ALTURA_BUJE_ECO_ROOF_M
+                c["altura_buje"] = c["altura_techo"] + ALTURA_BUJE_ECO_ROOF_M
             else:
                 c["altura_buje"] = cc3.number_input(
                     t("equipos_label_buje"), min_value=0.5, max_value=150.0,
@@ -1075,6 +1077,8 @@ with tab_config:
                 st.caption(t("equipos_caption_sin_precio"))
 
             if _es_eco_roof:
+                st.caption(t("equipos_caption_buje_ecoroof", techo=f"{c['altura_techo']:.1f}",
+                             buje=f"{c['altura_buje']:.2f}"))
                 if articulo_incluye_solar(c["articulo"]):
                     _preset_fila = ECO_ROOF_PRESETS[PRESET_POR_MODELO[c["modelo"]]]
                     st.caption(t("equipos_caption_ecoroof_solar_si",

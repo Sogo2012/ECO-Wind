@@ -1328,11 +1328,22 @@ TRANSLATIONS = {
                "with its fixed factory bouquet (3 or 5 Small Tulip 1m turbines) and is priced "
                "per unit."),
     },
-    "equipos_help_buje_ecoroof": {
-        "es": ("Fija en Eco-Roof: altura de pala del Small Tulip (1.149 m), la misma que usa la "
-               "tabla oficial del producto."),
-        "en": ("Fixed for Eco-Roof: Small Tulip blade height (1.149 m), the same used by the "
-               "product's official table."),
+    "equipos_label_altura_techo": {"es": "Altura del techo (m)", "en": "Roof height (m)"},
+    "equipos_help_altura_techo": {
+        "es": ("Altura del techo sobre el terreno donde se instala el Eco-Roof. El buje queda a "
+               "esta altura + 1.149 m (altura de pala del Small Tulip), y el viento se lleva a "
+               "esa altura con el mismo perfil logarítmico que el resto de las turbinas. "
+               "Aproximación: no modela la aceleración ni la turbulencia del flujo sobre el "
+               "borde del edificio."),
+        "en": ("Height of the roof above ground where the Eco-Roof is installed. The hub sits "
+               "at this height + 1.149 m (Small Tulip blade height), and the wind is brought to "
+               "that height with the same logarithmic profile used for the other turbines. "
+               "Approximation: it does not model flow acceleration or turbulence over the "
+               "building edge."),
+    },
+    "equipos_caption_buje_ecoroof": {
+        "es": "Buje a {buje} m sobre el terreno (techo {techo} m + 1.149 m del equipo).",
+        "en": "Hub at {buje} m above ground (roof {techo} m + 1.149 m of the unit).",
     },
     "equipos_caption_ecoroof_solar_si": {
         "es": ("Incluye paneles solares ({w} W por equipo): su producción se simula con "
@@ -1355,16 +1366,17 @@ TRANSLATIONS = {
     "resultados_col_kwh_eolico": {"es": "kWh/año eólico", "en": "Wind kWh/year"},
     "resultados_col_kwh_solar": {"es": "kWh/año solar", "en": "Solar kWh/year"},
     "resultados_caption_ecoroof": {
-        "es": ("Eco-Roof: N es la cantidad de equipos (cada uno con 3 o 5 turbinas). Su "
-               "producción eólica sale de la tabla oficial de fábrica del producto (no del "
-               "multiplicador Bouquet), sin recorte por electrónica, y la solar se suma sólo si "
-               "el artículo elegido trae paneles. La curva de duración y el desglose por "
-               "velocidad de viento muestran sólo la parte eólica."),
-        "en": ("Eco-Roof: N is the number of units (each with 3 or 5 turbines). Its wind "
-               "output comes from the product's official factory table (not the Bouquet "
-               "multiplier), with no electronics clipping, and solar is added only if the "
-               "chosen item includes panels. The duration curve and the wind-speed breakdown "
-               "show the wind part only."),
+        "es": ("Eco-Roof: N es la cantidad de equipos (cada uno con 3 o 5 turbinas) y el buje "
+               "es la altura del techo + 1.149 m. Su producción eólica sale de la tabla oficial "
+               "de fábrica del producto (no del multiplicador Bouquet), sin recorte por "
+               "electrónica, y la solar se suma sólo si el artículo elegido trae paneles. La "
+               "curva de duración y el desglose por velocidad de viento muestran sólo la parte "
+               "eólica."),
+        "en": ("Eco-Roof: N is the number of units (each with 3 or 5 turbines) and the hub is "
+               "the roof height + 1.149 m. Its wind output comes from the product's official "
+               "factory table (not the Bouquet multiplier), with no electronics clipping, and "
+               "solar is added only if the chosen item includes panels. The duration curve and "
+               "the wind-speed breakdown show the wind part only."),
     },
     "especificacion_fila_turbinas_por_equipo": {
         "es": "Turbinas Small Tulip (1m) por equipo", "en": "Small Tulip (1m) turbines per unit",

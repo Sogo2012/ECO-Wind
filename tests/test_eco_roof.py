@@ -37,14 +37,15 @@ import pandas as pd
 import pytest
 
 from engine.eco_roof_catalog import (
-    ECO_ROOF_PRESETS, PRESET_POR_MODELO, articulo_incluye_solar, es_modelo_eco_roof, preset_disponible,
+    ALTURA_BUJE_ECO_ROOF_M, ECO_ROOF_PRESETS, PRESET_POR_MODELO, articulo_incluye_solar,
+    es_modelo_eco_roof, preset_disponible,
 )
 from engine.eco_roof_curves import TABLA_N3, TABLA_N5, potencia_tabla_w
 from engine.eco_roof_simulador import (
     PresetSinTablaOficialError, simular_cluster_eco_roof, simular_eco_roof,
 )
 from engine.precios_flower_turbines import get_articulos_disponibles
-from engine.simulador_pista_a import simular
+from engine.simulador_pista_a import Z0_DEFAULT, Z0_MET_DEFAULT, simular, wind_at_height
 from engine.epw_real import SITIOS_EPW_REAL, cargar_epw_real
 from engine.eco_roof_solar import (
     ACTIVE_AREA_FRACTION_GENERICO,
@@ -403,6 +404,24 @@ class TestSimularClusterEcoRoofSinPaneles:
         assert (fila["serie_horaria_W_por_turbina"] * 5 / 1000.0).sum() == pytest.approx(
             fila["kwh_anual_eolico"])
         assert fila["kwh_mensual"].sum() == pytest.approx(fila["kwh_anual"])
+
+    def test_buje_es_altura_del_techo_mas_la_del_equipo(self):
+        """El viento se lleva a (techo + 1.149 m) sobre el terreno, con el mismo perfil
+        logarítmico que el resto de las turbinas."""
+        df = _clima_horas_fijas([5.0] * 48)
+        fila = simular_cluster_eco_roof("ecoroof_flat_3", 1, df, ruta_epw="", elevacion_m=0.0,
+                                        articulo=None, altura_techo_m=10.0)
+        esperado = wind_at_height(df["WS10M"].values, 10, 10.0 + ALTURA_BUJE_ECO_ROOF_M,
+                                  z0=Z0_DEFAULT, z0_met=Z0_MET_DEFAULT)
+        np.testing.assert_allclose(fila["v_hub"], esperado)
+
+    def test_techo_mas_alto_da_mas_eolico(self):
+        df = _clima_horas_fijas([5.0] * 48)
+        kwh = [simular_cluster_eco_roof("ecoroof_flat_3", 1, df, ruta_epw="", elevacion_m=0.0,
+                                        articulo=None, altura_techo_m=h)["kwh_anual"]
+               for h in (0.0, 5.0, 10.0, 20.0)]
+        assert kwh == sorted(kwh)
+        assert kwh[0] < kwh[-1]
 
     def test_flat_5_usa_tabla_n5(self):
         df = _clima_horas_fijas([8.0] * 48)

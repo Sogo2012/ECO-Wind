@@ -38,7 +38,8 @@ class PresetSinTablaOficialError(ValueError):
 
 
 def simular_eco_roof(clave_preset, df_clima, ruta_epw, elevacion_m,
-                      h_ref=10, z0=Z0_DEFAULT, z0_met=Z0_MET_DEFAULT, incluir_solar=True):
+                      h_ref=10, z0=Z0_DEFAULT, z0_met=Z0_MET_DEFAULT, incluir_solar=True,
+                      altura_techo_m=0.0):
     """
     Producción anual (eólica + solar) de UN equipo de un preset fijo del catálogo
     Eco-Roof, hora por hora, contra un df_clima real (el mismo formato que ya usa
@@ -54,6 +55,11 @@ def simular_eco_roof(clave_preset, df_clima, ruta_epw, elevacion_m,
     y rugosidades del perfil logarítmico de viento.
     incluir_solar: False cuando el artículo elegido no trae paneles solares --
     no se corre EnergyPlus y la producción solar es 0.
+    altura_techo_m: altura del techo sobre el terreno donde se instala el equipo.
+    El buje queda a altura_techo_m + la altura propia del producto
+    (preset["altura_buje_m"], 1.149 m) y a ESA altura se lleva el viento de
+    referencia con el perfil logarítmico -- aproximación de primer orden: no
+    modela la aceleración ni la turbulencia del flujo sobre el borde del edificio.
 
     Devuelve dict con el desglose eólico, el desglose solar (de
     simular_solar_eco_roof(), con su propia advertencia de "estimado"; None si
@@ -74,8 +80,8 @@ def simular_eco_roof(clave_preset, df_clima, ruta_epw, elevacion_m,
         )
 
     # --- Eólico: interpolación de tabla oficial (ver eco_roof_curves.py) ---
-    v_hub = wind_at_height(df_clima["WS10M"].values, h_ref, preset["altura_buje_m"],
-                            z0=z0, z0_met=z0_met)
+    altura_buje_m = altura_techo_m + preset["altura_buje_m"]
+    v_hub = wind_at_height(df_clima["WS10M"].values, h_ref, altura_buje_m, z0=z0, z0_met=z0_met)
     factor_densidad = factor_correccion_densidad(elevacion_m)
     potencia_w_por_turbina = potencia_tabla_w(v_hub, preset["tabla_potencia"]) * factor_densidad
 
@@ -108,7 +114,7 @@ def simular_eco_roof(clave_preset, df_clima, ruta_epw, elevacion_m,
 
 
 def simular_cluster_eco_roof(modelo, N_equipos, df_clima, ruta_epw, elevacion_m, articulo,
-                              h_ref=10, z0=Z0_DEFAULT, z0_met=Z0_MET_DEFAULT):
+                              h_ref=10, z0=Z0_DEFAULT, z0_met=Z0_MET_DEFAULT, altura_techo_m=0.0):
     """
     Una fila Eco-Roof del proyecto ("Equipos y configuración"), devuelta con el MISMO
     formato de dict que simulador_pista_a.simular() -- así Resultados, Análisis
@@ -121,6 +127,8 @@ def simular_cluster_eco_roof(modelo, N_equipos, df_clima, ruta_epw, elevacion_m,
     catálogo de precios (precio × N).
     articulo: el artículo elegido del catálogo -- la producción solar sólo se suma si
     el artículo trae paneles ("... plus solar panels", ver articulo_incluye_solar()).
+    altura_techo_m: altura del techo sobre el terreno -- el buje queda a esta altura +
+    1.149 m (ver simular_eco_roof()).
 
     Diferencias de significado respecto a simular(), a propósito:
     - "serie_horaria_W_por_turbina" es la potencia eólica de UN EQUIPO completo (todas
@@ -139,7 +147,7 @@ def simular_cluster_eco_roof(modelo, N_equipos, df_clima, ruta_epw, elevacion_m,
     preset = ECO_ROOF_PRESETS[clave_preset]
     incluye_solar = articulo_incluye_solar(articulo)
     r = simular_eco_roof(clave_preset, df_clima, ruta_epw, elevacion_m, h_ref=h_ref, z0=z0,
-                         z0_met=z0_met, incluir_solar=incluye_solar)
+                         z0_met=z0_met, incluir_solar=incluye_solar, altura_techo_m=altura_techo_m)
 
     serie_w_por_equipo = r["serie_horaria_kwh_eolico"] * 1000.0
     serie_kwh_solar_cluster = (r["solar"]["serie_horaria_kwh"] * N_equipos if incluye_solar
