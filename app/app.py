@@ -286,16 +286,16 @@ def _turbinas_por_equipo(modelo):
 
 
 def _potencia_pico_equipo_w(modelo, articulo):
-    """Potencia pico de UNA unidad de N. Turbinas sueltas: el mismo tope por turbina que
-    usa el cálculo de energía -- controlador del artículo, o generador si el artículo no
-    lo dice (engine/potencia_equipo.py; antes era siempre la del generador, y en el
-    informe del Estadio Heredia con cargadores de 3 kW la potencia media del año quedaba
-    por encima de la "pico"). Eco-Roof: NO la "potencia nominal" de su ficha (300 W /
-    500 W, justamente el número engañoso del business case de CNFL) sino el valor más
-    alto de la tabla oficial (15 m/s) × turbinas del equipo, más los paneles solares si
-    el artículo elegido los trae."""
+    """Potencia pico instalada de UNA unidad de N. Turbinas sueltas: potencia nominal del
+    generador de la ficha de fábrica (capacidad instalada, igual que los kWp de un sistema
+    solar se informan por los paneles y no por el inversor) -- el cargador/inversor del
+    artículo se muestra aparte en la ficha y limita la energía, no la potencia instalada.
+    Estadio Heredia (Daniel Farb, Flower Turbines): 20 × 3 kW = 60 kW. Eco-Roof: NO la
+    "potencia nominal" de su ficha (300 W / 500 W, justamente el número engañoso del
+    business case de CNFL) sino el valor más alto de la tabla oficial (15 m/s) × turbinas
+    del equipo, más los paneles solares si el artículo elegido los trae."""
     if not es_modelo_eco_roof(modelo):
-        return potencia_max_turbina_w(modelo, articulo)
+        return SPECS_TURBINAS[modelo]["potencia_nominal_w"]
     preset = ECO_ROOF_PRESETS[PRESET_POR_MODELO[modelo]]
     pico_w = potencia_tabla_w(15.0, preset["tabla_potencia"]) * preset["N"]
     if articulo_incluye_solar(articulo):
@@ -401,7 +401,7 @@ def _simular_clusters(clusters, resultado_clima, z0, metodo_bouquet):
             # importar qué controlador/inversor se compró -- eso sobreestima la producción
             # real en sitios de viento fuerte. Si el clúster todavía no tiene artículo
             # elegido (pestaña Equipos y configuración), cae a la potencia del generador de
-            # la ficha. Mismo tope que la potencia pico (engine/potencia_equipo.py).
+            # la ficha (engine/potencia_equipo.py).
             _capacidad_w = potencia_max_turbina_w(c["modelo"], c.get("articulo"))
             r = simular(df_clima, altura_buje=c["altura_buje"], modelo=c["modelo"], N=int(c["N"]),
                         elevacion_m=elevacion_m, z0=z0, metodo_bouquet=metodo_bouquet,

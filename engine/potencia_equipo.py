@@ -1,17 +1,18 @@
 """
-Potencia máxima por turbina de un clúster de la cartera -- UNA sola regla para el
-cálculo de energía (tope horario de simulador_pista_a.simular()) y para la
-"Potencia pico instalada" de la app y del informe ejecutivo.
+Potencia de un equipo de la cartera según su ficha y el artículo elegido.
 
-Por qué existe (correo de Daniel Farb, Flower Turbines, sobre el informe del Estadio
-Heredia con cargadores de 3 kW): la página 1 decía 20 kW de potencia pico
-(20 turbinas × 1,000 W de la ficha del generador) mientras la energía anual se
-calculaba dejando que cada turbina llegue a los 3,000 W del controlador -- la
-potencia MEDIA del año (216,781 kWh / 8,760 h = 24.7 kW) quedaba por encima de la
-potencia PICO, algo físicamente imposible. Eran dos supuestos distintos en el mismo
-documento. Con esta regla los dos números salen del mismo lugar y no pueden volver a
-contradecirse, para ningún modelo (lo mismo pasaba con el Large Tulip + inversor de
-10 kW, y al revés con el AL13 de 8 m + inversor de 5 kW).
+- potencia_max_turbina_w(): tope horario por turbina del cálculo de energía
+  (simulador_pista_a.simular()) -- el cargador/inversor del artículo, o el generador.
+- velocidad_a_potencia_ms(): velocidad a la que un bouquet llega a una potencia dada,
+  desde la curva validada.
+
+La "Potencia pico instalada" de la app y del informe NO sale de acá: es la potencia
+nominal del generador de la ficha × turbinas (capacidad instalada). Contexto (correo de
+Daniel Farb, Flower Turbines, sobre el informe del Estadio Heredia): la ficha decía
+1,000 W por generador y la página 1 daba 20 kW, mientras la energía dejaba llegar cada
+turbina a los 3,000 W del cargador -- la potencia media del año (216,781 kWh / 8,760 h
+= 24.7 kW) quedaba por encima de la "pico". Con el generador corregido a 3,000 W, la
+potencia instalada es 60 kW y ningún cargador del catálogo del 3-M Tulip la supera.
 """
 import numpy as np
 
@@ -25,9 +26,8 @@ def potencia_max_turbina_w(modelo, articulo):
     Potencia máxima (W) que puede entregar UNA turbina del clúster: la capacidad del
     controlador/inversor incluido en el artículo elegido, si el texto del artículo la
     trae ("... charger 3 kilowatts" -> 3000); si no, la potencia del generador de la
-    ficha de fábrica. Es el mismo tope por electrónica que usa el cálculo de energía,
-    así que la potencia pico del proyecto es exactamente el máximo horario que puede
-    alcanzar la producción simulada.
+    ficha de fábrica. Es el tope por electrónica del cálculo de energía (el recorte
+    horario), no la potencia pico instalada.
     """
     return capacidad_controlador_articulo_w(articulo) or SPECS_TURBINAS[modelo]["potencia_nominal_w"]
 

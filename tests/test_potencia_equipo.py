@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Potencia máxima por turbina (engine/potencia_equipo.py) -- una sola regla para el tope
-del cálculo de energía y para la "Potencia pico instalada" del informe.
+Potencia de los equipos (engine/potencia_equipo.py + ficha del 3-M Tulip).
 
-Caso real que la motivó (correo de Daniel Farb, Flower Turbines): informe del Estadio
-Heredia, 20 turbinas 3-M Tulip con cargadores de 3 kW -- la página 1 decía 20 kW pico
-mientras la energía anual se calculaba dejando llegar cada turbina a 3 kW.
+Caso real (correo de Daniel Farb, Flower Turbines): informe del Estadio Heredia, 20
+turbinas 3-M Tulip -- la página 1 decía 20 kW pico (ficha: 1,000 W por generador)
+mientras la energía anual dejaba llegar cada turbina a los 3 kW del cargador. Corrección:
+generador de 3 kW, potencia pico instalada 20 × 3 kW = 60 kW, con cualquier cargador.
 """
 import numpy as np
 import pandas as pd
@@ -25,11 +25,11 @@ class TestPotenciaMaxTurbina:
         assert potencia_max_turbina_w("three_m_tulip", ART_3M_3KW) == 3000
         assert potencia_max_turbina_w("three_m_tulip", ART_3M_1KW) == 1000
 
-    def test_estadio_heredia_20_turbinas(self):
-        """20 turbinas: 60 kW con cargadores de 3 kW (corrección de Daniel), 20 kW con
-        cargadores de 1 kW."""
-        assert 20 * potencia_max_turbina_w("three_m_tulip", ART_3M_3KW) == 60_000
-        assert 20 * potencia_max_turbina_w("three_m_tulip", ART_3M_1KW) == 20_000
+    def test_estadio_heredia_potencia_pico_instalada_60kw(self):
+        """Potencia pico instalada = 20 × potencia nominal del generador = 60 kW
+        (corrección de Daniel), con cualquier cargador -- el cargador limita la
+        energía, no la capacidad instalada."""
+        assert 20 * SPECS_TURBINAS["three_m_tulip"]["potencia_nominal_w"] == 60_000
 
     def test_sin_kw_en_el_articulo_cae_al_generador(self):
         assert potencia_max_turbina_w("three_m_tulip", None) == SPECS_TURBINAS["three_m_tulip"]["potencia_nominal_w"]
@@ -44,17 +44,19 @@ class TestPotenciaMaxTurbina:
         assert potencia_max_turbina_w("al13_8m", "8-meter blade height turbine on grid with inverter 5 kilowatts") == 5000
 
     def test_el_maximo_horario_simulado_nunca_supera_la_potencia_pico(self):
-        """La prueba de consistencia que falló en el informe: con viento fuerte, la
-        potencia horaria simulada llega justo al tope y nunca lo pasa, y la potencia
-        media nunca queda por encima de la pico."""
+        """La prueba de consistencia que falló en el informe original: con viento fuerte,
+        la potencia horaria simulada llega justo al tope del cargador, y ni ella ni la
+        media del año pasan la potencia pico instalada (generador de la ficha)."""
         idx = pd.date_range("2026-01-01", periods=48, freq="h")
         df = pd.DataFrame({"WS10M": np.linspace(3.0, 20.0, 48)}, index=idx)
+        pico_instalada = SPECS_TURBINAS["three_m_tulip"]["potencia_nominal_w"]
         for articulo in (ART_3M_1KW, ART_3M_3KW):
             tope = potencia_max_turbina_w("three_m_tulip", articulo)
             r = simular(df, altura_buje=25.0, modelo="three_m_tulip", N=10, capacidad_electronica_w=tope)
             serie = r["serie_horaria_W_por_turbina"]
             assert serie.max() == pytest.approx(tope)
-            assert serie.mean() <= tope
+            assert serie.max() <= pico_instalada
+            assert serie.mean() <= pico_instalada
 
 
 class TestFicha3MTulip:
