@@ -416,17 +416,17 @@ def _proyecto_tiene_solar(clusters):
                for c in clusters)
 
 
-def _kwh_mensual_eolico_y_solar(resultados):
-    """Producción mensual del proyecto (todos los clústers), separada en eólico y
-    solar -- para el gráfico apilado. kwh_mensual de cada clúster ya viene sumado
-    (eólico + solar si el equipo Eco-Roof tiene paneles); la parte solar se resta
-    del total en vez de sumar el eólico aparte, así funciona igual para turbinas
-    sueltas (sin la clave serie_horaria_kwh_solar) y para Eco-Roof."""
-    total = pd.concat([r["kwh_mensual"] for r in resultados], axis=1).sum(axis=1)
-    series_solar = [r["serie_horaria_kwh_solar"].resample("MS").sum()
-                     for r in resultados if r.get("serie_horaria_kwh_solar") is not None]
-    solar = pd.concat(series_solar, axis=1).sum(axis=1) if series_solar else pd.Series(0.0, index=total.index)
-    eolico = total - solar
+def _serie_horaria_eolico_y_solar(resultados):
+    """Serie horaria REAL del proyecto (todos los clústers), separada en eólico y
+    solar -- fuente única para el mensual apilado y el heatmap de generación.
+    serie_horaria_W_por_turbina de cada clúster es SIEMPRE eólico puro (el bloque
+    solar del Eco-Roof, cuando el artículo elegido trae paneles, se guarda aparte en
+    serie_horaria_kwh_solar -- ver simular_cluster_eco_roof()) -- cada fuente se arma
+    sumando directo su propia serie, sin restar nada de ningún total mezclado."""
+    eolico = sum(r["serie_horaria_W_por_turbina"] * int(r["N"]) / 1000.0 for r in resultados)
+    series_solar = [r["serie_horaria_kwh_solar"] for r in resultados
+                     if r.get("serie_horaria_kwh_solar") is not None]
+    solar = pd.concat(series_solar, axis=1).sum(axis=1) if series_solar else pd.Series(0.0, index=eolico.index)
     return eolico, solar
 
 
@@ -606,6 +606,50 @@ def crear_produccion_mensual_plotly(kwh_mensual_eolico, kwh_mensual_solar=None):
         paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
     )
 
+    return fig
+
+
+def _pivot_generacion_mes_hora(serie_kwh):
+    """Grid 12×24 de kWh PROMEDIO por hora del día y mes -- el "día típico" de cada
+    mes, a partir de la serie horaria real de producción (no un índice climático
+    sintético como crear_heatmap_plotly(), sino la energía que de verdad calculó
+    simular()/simular_cluster_eco_roof() para este proyecto)."""
+    promedios = serie_kwh.groupby([serie_kwh.index.month, serie_kwh.index.hour]).mean()
+    grid = np.zeros((12, 24))
+    for (mes, hora), valor in promedios.items():
+        grid[mes - 1, hora] = valor
+    return grid
+
+
+def crear_heatmap_generacion_plotly(serie_kwh, fuente_label, colorscale):
+    """Heatmap interactivo (mes × hora) de generación REAL -- kWh promedio por hora
+    del día en cada mes, para una sola fuente (eólico o solar). `fuente_label` ya
+    viene traducido (t("chart_mensual_serie_eolico") / "_solar") -- se usa en el
+    título y en el hover, no como clave de traducción nueva."""
+    grid = _pivot_generacion_mes_hora(serie_kwh)
+    meses = meses_abreviados()
+
+    texto = np.empty((12, 24), dtype=object)
+    for m in range(12):
+        for h in range(24):
+            texto[m, h] = t(
+                "chart_heatmap_gen_hover", mes=meses[m], hora=h,
+                fuente=fuente_label, kwh=f"{grid[m, h]:.2f}",
+            )
+
+    fig = go.Figure(data=go.Heatmap(
+        z=grid, x=list(range(24)), y=meses, text=texto, hoverinfo='text',
+        colorscale=colorscale,
+        colorbar=dict(title=t("chart_heatmap_gen_colorbar"), thickness=15),
+    ))
+    fig.update_layout(
+        title=t("chart_heatmap_gen_titulo", fuente=fuente_label),
+        xaxis_title=t("chart_heatmap_eje_x"), yaxis_title=t("chart_heatmap_eje_y"),
+        height=420, font=dict(family="sans-serif", size=10),
+        margin=dict(l=80, r=100, t=50, b=60),
+        xaxis=dict(tickmode='linear', tick0=0, dtick=3),
+        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+    )
     return fig
 
 
@@ -1357,11 +1401,30 @@ with tab_resultados:
                     ))
 
             st.divider()
-            kwh_mensual_eolico, kwh_mensual_solar = _kwh_mensual_eolico_y_solar(resultados)
+            serie_horaria_eolico, serie_horaria_solar = _serie_horaria_eolico_y_solar(resultados)
+            kwh_mensual_eolico = serie_horaria_eolico.resample("MS").sum()
+            kwh_mensual_solar = serie_horaria_solar.resample("MS").sum()
             kwh_mensual_total = kwh_mensual_eolico + kwh_mensual_solar
+            _hay_solar_heatmap = float(serie_horaria_solar.sum()) > 1e-6
             st.plotly_chart(
                 crear_produccion_mensual_plotly(kwh_mensual_eolico, kwh_mensual_solar),
                 use_container_width=True)
+
+            st.markdown(t("resultados_subheader_heatmap_generacion"))
+            st.caption(t("resultados_caption_heatmap_generacion"))
+            # Una imagen por fila, a todo el ancho -- no una al lado de la otra: a mitad
+            # de ancho un heatmap de 24 columnas queda demasiado apretado para leerse
+            # (mismo criterio ya documentado para las imágenes del PDF).
+            st.plotly_chart(
+                crear_heatmap_generacion_plotly(
+                    serie_horaria_eolico, t("chart_mensual_serie_eolico"), "Greens"),
+                use_container_width=True)
+            if _hay_solar_heatmap:
+                st.plotly_chart(
+                    crear_heatmap_generacion_plotly(
+                        serie_horaria_solar, t("chart_mensual_serie_solar"), "YlOrRd"),
+                    use_container_width=True)
+
             st.plotly_chart(crear_curva_duracion_plotly(serie_total_w), use_container_width=True)
 
             st.markdown(t("resultados_subheader_viento"))
@@ -1396,6 +1459,9 @@ with tab_resultados:
                 "kwh_mensual_total": kwh_mensual_total,
                 "kwh_mensual_eolico": kwh_mensual_eolico,
                 "kwh_mensual_solar": kwh_mensual_solar,
+                "serie_horaria_eolico": serie_horaria_eolico,
+                "serie_horaria_solar": serie_horaria_solar,
+                "hay_solar_heatmap": _hay_solar_heatmap,
                 "correccion_densidad_pct": (1 - resultados[0]["factor_correccion_densidad"]) * 100,
                 "tabla_desglose_viento": tabla_desglose_viento,
                 "incluye_solar": _hay_solar,
@@ -1992,6 +2058,13 @@ with tab_especificacion:
                             "correccion_densidad_pct": _prod["correccion_densidad_pct"],
                             "img_mensual": fig_a_png(crear_produccion_mensual_plotly(
                                 _prod["kwh_mensual_eolico"], _prod["kwh_mensual_solar"])),
+                            "img_heatmap_eolico": fig_a_png(crear_heatmap_generacion_plotly(
+                                _prod["serie_horaria_eolico"], t("chart_mensual_serie_eolico"), "Greens")),
+                            "img_heatmap_solar": (
+                                fig_a_png(crear_heatmap_generacion_plotly(
+                                    _prod["serie_horaria_solar"], t("chart_mensual_serie_solar"), "YlOrRd"))
+                                if _prod["hay_solar_heatmap"] else None
+                            ),
                             "img_duracion": fig_a_png(crear_curva_duracion_plotly(_prod["serie_total_w"])),
                             "img_viento": (
                                 fig_a_png(crear_desglose_viento_plotly(
