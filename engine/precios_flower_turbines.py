@@ -110,15 +110,14 @@ CATALOGO_FLOWER_TURBINES: Dict[str, List[Tuple[str, float]]] = {
         ("8-meter blade height turbine on grid with inverter 10 kilowatts", 51429.0),
         ("8-meter blade height turbine on grid with inverter 5 kilowatts", 42857.0),
     ],
+    # Sólo los artículos "plus solar panels" -- Pablo/ECO Consultor decidió que el
+    # Eco-Roof siempre se cotiza con paneles incluidos, nunca la versión turbinas-solas
+    # (que sí existe en la hoja original de Flower Turbines, pero no se ofrece acá).
     "ecoroof_flat_3": [
-        ("ecoroof with 3 1-meter turbines on grid with inverter", 18840.0),
-        ("ecoroof with 3 1-meter turbines off grid with chargers", 13971.0),
         ("ecoroof with 3 1-meter turbines on grid with inverter plus solar panels", 20554.0),
         ("ecoroof with 3 1-meter turbines off grid with chargers plus solar panels", 15686.0),
     ],
     "ecoroof_flat_5": [
-        ("ecoroof with 5 1-meter turbines on grid with inverter", 23983.0),
-        ("ecoroof with 5 1-meter turbines off grid with chargers", 20554.0),
         ("ecoroof with 5 1-meter turbines on grid with inverter plus solar panels", 25697.0),
         ("ecoroof with 5 1-meter turbines off grid with chargers plus solar panels", 22269.0),
     ],
