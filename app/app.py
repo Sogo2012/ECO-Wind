@@ -93,6 +93,7 @@ AZUL = "#173D4A"    # Pantone 309 C
 VERDE = "#66913E"   # Pantone 575 C
 GRIS = "#414549"    # Pantone 432 C
 AMBAR = "#B7791F"   # mismo tono que engine/pdf_reporte.py -- energía perdida por recorte
+SOLAR = "#F5C455"   # mismo amarillo de PALETA_CLIMA -- producción solar en el mensual apilado
 FONDO = "#E8F0F3"
 
 # --- Paleta de clima (10 colores para heatmaps y visualizaciones) ---
@@ -415,6 +416,20 @@ def _proyecto_tiene_solar(clusters):
                for c in clusters)
 
 
+def _kwh_mensual_eolico_y_solar(resultados):
+    """Producción mensual del proyecto (todos los clústers), separada en eólico y
+    solar -- para el gráfico apilado. kwh_mensual de cada clúster ya viene sumado
+    (eólico + solar si el equipo Eco-Roof tiene paneles); la parte solar se resta
+    del total en vez de sumar el eólico aparte, así funciona igual para turbinas
+    sueltas (sin la clave serie_horaria_kwh_solar) y para Eco-Roof."""
+    total = pd.concat([r["kwh_mensual"] for r in resultados], axis=1).sum(axis=1)
+    series_solar = [r["serie_horaria_kwh_solar"].resample("MS").sum()
+                     for r in resultados if r.get("serie_horaria_kwh_solar") is not None]
+    solar = pd.concat(series_solar, axis=1).sum(axis=1) if series_solar else pd.Series(0.0, index=total.index)
+    eolico = total - solar
+    return eolico, solar
+
+
 # --- Helpers de gráficos ---
 
 
@@ -543,9 +558,12 @@ def crear_desglose_viento_plotly(tabla_desglose, ancho_bin=1.0, capacidad_electr
     return fig
 
 
-def crear_produccion_mensual_plotly(kwh_mensual_total):
-    """Producción mensual interactiva con Plotly."""
+def crear_produccion_mensual_plotly(kwh_mensual_eolico, kwh_mensual_solar=None):
+    """Producción mensual interactiva con Plotly -- apilada eólico/solar cuando el
+    proyecto trae algún equipo Eco-Roof con paneles; si no hay solar (o no se pasa
+    esa serie), queda una sola barra verde, igual que antes."""
     fig = go.Figure()
+    hay_solar = kwh_mensual_solar is not None and float(kwh_mensual_solar.sum()) > 1e-6
 
     fig.add_trace(go.Bar(
         # list(MESES), no MESES directo: MESES es una instancia de _Meses (se
@@ -555,23 +573,36 @@ def crear_produccion_mensual_plotly(kwh_mensual_total):
         # este list(...), esto rompe con
         # "Invalid value of type '...._Meses' received for the 'x' property".
         x=list(MESES),
-        y=kwh_mensual_total.values,
+        y=kwh_mensual_eolico.values,
+        name=t("chart_mensual_serie_eolico"),
         marker=dict(color=VERDE),
         hovertemplate=t("chart_mensual_hover"),
-        showlegend=False
+        showlegend=hay_solar,
     ))
+    if hay_solar:
+        fig.add_trace(go.Bar(
+            x=list(MESES), y=kwh_mensual_solar.values,
+            name=t("chart_mensual_serie_solar"),
+            marker=dict(color=SOLAR),
+            hovertemplate=t("chart_mensual_hover"),
+        ))
 
     fig.update_layout(
+        barmode='stack',
         title=t("chart_mensual_titulo"),
         xaxis_title=t("chart_mensual_eje_x"),
         yaxis_title=t("chart_mensual_eje_y"),
         hovermode='x unified',
         template='plotly_white',
         height=400,
-        margin=dict(l=60, r=20, t=40, b=60),
+        # b=110 (en vez de 60) sólo cuando hay leyenda que mostrar -- mismo patrón que
+        # crear_desglose_viento_plotly: la leyenda va abajo del eje X para no
+        # solaparse con el título.
+        margin=dict(l=60, r=20, t=40, b=110 if hay_solar else 60),
         font=dict(family="sans-serif", size=11),
         xaxis=dict(gridcolor='#E8E8E8'),
         yaxis=dict(gridcolor='#E8E8E8'),
+        legend=dict(orientation="h", yanchor="top", y=-0.28, x=0),
         paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
     )
 
@@ -1326,8 +1357,11 @@ with tab_resultados:
                     ))
 
             st.divider()
-            kwh_mensual_total = pd.concat([r["kwh_mensual"] for r in resultados], axis=1).sum(axis=1)
-            st.plotly_chart(crear_produccion_mensual_plotly(kwh_mensual_total), use_container_width=True)
+            kwh_mensual_eolico, kwh_mensual_solar = _kwh_mensual_eolico_y_solar(resultados)
+            kwh_mensual_total = kwh_mensual_eolico + kwh_mensual_solar
+            st.plotly_chart(
+                crear_produccion_mensual_plotly(kwh_mensual_eolico, kwh_mensual_solar),
+                use_container_width=True)
             st.plotly_chart(crear_curva_duracion_plotly(serie_total_w), use_container_width=True)
 
             st.markdown(t("resultados_subheader_viento"))
@@ -1360,6 +1394,8 @@ with tab_resultados:
                 "resultados": resultados, "serie_total_w": serie_total_w,
                 "kwh_total": kwh_total, "n_total": n_total,
                 "kwh_mensual_total": kwh_mensual_total,
+                "kwh_mensual_eolico": kwh_mensual_eolico,
+                "kwh_mensual_solar": kwh_mensual_solar,
                 "correccion_densidad_pct": (1 - resultados[0]["factor_correccion_densidad"]) * 100,
                 "tabla_desglose_viento": tabla_desglose_viento,
                 "incluye_solar": _hay_solar,
@@ -1954,7 +1990,8 @@ with tab_especificacion:
                                 for r in _prod["resultados"]
                             ],
                             "correccion_densidad_pct": _prod["correccion_densidad_pct"],
-                            "img_mensual": fig_a_png(crear_produccion_mensual_plotly(_prod["kwh_mensual_total"])),
+                            "img_mensual": fig_a_png(crear_produccion_mensual_plotly(
+                                _prod["kwh_mensual_eolico"], _prod["kwh_mensual_solar"])),
                             "img_duracion": fig_a_png(crear_curva_duracion_plotly(_prod["serie_total_w"])),
                             "img_viento": (
                                 fig_a_png(crear_desglose_viento_plotly(
