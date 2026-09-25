@@ -527,7 +527,7 @@ TRANSLATIONS = {
         "en": "Part number: {numero_parte} -- {clase_iec}",
     },
     "equipos_ficha_markdown": {
-        "es": ("- **Potencia nominal:** {potencia_nominal_w} W a {viento_potencia_nominal_ms} m/s\n"
+        "es": ("- **Potencia nominal:** {potencia_nominal_w} W a {viento_potencia_nominal}\n"
                "- **Cut-in / supervivencia:** {velocidad_cutin_ms} m/s / {velocidad_supervivencia_ms} m/s\n"
                "- **Generador:** {tipo_generador} ({polos_generador} polos)\n"
                "- **Salida:** {voltaje_salida}\n"
@@ -535,7 +535,7 @@ TRANSLATIONS = {
                "de rotor, {peso_total_kg} kg\n"
                "- **Vida de diseño:** {vida_diseno_anos} años\n"
                "- **Cimentación requerida:** {cimentacion_requerida}"),
-        "en": ("- **Rated power:** {potencia_nominal_w} W at {viento_potencia_nominal_ms} m/s\n"
+        "en": ("- **Rated power:** {potencia_nominal_w} W at {viento_potencia_nominal}\n"
                "- **Cut-in / survival:** {velocidad_cutin_ms} m/s / {velocidad_supervivencia_ms} m/s\n"
                "- **Generator:** {tipo_generador} ({polos_generador} poles)\n"
                "- **Output:** {voltaje_salida}\n"
@@ -1074,6 +1074,28 @@ TRANSLATIONS = {
     },
     "especificacion_fila_cutin": {"es": "Velocidad de arranque (cut-in)", "en": "Cut-in speed"},
     "especificacion_fila_supervivencia": {"es": "Velocidad de supervivencia", "en": "Survival speed"},
+    "especificacion_fila_supervivencia_reforzada": {
+        "es": "Supervivencia con refuerzo opcional de palas",
+        "en": "Survival speed with optional blade reinforcement",
+    },
+    "especificacion_valor_supervivencia_reforzada": {
+        "es": "{v} m/s (refuerzo de palas, costo adicional por juego)",
+        "en": "{v} m/s (blade reinforcement, extra cost per set)",
+    },
+    "especificacion_fila_huracan": {"es": "Ante pronóstico de huracán", "en": "If a hurricane is forecast"},
+    "especificacion_valor_huracan": {"es": "Aplicar el freno de las turbinas", "en": "Apply the turbine brake"},
+    "especificacion_v_nominal_aislada": {"es": "turbina aislada", "en": "isolated turbine"},
+    "especificacion_v_nominal_bouquet": {"es": "bouquet de {n}", "en": "bouquet of {n}"},
+    "especificacion_v_nominal_fuera_tabla": {
+        "es": "> 15 m/s, fuera de la tabla oficial (0–15 m/s)",
+        "en": "> 15 m/s, beyond the official table (0–15 m/s)",
+    },
+    "equipos_caption_refuerzo_huracan": {
+        "es": ("Supervivencia estándar {v} m/s; hasta {vr} m/s con el refuerzo opcional de palas "
+               "(costo adicional por juego). Ante pronóstico de huracán, aplicar el freno."),
+        "en": ("Standard survival speed {v} m/s; up to {vr} m/s with the optional blade "
+               "reinforcement (extra cost per set). If a hurricane is forecast, apply the brake."),
+    },
     "especificacion_fila_tipo_rotor": {"es": "Tipo de rotor", "en": "Rotor type"},
     "especificacion_fila_tipo_generador": {"es": "Tipo de generador", "en": "Generator type"},
     "especificacion_fila_diametro_rotor": {"es": "Diámetro del rotor", "en": "Rotor diameter"},

@@ -169,12 +169,24 @@ SPECS_TURBINAS = {
         "numero_parte": "FT 3M Turbine",
         "clase_iec": "IEC 61400 Class IV",
         "tipo_rotor": "specs_three_m_tulip_rotor",
-        "potencia_nominal_w": 1000,
-        "viento_potencia_nominal_ms": 11.0,
+        # Corrección de Daniel Farb (Flower Turbines), correo de sep-2026 sobre el informe
+        # del Estadio Heredia: "the rated power should be 3, not 1". La ficha anterior
+        # decía 1000 W a 11 m/s -- ese punto sigue siendo el de la curva de una turbina
+        # AISLADA (1078 W a 11 m/s), pero no es la potencia nominal del generador.
+        "potencia_nominal_w": 3000,
+        # Sin un valor único: 3 kW no se alcanza con la turbina aislada dentro de la tabla
+        # oficial (0-15 m/s; 2734 W a 15 m/s), sí en bouquet -- la app lo deriva por
+        # tamaño de bouquet desde la curva validada (engine/potencia_equipo.py::
+        # velocidad_a_potencia_ms), en vez de dejar un 11 m/s que ya no corresponde.
+        "viento_potencia_nominal_ms": None,
         "produccion_12ms_aislada_w": 1400.0,
         "produccion_12ms_cluster5_total_w": 15000.0,
         "velocidad_cutin_ms": 0.7,
-        "velocidad_supervivencia_ms": 54.0,
+        # Daniel Farb (mismo correo): 40 m/s de supervivencia estándar; 54 m/s sólo con el
+        # refuerzo opcional de palas (artículo "hurricane reinforcements per blade set").
+        # Ante un huracán anunciado: aplicar el freno.
+        "velocidad_supervivencia_ms": 40.0,
+        "velocidad_supervivencia_reforzada_ms": 54.0,
         "sistema_frenado": "Electrónico, mecánico simple y programación automática",
         "tipo_generador": "specs_three_m_tulip_generador",
         "polos_generador": 18,
