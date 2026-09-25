@@ -364,6 +364,8 @@ TRANSLATIONS = {
     },
     "chart_mensual_eje_x": {"es": "Mes", "en": "Month"},
     "chart_mensual_eje_y": {"es": "Energía (kWh)", "en": "Energy (kWh)"},
+    "chart_mensual_serie_eolico": {"es": "Eólico", "en": "Wind"},
+    "chart_mensual_serie_solar": {"es": "Solar", "en": "Solar"},
     "chart_mensual_hover": {
         "es": "<b>%{x}</b><br>Producción: %{y:,.0f} kWh<extra></extra>",
         "en": "<b>%{x}</b><br>Output: %{y:,.0f} kWh<extra></extra>",

@@ -322,6 +322,10 @@ class TestSimularEcoRoofCompleto:
 
 
 _ART_FLAT3_CON_SOLAR = "ecoroof with 3 1-meter turbines on grid with inverter plus solar panels"
+# Ya no existe como artículo real del catálogo (ver test_todos_los_articulos_incluyen_solar) --
+# se usa acá solo como texto sintético para probar que articulo_incluye_solar()/
+# simular_cluster_eco_roof() siguen tratando correctamente cualquier texto sin "solar",
+# por si algún día se reintroduce una variante sin paneles en el catálogo.
 _ART_FLAT3_SIN_SOLAR = "ecoroof with 3 1-meter turbines on grid with inverter"
 
 
@@ -345,15 +349,16 @@ class TestCarteraEcoRoof:
         assert not es_modelo_eco_roof("three_m_tulip")
         assert not es_modelo_eco_roof("small_tulip")
 
-    def test_solar_sigue_al_articulo_del_catalogo(self):
-        """Los artículos reales del catálogo de precios: la mitad dice "plus solar
-        panels" y la otra mitad no -- la regla tiene que separarlos exacto."""
+    def test_todos_los_articulos_incluyen_solar(self):
+        """El catálogo de precios ya no ofrece la variante Eco-Roof sin paneles -- el
+        cliente no puede elegir turbinas solas para este producto, así que
+        articulo_incluye_solar() tiene que dar True para los 2 artículos de cada
+        modelo (on-grid y off-grid, los dos "plus solar panels")."""
         for modelo in ("ecoroof_flat_3", "ecoroof_flat_5"):
             articulos = [art for art, _ in get_articulos_disponibles(modelo)]
-            con_solar = [art for art in articulos if articulo_incluye_solar(art)]
-            assert len(articulos) == 4
-            assert len(con_solar) == 2
-            assert all("plus solar panels" in art for art in con_solar)
+            assert len(articulos) == 2
+            assert all("plus solar panels" in art for art in articulos)
+            assert all(articulo_incluye_solar(art) for art in articulos)
         assert not articulo_incluye_solar(None)
         assert not articulo_incluye_solar("")
 
