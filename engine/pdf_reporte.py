@@ -290,7 +290,9 @@ def generar_pdf_informe_ejecutivo(datos, logo_path=None, idioma=IDIOMA_DEFAULT):
         "incluye_solar": bool o ausente -- True si algún equipo Eco-Roof trae paneles,
         "produccion": {"filas_tabla": [(modelo, n, buje, kwh, v_media, pct_cutin), ...],
                         "correccion_densidad_pct": float,
-                        "img_mensual": png_bytes, "img_duracion": png_bytes},
+                        "img_mensual": png_bytes, "img_duracion": png_bytes,
+                        "img_heatmap_eolico": png_bytes,
+                        "img_heatmap_solar": png_bytes o None -- sólo si el proyecto tiene solar},
         "financiero": None o {
           "capex": float, "payback_years": float o None, "roi_percentage": float o None,
           "npv_usd": float o None, "ahorro_anual_USD": float, "mantenimiento_anual_USD": float,
@@ -441,6 +443,14 @@ def generar_pdf_informe_ejecutivo(datos, logo_path=None, idioma=IDIOMA_DEFAULT):
     # de ancho los ejes y las etiquetas quedan demasiado apretados para leerse bien.
     story.append(KeepTogether(_fila_imagenes([(prod["img_mensual"], tr("pdf_caption_mensual", idioma))])))
     story.append(Spacer(1, 8))
+    if prod.get("img_heatmap_eolico"):
+        story.append(KeepTogether(_fila_imagenes(
+            [(prod["img_heatmap_eolico"], tr("pdf_caption_heatmap_eolico", idioma))])))
+        story.append(Spacer(1, 8))
+    if prod.get("img_heatmap_solar"):
+        story.append(KeepTogether(_fila_imagenes(
+            [(prod["img_heatmap_solar"], tr("pdf_caption_heatmap_solar", idioma))])))
+        story.append(Spacer(1, 8))
     if prod.get("img_viento"):
         story.append(KeepTogether(_fila_imagenes([(prod["img_duracion"], tr("pdf_caption_duracion", idioma))])))
         story.append(Spacer(1, 8))

@@ -411,6 +411,17 @@ TRANSLATIONS = {
     "chart_heatmap_eje_x": {"es": "Hora del día", "en": "Hour of day"},
     "chart_heatmap_eje_y": {"es": "Mes", "en": "Month"},
 
+    # --- Gráficos Plotly: heatmap de generación real (mes × hora, eólico/solar) ------
+    "chart_heatmap_gen_titulo": {
+        "es": "Generación {fuente} promedio (mes × hora)",
+        "en": "Average {fuente} generation (month × hour)",
+    },
+    "chart_heatmap_gen_colorbar": {"es": "kWh prom.", "en": "avg kWh"},
+    "chart_heatmap_gen_hover": {
+        "es": "<b>{mes}</b><br>Hora: {hora}:00<br>{fuente}: {kwh} kWh promedio",
+        "en": "<b>{mes}</b><br>Hour: {hora}:00<br>{fuente}: {kwh} kWh average",
+    },
+
     # --- Gráficos Plotly: perfil logarítmico de viento -------------------------------
     "chart_perfil_hover": {
         "es": "<b>%{y:.2f}m</b><br>Viento: %{x:.2f} m/s<extra></extra>",
@@ -974,6 +985,18 @@ TRANSLATIONS = {
                "recovering the investment from electricity savings alone, that's the value to "
                "present -- this calculation doesn't quantify it in dollars."),
     },
+    "resultados_subheader_heatmap_generacion": {
+        "es": "**Generación por mes y hora del día**",
+        "en": "**Generation by month and hour of day**",
+    },
+    "resultados_caption_heatmap_generacion": {
+        "es": ("kWh promedio de un día típico de cada mes, hora por hora -- calculado con la "
+               "producción real ya simulada (no una curva genérica), para ver en qué horas del día "
+               "pesa más cada fuente."),
+        "en": ("Average kWh of a typical day in each month, hour by hour -- calculated from the "
+               "actual simulated production (not a generic curve), to see which hours of the day "
+               "each source contributes most."),
+    },
     "resultados_subheader_viento": {
         "es": "**Desglose de producción por velocidad de viento**",
         "en": "**Production breakdown by wind speed**",
@@ -1236,6 +1259,14 @@ TRANSLATIONS = {
     "pdf_caption_mensual": {
         "es": "Producción mensual (todos los clústers)",
         "en": "Monthly output (all clusters)",
+    },
+    "pdf_caption_heatmap_eolico": {
+        "es": "Generación eólica promedio por mes y hora del día",
+        "en": "Average wind generation by month and hour of day",
+    },
+    "pdf_caption_heatmap_solar": {
+        "es": "Generación solar promedio por mes y hora del día",
+        "en": "Average solar generation by month and hour of day",
     },
     "pdf_caption_duracion": {
         "es": "Curva de duración -- resolución horaria completa",
