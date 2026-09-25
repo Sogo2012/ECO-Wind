@@ -67,6 +67,7 @@ from engine.eco_roof_catalog import (
 )
 from engine.eco_roof_curves import potencia_tabla_w
 from engine.eco_roof_simulador import simular_cluster_eco_roof
+from engine.potencia_equipo import potencia_max_turbina_w, velocidad_a_potencia_ms
 from engine.i18n import t, tr, meses_abreviados, IDIOMA_DEFAULT, IDIOMAS_DISPONIBLES
 
 # Cartera completa del selector "Modelo": las turbinas del motor de curvas k·v³×M(N)
@@ -285,11 +286,14 @@ def _turbinas_por_equipo(modelo):
 
 
 def _potencia_pico_equipo_w(modelo, articulo):
-    """Potencia pico de UNA unidad de N. Turbinas sueltas: potencia del generador de la
-    ficha de fábrica (sin cambios). Eco-Roof: NO la "potencia nominal" de su ficha (300 W
-    / 500 W, justamente el número engañoso del business case de CNFL) sino el valor más
-    alto de la tabla oficial (15 m/s) × turbinas del equipo, más los paneles solares si
-    el artículo elegido los trae."""
+    """Potencia pico instalada de UNA unidad de N. Turbinas sueltas: potencia nominal del
+    generador de la ficha de fábrica (capacidad instalada, igual que los kWp de un sistema
+    solar se informan por los paneles y no por el inversor) -- el cargador/inversor del
+    artículo se muestra aparte en la ficha y limita la energía, no la potencia instalada.
+    Estadio Heredia (Daniel Farb, Flower Turbines): 20 × 3 kW = 60 kW. Eco-Roof: NO la
+    "potencia nominal" de su ficha (300 W / 500 W, justamente el número engañoso del
+    business case de CNFL) sino el valor más alto de la tabla oficial (15 m/s) × turbinas
+    del equipo, más los paneles solares si el artículo elegido los trae."""
     if not es_modelo_eco_roof(modelo):
         return SPECS_TURBINAS[modelo]["potencia_nominal_w"]
     preset = ECO_ROOF_PRESETS[PRESET_POR_MODELO[modelo]]
@@ -297,6 +301,36 @@ def _potencia_pico_equipo_w(modelo, articulo):
     if articulo_incluye_solar(articulo):
         pico_w += preset["capacidad_solar_kwp"] * 1000
     return pico_w
+
+
+def _texto_velocidad_nominal(modelo, tamanos_bouquet):
+    """Velocidad a potencia nominal, como texto con unidad. Si la ficha trae un valor
+    único, ése. Si no (3-M Tulip: 3 kW no se alcanza con la turbina aislada dentro de la
+    tabla oficial), se deriva de la curva validada para cada tamaño de bouquet del
+    proyecto -- con el mismo método de bouquet elegido en Parámetros avanzados."""
+    specs = SPECS_TURBINAS[modelo]
+    if specs["viento_potencia_nominal_ms"] is not None:
+        return f"{specs['viento_potencia_nominal_ms']} m/s"
+    metodo = st.session_state.get("metodo_bouquet_radio", "real")
+    partes = []
+    for n in sorted({int(n) for n in tamanos_bouquet}):
+        v = velocidad_a_potencia_ms(modelo, n, specs["potencia_nominal_w"], metodo)
+        valor = f"≈{v:.1f} m/s" if v <= 15.0 else t("especificacion_v_nominal_fuera_tabla")
+        donde = t("especificacion_v_nominal_aislada") if n == 1 else t("especificacion_v_nominal_bouquet", n=n)
+        partes.append(f"{valor} ({donde})")
+    return " · ".join(partes)
+
+
+def _filas_supervivencia(specs):
+    """Supervivencia estándar y, si la ficha trae la opción de refuerzo de palas (3-M
+    Tulip), la supervivencia reforzada y la instrucción ante huracán."""
+    filas = [(t("especificacion_fila_supervivencia"), f"{specs['velocidad_supervivencia_ms']} m/s")]
+    if specs.get("velocidad_supervivencia_reforzada_ms"):
+        filas.append((t("especificacion_fila_supervivencia_reforzada"),
+                      t("especificacion_valor_supervivencia_reforzada",
+                        v=specs["velocidad_supervivencia_reforzada_ms"])))
+        filas.append((t("especificacion_fila_huracan"), t("especificacion_valor_huracan")))
+    return filas
 
 
 def _filas_ficha_eco_roof(modelo, articulo):
@@ -366,10 +400,9 @@ def _simular_clusters(clusters, resultado_clima, z0, metodo_bouquet):
             # tope, kWh/año asume que TODA la energía aerodinámica se aprovecha, sin
             # importar qué controlador/inversor se compró -- eso sobreestima la producción
             # real en sitios de viento fuerte. Si el clúster todavía no tiene artículo
-            # elegido (pestaña Equipos y configuración), cae al valor de fábrica del modelo
-            # -- nunca al recorte más grande, para no estimar de más.
-            _capacidad_w = (capacidad_controlador_articulo_w(c.get("articulo"))
-                            or SPECS_TURBINAS[c["modelo"]]["potencia_nominal_w"])
+            # elegido (pestaña Equipos y configuración), cae a la potencia del generador de
+            # la ficha (engine/potencia_equipo.py).
+            _capacidad_w = potencia_max_turbina_w(c["modelo"], c.get("articulo"))
             r = simular(df_clima, altura_buje=c["altura_buje"], modelo=c["modelo"], N=int(c["N"]),
                         elevacion_m=elevacion_m, z0=z0, metodo_bouquet=metodo_bouquet,
                         capacidad_electronica_w=_capacidad_w)
@@ -1120,7 +1153,7 @@ with tab_config:
                         st.markdown(t(
                             "equipos_ficha_markdown",
                             potencia_nominal_w=_specs["potencia_nominal_w"],
-                            viento_potencia_nominal_ms=_specs["viento_potencia_nominal_ms"],
+                            viento_potencia_nominal=_texto_velocidad_nominal(c["modelo"], [c["N"]]),
                             velocidad_cutin_ms=_specs["velocidad_cutin_ms"],
                             velocidad_supervivencia_ms=_specs["velocidad_supervivencia_ms"],
                             tipo_generador=t(_specs["tipo_generador"]), polos_generador=_specs["polos_generador"],
@@ -1129,6 +1162,12 @@ with tab_config:
                             vida_diseno_anos=_specs["vida_diseno_anos"],
                             cimentacion_requerida=t(_specs["cimentacion_requerida"]),
                         ))
+                        if _specs.get("velocidad_supervivencia_reforzada_ms"):
+                            st.caption(t(
+                                "equipos_caption_refuerzo_huracan",
+                                v=_specs["velocidad_supervivencia_ms"],
+                                vr=_specs["velocidad_supervivencia_reforzada_ms"],
+                            ))
 
     if st.button(t("equipos_boton_agregar_cluster")):
         st.session_state.clusters.append({"modelo": "medium_tulip", "N": 1, "altura_buje": 3.0})
@@ -1778,9 +1817,11 @@ with tab_especificacion:
             # una con su propia potencia nominal real, en vez de mezclarse en una sola
             # fila con la ficha genérica del modelo.
             _cantidad_por_config = {}
+            _bouquets_por_config = {}
             for c in st.session_state.clusters:
                 _clave_config = (c["modelo"], c.get("articulo"))
                 _cantidad_por_config[_clave_config] = _cantidad_por_config.get(_clave_config, 0) + int(c["N"])
+                _bouquets_por_config.setdefault(_clave_config, []).append(int(c["N"]))
 
             for (_clave, _articulo), _cantidad in _cantidad_por_config.items():
                 _specs = SPECS_TURBINAS[_clave]
@@ -1815,9 +1856,10 @@ with tab_especificacion:
                             continue
                         _filas_turbina = [
                             (t("especificacion_fila_potencia_nominal"), f"{_specs['potencia_nominal_w']:.0f} W"),
-                            (t("especificacion_fila_velocidad_nominal"), f"{_specs['viento_potencia_nominal_ms']} m/s"),
+                            (t("especificacion_fila_velocidad_nominal"),
+                             _texto_velocidad_nominal(_clave, _bouquets_por_config[(_clave, _articulo)])),
                             (t("especificacion_fila_cutin"), f"{_specs['velocidad_cutin_ms']} m/s"),
-                            (t("especificacion_fila_supervivencia"), f"{_specs['velocidad_supervivencia_ms']} m/s"),
+                            *_filas_supervivencia(_specs),
                             (t("especificacion_fila_tipo_rotor"), t(_specs["tipo_rotor"])),
                             (t("especificacion_fila_tipo_generador"), t(_specs["tipo_generador"])),
                             (t("especificacion_fila_diametro_rotor"), f"{_specs['diametro_rotor_m']} m"),
