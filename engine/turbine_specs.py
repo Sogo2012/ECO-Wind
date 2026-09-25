@@ -79,9 +79,14 @@ RUTA_IMAGEN = {
     "al13_6m": os.path.join(_CARPETA_IMAGENES, "AL 13 POWER TOWER.png"),
     "al13_8m": os.path.join(_CARPETA_IMAGENES, "AL 13 POWER TOWER.png"),
     "survival_unit": None,
-    "ecoroof_flat_3": None,
-    "ecoroof_flat_5": None,
-    "ecoroof_slanted": None,
+    "ecoroof_flat_3": os.path.join(_CARPETA_IMAGENES, "Eco-Roof Flat 3.webp"),
+    "ecoroof_flat_5": os.path.join(_CARPETA_IMAGENES, "Eco-Roof Flat 5.webp"),
+    # Sin render propio del montaje en techo inclinado todavía -- se reutiliza
+    # temporalmente el de "Flat 3" (mismo N=3 turbinas, misma tabla de potencia que
+    # ecoroof_slanted) hasta tener una foto real del montaje inclinado. Mismo patrón que
+    # ya usa AL13 Power Tower unas líneas arriba: un render compartido en vez de ninguno,
+    # documentado como pendiente.
+    "ecoroof_slanted": os.path.join(_CARPETA_IMAGENES, "Eco-Roof Flat 3.webp"),
 }
 
 # Transcripción directa del data frame de Pablo, re-keyeado a las claves de modelo de
