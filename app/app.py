@@ -1125,15 +1125,22 @@ with tab_config:
                                 nombre_modelo=NOMBRES_MODELO.get(c["modelo"], c["modelo"]))):
                 if _es_eco_roof:
                     _specs_turbina = SPECS_TURBINAS[ECO_ROOF_PRESETS[PRESET_POR_MODELO[c["modelo"]]]["turbina_key"]]
-                    st.caption(t("pdf_ecoroof_texto_preconfigurado"))
-                    st.caption(t("equipos_caption_numero_parte",
-                                  numero_parte=_specs["numero_parte"], clase_iec=_specs_turbina["clase_iec"]))
-                    _col_espec, _col_val = t("especificacion_col_especificacion"), t("especificacion_col_valor")
-                    st.dataframe(
-                        pd.DataFrame([{_col_espec: f, _col_val: v}
-                                      for f, v in _filas_ficha_eco_roof(c["modelo"], c["articulo"])]),
-                        hide_index=True, use_container_width=True,
-                    )
+                    col_img, col_specs = st.columns([1, 2])
+                    with col_img:
+                        if _ruta_img and os.path.exists(_ruta_img):
+                            st.image(_ruta_img)
+                        else:
+                            st.caption(t("equipos_caption_sin_imagen"))
+                    with col_specs:
+                        st.caption(t("pdf_ecoroof_texto_preconfigurado"))
+                        st.caption(t("equipos_caption_numero_parte",
+                                      numero_parte=_specs["numero_parte"], clase_iec=_specs_turbina["clase_iec"]))
+                        _col_espec, _col_val = t("especificacion_col_especificacion"), t("especificacion_col_valor")
+                        st.dataframe(
+                            pd.DataFrame([{_col_espec: f, _col_val: v}
+                                          for f, v in _filas_ficha_eco_roof(c["modelo"], c["articulo"])]),
+                            hide_index=True, use_container_width=True,
+                        )
                     st.markdown(t("pdf_ecoroof_tabla_potencia_titulo"))
                     st.caption(t("pdf_ecoroof_nota_potencia"))
                     st.dataframe(_tabla_potencia_eco_roof_df(c["modelo"]), hide_index=True,
